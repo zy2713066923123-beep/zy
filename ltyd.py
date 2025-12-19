@@ -23,6 +23,9 @@ from Crypto.Cipher import AES, DES, DES3
 # 禁用安全请求警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+# 全局消息变量
+msg = ""
+
 
 class Crypt:
     def __init__(self, crypt_type: str, key, iv=None, mode="ECB"):
@@ -155,6 +158,7 @@ class China_Unicom:
 
     # 阅读
     def read_novel(self, b):
+        self.log(f"账号[{self.index}][{self.mobile}]开始阅读小说...")
         self.get_cntindex()
         self.get_chapterallindex()
         for i in range(b):
@@ -162,7 +166,9 @@ class China_Unicom:
             crypt_text = f'{{"chapterAllIndex":{self.chapterallindex},"cntIndex":{self.cntindex},"cntTypeFlag":"1","timestamp":"{self.date}","token":"{self.userinfo["token"]}","userId":"{self.userinfo["userid"]}","userIndex":{self.userinfo["userindex"]},"userAccount":"{self.userinfo["phone"]}","verifyCode":"{self.userinfo["verifycode"]}"}}'
             self.req(url, crypt_text)
             self.addReadTime()
+            self.log(f"账号[{self.index}][{self.mobile}]阅读进度 {i+1}/{b}，等待120秒...")
             sleep(120)
+        self.log(f"账号[{self.index}][{self.mobile}]阅读完成")
 
     # 上报阅读时间
     def addReadTime(self):
@@ -174,10 +180,15 @@ class China_Unicom:
     def get_cntindex(self):
         url = "https://10010.woread.com.cn/ng_woread_service/rest/basics/recommposdetail/14856"
         self.headers.pop("Content-Length", "no")
-        data = requests.get(url, headers=self.headers).json()
-        self.catid = data["data"]['booklist']['message'][0]['catindex']
-        self.cardid = data['data']['bindinfo'][0]['recommposiindex']
-        self.cntindex = data["data"]['booklist']['message'][0]['cntindex']
+        try:
+            data = requests.get(url, headers=self.headers).json()
+            self.catid = data["data"]['booklist']['message'][0]['catindex']
+            self.cardid = data['data']['bindinfo'][0]['recommposiindex']
+            self.cntindex = data["data"]['booklist']['message'][0]['cntindex']
+            self.log(f"账号[{self.index}][{self.mobile}]获取阅读参数成功")
+        except Exception as e:
+            self.log(f"账号[{self.index}][{self.mobile}]获取阅读参数失败: {e}")
+            raise
 
     # 获取参数
     def get_chapterallindex(self):
