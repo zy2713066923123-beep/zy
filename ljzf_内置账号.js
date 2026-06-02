@@ -39,7 +39,6 @@ const { URL } = require('url');
 const APP_NAME = '霖久智服';
 const NOTIFY_TITLE = '霖久智服_微信协议版';
 const API_BASE = 'https://linjiucloud-api.ysservice.com.cn';
-const DEFAULT_WECHAT_SERVER = 'http://192.168.6.222:8011';
 const DEFAULT_APPID = 'wx0a9f159eddb2c5f8';
 const DEFAULT_TENANT_ID = '10111';
 const DEFAULT_CLIENT_ID = '64';
@@ -89,22 +88,41 @@ main().catch(async (error) => {
 });
 
 async function main() {
-  const accounts = parseAccounts(CONFIG.rawAccounts);
-  if (!accounts.length) throw new Error('未配置 wxljzf，请填写 wxid#备注 或 手机号#wxid#备注');
-  accounts
-    .filter((account) => !account.mobile)
-    .forEach((account) => log(`⚠️ 账号 ${account.remark} 未从变量解析到手机号，将尝试使用 quickLogin/缓存返回的手机号`));
+  const accounts = USER_TOKENS.filter((t) => t.token && t.accountId).map((t, i) => ({
+    ...t,
+    remark: t.remark || '账号' + (i + 1),
+    mobile: t.mobile || '',
+    wxid: 'built_in_' + i,
+    appid: t.appid || DEFAULT_APPID,
+    isBuiltIn: true
+  }));
+
+  if (!accounts.length) {
+    throw new Error('未在 USER_TOKENS 中配置账号，请先填入抓包获取的参数！');
+  }
+
+  log(`ℹ️ 📱 使用 USER_TOKENS 内置账号配置`);
+  log(`✅ ✅ 成功加载 ${accounts.length} 个内置账号`);
+  accounts.forEach((t, i) => {
+    log(`ℹ️    ${t.remark}: ${t.mobile || '未知手机号'}`);
+  });
+  log(`ℹ️ ==================================================`);
+  log(`ℹ️ 🚀 ${APP_NAME}脚本开始执行`);
+  log(`ℹ️ ⏰ 北京时间: ${new Date().toLocaleString()}`);
+  log(`ℹ️ ==================================================`);
+  log(`🚀 ${APP_NAME} - ${new Date().toLocaleString()}\n`);
 
   const cache = loadCache();
   stats.accounts = accounts.length;
-  log(`🚀 ${APP_NAME} 微信协议版开始，共 ${accounts.length} 个账号`);
-  log(`🌐 WECHAT_SERVER=${CONFIG.wechatServer}`);
+  log(`ℹ️ 共找到 ${accounts.length} 个账号\n`);
 
   for (let index = 0; index < accounts.length; index += 1) {
     const account = accounts[index];
-    log(`\n========== 账号 ${index + 1}/${accounts.length}：${account.remark} ==========`);
+    log(`==================== 第 ${index + 1} 个账号 ====================`);
+    log(`\n==== 开始【第 ${index + 1} 个账号】====\n\n`);
 
     try {
+      log(`ℹ️ 📱 开始处理账号: ${account.mobile || account.remark}`);
       const auth = await getAuth(account, cache);
       await runAccount(account, auth, cache);
       stats.ok += 1;
@@ -227,62 +245,18 @@ async function runAccount(account, auth, cache) {
 }
 
 async function getAuth(account, cache) {
-  const cached = normalizeAuth(cache[account.wxid]);
-  if (!CONFIG.forceLogin && cached.token && cached.accountId && cached.sessionKey && cached.openId && cached.memberId) {
-    const cachedMobile = account.mobile || cached.mobile || '';
-    if (cachedMobile) {
-      log(`🔐 使用缓存登录态：token=${mask(cached.token)} mobile=${maskPhone(cachedMobile)}`);
-      return { ...cached, appid: account.appid, mobile: cachedMobile };
-    }
-    log(`🔐 缓存登录态缺少手机号，本次重新 quickLogin 尝试解析`);
-  }
-
-  const code = await getWxCode(account.wxid, account.appid);
-  log(`🔑 获取 jsCode 成功：${mask(code, 5, 4)}`);
-
-  const quick = await quickLogin(account, code);
-  let auth = normalizeAuth({ ...cached, ...quick, appid: account.appid });
-  auth.mobile = account.mobile || auth.mobile || cached.mobile || '';
-
-  if (!auth.memberId && auth.mobile) {
-    const member = await autoMember(account, auth.mobile);
-    auth = normalizeAuth({ ...auth, ...member });
-    auth.mobile = account.mobile || auth.mobile || cached.mobile || '';
-  }
-
-  const missing = ['token', 'accountId', 'sessionKey', 'openId', 'memberId'].filter((key) => !auth[key]);
-  if (missing.length) throw new Error(`quickLogin 返回字段不完整：缺少 ${missing.join(', ')}；返回=${safeJson(quick)}`);
-
-  cache[account.wxid] = {
-    token: auth.token,
-    accountId: auth.accountId,
-    sessionKey: auth.sessionKey,
-    openId: auth.openId,
-    memberId: auth.memberId,
-    mobile: account.mobile || auth.mobile || cached.mobile || '',
-    remark: account.remark,
-    updateTime: new Date().toISOString(),
+  log(`ℹ️ ✅ [${account.mobile || account.remark}] 已从配置补全认证信息`);
+  log(`ℹ️ ✅ [${account.mobile || account.remark}] 当前用户ID: ${account.memberId || '未知'}`);
+  log(`ℹ️ 🔐 [${account.mobile || account.remark}] 初始化认证状态 -> token:${mask(account.token)} | accountId:${mask(account.accountId)} | sessionKey:${mask(account.sessionKey)} | openId:${mask(account.openId)}`);
+  return {
+    token: account.token,
+    accountId: account.accountId,
+    sessionKey: account.sessionKey,
+    openId: account.openId,
+    memberId: account.memberId,
+    mobile: account.mobile || '',
+    appid: account.appid || DEFAULT_APPID,
   };
-  saveCache(cache);
-
-  log(`✅ quickLogin 成功：memberId=${auth.memberId} accountId=${mask(auth.accountId, 6, 6)} mobile=${maskPhone(auth.mobile) || '未解析到'}`);
-  return auth;
-}
-
-async function refreshAuth(account, auth, cache, reason) {
-  log(`🔄 ${reason || '登录态失效'}，清理缓存后重新 quickLogin`);
-  if (cache && account.wxid) {
-    delete cache[account.wxid];
-    saveCache(cache);
-  }
-  const fresh = await getAuth(account, cache || {});
-  Object.assign(auth, fresh);
-  return auth;
-}
-
-function isAuthExpiredError(error) {
-  const message = String(error && error.message ? error.message : error || '');
-  return /HTTP 401|登录已过期|token.*过期|unauthorized/i.test(message);
 }
 
 async function withAuthRetry(account, auth, cache, action, label) {
@@ -291,46 +265,6 @@ async function withAuthRetry(account, auth, cache, action, label) {
   } catch (error) {
     throw error;
   }
-}
-
-async function getWxCode(wxid, appid) {
-  const endpoints = ['/api/v1/wx/app/get/code', '/api/v1/wx/app/get/code/', '/api/v1/wx/get/code'];
-  let lastError = null;
-  for (const endpoint of endpoints) {
-    try {
-      const data = await requestJson(`${CONFIG.wechatServer}${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ wxid, appid }),
-      });
-      const code = extractWxCode(data);
-      if (code) return code;
-      lastError = new Error(`无 code：${safeJson(data)}`);
-    } catch (error) {
-      lastError = error;
-    }
-  }
-  throw new Error(`获取微信 code 失败：${lastError ? lastError.message : '未知错误'}`);
-}
-
-async function quickLogin(account, jsCode) {
-  const body = { appId: account.appid, jsCode, tenantId: DEFAULT_TENANT_ID, skipRequest: true };
-  if (account.mobile) body.mobile = account.mobile;
-
-  const data = await apiJson('/base/uniapp/uaa/member/mp/auth/quick', { method: 'POST', account, body });
-  if (Number(data.code) !== 0) throw new Error(`quickLogin 失败：${data.message || safeJson(data)}`);
-  return extractAuth(data);
-}
-
-async function autoMember(account, mobile) {
-  const data = await apiJson('/mc/member/autoMember', {
-    method: 'POST',
-    account,
-    body: { channel: 'CHARGE_PLATFORM', tenantId: DEFAULT_TENANT_ID, mobile: String(mobile), skipRequest: true },
-  });
-  if (Number(data.code) !== 0) throw new Error(`autoMember 失败：${data.message || safeJson(data)}`);
-  if (typeof data.data === 'string') return { memberId: data.data, mobile };
-  return extractAuth(data);
 }
 
 async function fetchTaskList(account, auth, cache) {
@@ -558,37 +492,6 @@ function encryptRequestData(data) {
     Buffer.from(keyBuffer.toString('base64'), 'utf8'),
   ).toString('base64');
   return { encryptedKey, encryptedData, iv: ivBuffer.toString('base64'), nonce: randomHex(32), timestamp: Date.now().toString() };
-}
-
-function parseAccounts(raw) {
-  const isPhone = (value) => /^1\d{10}$/.test(String(value || ''));
-  const isAppid = (value) => /^wx[a-z0-9]+$/i.test(String(value || ''));
-  const isWxid = (value) => /^wxid_/i.test(String(value || ''));
-  const isUa = (value) => /MicroMessenger|Mozilla|MiniProgramEnv/i.test(String(value || ''));
-  return String(raw || '')
-    .split(/[\n&]+/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .map((item) => {
-      const parts = item.split('#').map((value) => value.trim()).filter(Boolean);
-      const wxid = parts.find(isWxid) || '';
-      if (!wxid) return null;
-
-      const mobile = parts.find(isPhone) || '';
-      const appid = parts.find(isAppid) || DEFAULT_APPID;
-      const ua = parts.find(isUa) || '';
-      const remark = parts.find((value) => value && !isPhone(value) && !isWxid(value) && !isAppid(value) && !isUa(value)) || mobile || wxid;
-
-      return {
-        mobile,
-        wxid,
-        appid,
-        remark,
-        ua,
-      };
-    })
-    .filter(Boolean)
-    .filter((item) => item.wxid);
 }
 
 function printTaskList(tasks) {
