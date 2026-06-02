@@ -7,6 +7,8 @@ class Env {
     if (val) this.userList = val.split(/[\n&]+/).map(v => String(v).split('#')[0].trim()).filter(Boolean);
     else console.log('未找到环境变量 WX_ID');
   }
+  isNode() { return "undefined" !== typeof module && !!module.exports; }
+  msg(text) { console.log(text); }
   done() { }
 }
 /*
@@ -144,7 +146,7 @@ async function getWxCode(account) {
     try {
       const { status, data } = await axios.post(
         wxServerUrl + endpoint,
-        { appid: MINI_APP_ID, wxid: account },
+        { appid: MINI_APPID, wxid: account },
         {
           headers: { "Content-Type": "application/json", "Accept": "application/json" },
           timeout: 15000,
@@ -266,14 +268,14 @@ async function signIn(account, index) {
 
   let accounts = [];
   if ($.isNode()) {
-    const env = process.env.WX_ID;
+    const env = process.env.WX_ID || process.env.aima;
     if (env) {
-      accounts = env.split(/&|\n/).map((t) => t.trim()).filter(Boolean);
+      accounts = env.split(/[\n&]+/).map(v => String(v).split('#')[0].trim()).filter(Boolean);
     }
   }
 
   if (accounts.length === 0) {
-    $.msg("❌ 未找到账号标识，请配置变量 'aima'");
+    $.msg("❌ 未找到账号标识，请配置变量 'WX_ID' 或 'aima'");
     return;
   }
 
