@@ -14,14 +14,14 @@ class WeChatServer {
 }
 
 class Env {
-    constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; }
-    log(...args) { console.log(...args); }
+    constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; this.logs = []; const originalLog = console.log; console.log = (...args) => { this.logs.push(args.join(" ")); originalLog.apply(console, args); }; }
+    log(...args) { console.log(...args); this.logs.push(args.join(" ")); }
     checkEnv(ckName) {
         const val = process.env.WX_ID || process.env[ckName];
         if (val) this.userList = val.split(/[\n&]+/).map(v => String(v).split('#')[0].trim()).filter(Boolean);
         else console.log('未找到环境变量 WX_ID');
     }
-    done() { }
+    async done() { try { const notify = require('./sendNotify'); await notify.sendNotify(this.name, this.logs.join('\n')); } catch(e) { console.log('通知发送失败', e); } }
 }
 /*
 ------------------------------------------

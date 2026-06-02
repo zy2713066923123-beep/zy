@@ -5,8 +5,8 @@ const files = fs.readdirSync('.').filter(f => f.endsWith('.js') && !['getCode.js
 
 const envPolyfill = `
 class Env {
-    constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; }
-    log(...args) { console.log(...args); }
+    constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; this.logs = []; const originalLog = console.log; console.log = (...args) => { this.logs.push(args.join(" ")); originalLog.apply(console, args); }; }
+    log(...args) { console.log(...args); this.logs.push(args.join(" ")); }
     checkEnv(ckName) {
         const val = process.env.WX_ID || process.env[ckName];
         if (val) this.userList = val.split(/[\\n&]+/).map(v => v.trim()).filter(Boolean);

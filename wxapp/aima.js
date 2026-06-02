@@ -1,7 +1,7 @@
 
 class Env {
-  constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; }
-  log(...args) { console.log(...args); }
+  constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; this.logs = []; const originalLog = console.log; console.log = (...args) => { this.logs.push(args.join(" ")); originalLog.apply(console, args); }; }
+  log(...args) { console.log(...args); this.logs.push(args.join(" ")); }
   checkEnv(ckName) {
     const val = process.env.WX_ID || process.env[ckName];
     if (val) this.userList = val.split(/[\n&]+/).map(v => String(v).split('#')[0].trim()).filter(Boolean);
@@ -9,7 +9,7 @@ class Env {
   }
   isNode() { return "undefined" !== typeof module && !!module.exports; }
   msg(text) { console.log(text); }
-  done() { }
+  async done() { try { const notify = require('./sendNotify'); await notify.sendNotify(this.name, this.logs.join('\n')); } catch(e) { console.log('通知发送失败', e); } }
 }
 /*
 爱玛会员俱乐部 - 自动签到脚本
