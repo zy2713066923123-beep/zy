@@ -103,7 +103,7 @@ const push_config = {
       - 文本消息: 1 (数字一)
       - 图文消息（mpnews）: 素材库图片id, 可查看此教程(http://note.youdao.com/s/HMiudGkb)或者(https://note.youdao.com/ynoteshare1/index.html?id=1a0c8aff284ad28cbd011b29b3ad0191&type=note)
     */
-    QYWX_AM: 'ww3e926447934f6082,AzAQ579zo1vgAbkqUeCpPzaInFn9JavwNQUqxR-XFTI,@all,1000002,2QrunRP1WupDvzmcmBAiMGuztg5YF_Z8ll-iO_G0tvbi2yZO9QyVWjTHlIJgWrtWXhyNo8pHzkxF9-ur_-PiueQ', // 企业微信应用
+    QYWX_AM: '', // 企业微信应用
 
     QYWX_KEY: '', // 企业微信机器人的 webhook(详见文档 https://work.weixin.qq.com/api/doc/90000/90136/91770)，例如：693a91f6-7xxx-4bc4-97a0-0ec2sifa5aaa
 
