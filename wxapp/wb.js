@@ -6,7 +6,7 @@ class WeChatServer {
         try {
             const actualWxid = String(wxid).split('#')[0].trim();
             const code = await getSingleCode(this.config.appid, actualWxid);
-            return { data: { code, data: { code } } };
+            return { data: { status: true, code, data: { code } } };
         } catch (e) {
             return { data: {} };
         }

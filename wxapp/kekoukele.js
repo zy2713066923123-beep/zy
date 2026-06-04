@@ -6,7 +6,7 @@ class WeChatServer {
         try {
             const actualWxid = String(wxid).split('#')[0].trim();
             const code = await getSingleCode(this.config.appid, actualWxid);
-            return { data: { code, data: { code } } };
+            return { data: { status: true, code, data: { code } } };
         } catch (e) {
             return { data: {} };
         }
@@ -21,6 +21,7 @@ class Env {
         if (val) this.userList = val.split(/[\n&]+/).map(v => String(v).split('#')[0].trim()).filter(Boolean);
         else console.log('未找到环境变量 WX_ID');
     }
+    wait(time) { return new Promise(resolve => setTimeout(resolve, time)); }
     async done() { try { const notify = require('./sendNotify'); await notify.sendNotify(this.name, this.logs.join('\n')); } catch(e) { console.log('通知发送失败', e); } }
 }
 

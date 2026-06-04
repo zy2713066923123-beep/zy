@@ -6,7 +6,7 @@ class WeChatServer {
         try {
             const actualWxid = String(wxid).split('#')[0].trim();
             const code = await getSingleCode(this.config.appid, actualWxid);
-            return { data: { code, data: { code } } };
+            return { data: { status: true, code, data: { code } } };
         } catch (e) {
             return { data: {} };
         }
@@ -24,6 +24,7 @@ class Env {
     wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
     uuid() { return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) { var r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8); return v.toString(16); }); }
     time(fmt) { let date = new Date(); let o = { "M+": date.getMonth() + 1, "d+": date.getDate() }; if (/(y+)/.test(fmt)) fmt = fmt.replace(RegExp.$1, (date.getFullYear() + "").substr(4 - RegExp.$1.length)); for (let k in o) if (new RegExp("(" + k + ")").test(fmt)) fmt = fmt.replace(RegExp.$1, (RegExp.$1.length === 1) ? (o[k]) : (("00" + o[k]).substr(("" + o[k]).length))); return fmt; }
+    wait(time) { return new Promise(resolve => setTimeout(resolve, time)); }
     async done() { try { const notify = require('./sendNotify'); await notify.sendNotify(this.name, this.logs.join('\n')); } catch(e) { console.log('通知发送失败', e); } }
 }
 
