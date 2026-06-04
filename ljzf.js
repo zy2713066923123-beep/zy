@@ -1,11 +1,8 @@
 /*
-霖久智服 微信协议版 - 内置账号版
-此版本不依赖 WECHAT_SERVER 和 wxljzf 变量。
-所有账号的认证参数直接在下方的 USER_TOKENS 数组中配置。
+霖久智服
 */
 
-// ================== 【抓包参数配置区】 ==================
-const USER_TOKENS = [
+let USER_TOKENS = [
   // 示例配置（支持多账号，请复制大括号块并用逗号隔开）：
   // {
   //   remark: '账号1',          // 备注名
@@ -15,17 +12,56 @@ const USER_TOKENS = [
   //   sessionKey: '填入抓包得到的 sessionKey',
   //   openId: '填入抓包得到的 openId',
   //   memberId: '填入抓包得到的 memberId'
-  // },
-  // {
-  //   remark: '账号2',
-  //   mobile: '1562c',
-  //   token: '填入抓包得到的 x-auth-token',
-  //   accountId: '填入抓包得到的 x-account-id',
-  //   sessionKey: '填入抓包得到的 sessionKey',
-  //   openId: '填入抓包得到的 openId',
-  //   memberId: '填入抓包得到的 memberId'
   // }
 ];
+
+// 支持从环境变量读取 ljzfData
+if (process.env.ljzfData) {
+  let parsedTokens = [];
+  // 先整体尝试作为单个 JSON 数组解析
+  try {
+    const parsed = JSON.parse(process.env.ljzfData);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      parsedTokens = parsed;
+    }
+  } catch (e) {
+    // 如果整体不是有效 JSON（比如多个青龙同名环境变量组合，或者是 # 拼接的字符串）
+    let accounts = process.env.ljzfData.split(/[\n&@]+/);
+    for (let acc of accounts) {
+      if (!acc.trim()) continue;
+      // 尝试把单条记录作为 JSON 解析
+      try {
+        let singleJson = JSON.parse(acc);
+        if (Array.isArray(singleJson)) {
+          parsedTokens.push(...singleJson);
+        } else if (typeof singleJson === 'object' && singleJson !== null) {
+          parsedTokens.push(singleJson);
+        }
+      } catch (err) {
+        // 如果也不是单条 JSON，则尝试 # 分隔解析
+        let parts = acc.split('#');
+        if (parts.length >= 7) {
+          parsedTokens.push({
+            remark: parts[0].trim(),
+            mobile: parts[1].trim(),
+            token: parts[2].trim(),
+            accountId: parts[3].trim(),
+            sessionKey: parts[4].trim(),
+            openId: parts[5].trim(),
+            memberId: parts[6].trim()
+          });
+        }
+      }
+    }
+  }
+  
+  if (parsedTokens.length > 0) {
+    USER_TOKENS = parsedTokens;
+    console.log(`✅ 成功从环境变量读取到 ${USER_TOKENS.length} 个账号配置`);
+  } else {
+    console.log('⚠️ 环境变量 ljzfData 存在，但无法解析为有效账号格式，将使用内置配置。');
+  }
+}
 // ======================================================
 
 const fs = require('fs');
