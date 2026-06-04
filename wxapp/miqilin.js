@@ -26,7 +26,7 @@ class Env {
 }
 /*
 ------------------------------------------
-@Author: sm
+@Author: sm (Modified by AI)
 @Date: 2024.06.07 19:15
 @Description:  
 cron: 30 9 * * *
@@ -58,14 +58,17 @@ const $ = new Env("米其林会员小程序");
 let ckName = `miqilin`;
 const strSplitor = "#";
 const axios = require("axios");
+const fs = require("fs");
+const path = require("path");
 const defaultUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.31(0x18001e31) NetType/WIFI Language/zh_CN miniProgram"
 let wechat = new WeChatServer({
     url: process.env.WECHAT_SERVER || "http://192.168.6.222:8011",
     appid: 'wx14413dafd16b9540',
     WX_ID: process.env.WX_ID || "",
-
 }
 );
+
+global.goodsList = [];
 
 class Task {
     constructor(env) {
@@ -74,6 +77,36 @@ class Task {
         this.token = null
         this.wcsid = this.user[0]
         this.isSign = false
+        this.points = 0
+        this.findBibNum = 0
+        this.lastBanner = ""
+    }
+
+    loadQuestionBanner() {
+        const bannerCacheFile = path.join(__dirname, 'miqilin_banner.json');
+        let data = {};
+        if (fs.existsSync(bannerCacheFile)) {
+            try { data = JSON.parse(fs.readFileSync(bannerCacheFile, 'utf8')); } catch(e){}
+        }
+        this.lastBanner = data["last_banner"] || "";
+    }
+
+    saveQuestionBanner(banner) {
+        if (!banner) return;
+        const bannerCacheFile = path.join(__dirname, 'miqilin_banner.json');
+        let data = {};
+        if (fs.existsSync(bannerCacheFile)) {
+            try { data = JSON.parse(fs.readFileSync(bannerCacheFile, 'utf8')); } catch(e){}
+        }
+        if (data["current_banner"] && data["current_banner"] !== banner) {
+            data["last_banner"] = data["current_banner"];
+            data["current_banner"] = banner;
+        } else if (!data["current_banner"]) {
+            data["current_banner"] = banner;
+            data["last_banner"] = "";
+        }
+        fs.writeFileSync(bannerCacheFile, JSON.stringify(data));
+        this.lastBanner = data["last_banner"];
     }
 
     async run() {
@@ -88,12 +121,35 @@ class Task {
             return
         }
         this.token = 'Bearer ' + this.token
+        this.loadQuestionBanner()
+
         await this.getUserInfo()
+        $.log(`执行前积分：${this.points}`)
+
         await this.doPaper()
-        for (let i = 0; i < 10; i++) {
+        await this.doLuckDraw()
+        await this.doFindBib()
+        await this.doShare()
+        
+        await this.getUserInfo()
+        $.log(`执行后积分：${this.points}`)
+
+        await this.getOrders()
+        await this.getGoods()
+    }
+    
+    async doShare() {
+        while (true) {
             await this.share();
+            await $.wait(1000);
+            let shareCount = await this.sharePoints();
+            if (shareCount === 0) {
+                break;
+            }
+            await $.wait(2000);
         }
     }
+
     async share() {
         const options = {
             method: 'POST',
@@ -105,11 +161,239 @@ class Task {
             },
             data: { "type": "ARTICLE", "code": "COM-MHT-93" }
         };
-        //post方法
-        let { data: result } = await axios.request(options);
-
-        $.log(`转发:${result?.code != 200 ? "转发失败" + result?.message : "转发成功!"}`)
+        try {
+            let { data: result } = await axios.request(options);
+            $.log(`转发:${result?.code != 200 ? "转发失败" + (result?.message||'') : "转发成功!"}`)
+        } catch (e) {
+            $.log(`转发异常`)
+        }
     }
+
+    async sharePoints() {
+        const options = {
+            method: 'GET',
+            url: `https://ulp.michelin.com.cn/membership/member/points/toast`,
+            headers: {
+                "Host": "ulp.michelin.com.cn",
+                "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_4_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.31(0x18001f37) NetType/WIFI Language/zh_CN",
+                "Authorization": this.token,
+            }
+        };
+        try {
+            let { data: rs } = await axios.request(options);
+            if (rs.code === 200 && rs.data) {
+                for (let item of rs.data) {
+                    $.log(`${item.name},获得${item.points}积分`);
+                }
+                return rs.data.length || 0;
+            }
+        } catch(e) {}
+        return 0;
+    }
+
+    async doFindBib() {
+        while (true) {
+            if (this.findBibNum > 10) break;
+            if (await this.findBib()) {
+                await $.wait(1000);
+            } else {
+                break;
+            }
+        }
+    }
+
+    async findBib() {
+        const latitude = 23.70556;
+        const longitude = 102.49621;
+        const options = {
+            method: 'GET',
+            url: `https://ulp.michelin.com.cn/campaign/findbib/luckydraw/BIB_2022?latitude=${latitude}&longitude=${longitude}`,
+            headers: {
+                "Host": "ulp.michelin.com.cn",
+                "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_4_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.31(0x18001f37) NetType/WIFI Language/zh_CN",
+                "Authorization": this.token,
+            }
+        };
+        try {
+            let { data: rs } = await axios.request(options);
+            if (rs.code === 200) {
+                if (rs.data.prizeType === "POINTS") {
+                    $.log(`[寻找米其林先生]积分:${rs.data.benefit.name}`);
+                    this.findBibNum = 0;
+                } else if (rs.data.prizeType === "KNWL_CARD") {
+                    $.log(`[寻找米其林先生]知识卡:${rs.data.benefit.name}`);
+                    this.findBibNum += 1;
+                } else if (rs.data.prizeType === "BIB_CARD") {
+                    $.log(`[寻找米其林先生]卡片:${rs.data.benefit.name}`);
+                    this.findBibNum = 0;
+                } else if (rs.data.prizeType === "EC_COUPON") {
+                    $.log(`[寻找米其林先生]优惠券:${rs.data.benefit.name}`);
+                    this.findBibNum = 0;
+                } else {
+                    let prizeType = rs.data.prizeType;
+                    $.log(`[寻找米其林先生]${prizeType}:${rs.data.benefit.name}`);
+                    this.findBibNum = 0;
+                }
+                return true;
+            } else {
+                $.log(`寻找米其林先生结束：${rs.message}`);
+                return false;
+            }
+        } catch(e) {
+            $.log(`寻找米其林先生请求失败`);
+            return false;
+        }
+    }
+
+    async qualify(lastBanner) {
+        const PAPERID = "7391689672818298880";
+        const options = {
+            method: 'GET',
+            url: `https://ulp.michelin.com.cn/campaign/paper/lukcydraw/qualify/${lastBanner}?ulpUserPaperId=${PAPERID}&paperCode=${lastBanner}`,
+            headers: {
+                "Host": "ulp.michelin.com.cn",
+                "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.65(0x18004130) NetType/WIFI Language/zh_CN",
+                "Authorization": this.token,
+            }
+        };
+        try {
+            await axios.request(options);
+        } catch(e) {}
+    }
+
+    async stage() {
+        if (!this.lastBanner) {
+            return { banner: "", status: false };
+        }
+        const options = {
+            method: 'GET',
+            url: `https://ulp.michelin.com.cn/campaign/stage/${this.lastBanner}`,
+            headers: {
+                "Host": "ulp.michelin.com.cn",
+                "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_4_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.31(0x18001f37) NetType/WIFI Language/zh_CN",
+                "Authorization": this.token,
+            }
+        };
+        try {
+            let { data: rs } = await axios.request(options);
+            if (rs.code === 200) {
+                if (rs.data.campaign && rs.data.campaign.status === "ONGOING" && rs.data.prizeEarned === false && parseInt(rs.data.remainCount) > 0) {
+                    return { banner: this.lastBanner, status: true };
+                }
+            }
+            return { banner: this.lastBanner, status: false };
+        } catch(e) {
+            return { banner: this.lastBanner, status: false };
+        }
+    }
+
+    async luckDraw(banner) {
+        const options = {
+            method: 'GET',
+            url: `https://ulp.michelin.com.cn/campaign/stage/luckydraw/${banner}`,
+            headers: {
+                "Host": "ulp.michelin.com.cn",
+                "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_4_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.31(0x18001f37) NetType/WIFI Language/zh_CN",
+                "Authorization": this.token,
+            }
+        };
+        try {
+            let { data: rs } = await axios.request(options);
+            if (rs.code === 200) {
+                $.log(`上期问答挑战抽奖获得：${rs.data.name}`);
+            } else {
+                $.log(`上期问答挑战抽奖结束/失败`);
+            }
+        } catch(e) {}
+    }
+
+    async doLuckDraw() {
+        if (!this.lastBanner) {
+            $.log("未找到上期问答挑战活动banner，跳过抽奖");
+            return;
+        }
+        await this.qualify(this.lastBanner);
+        let { banner, status } = await this.stage();
+        if (status) {
+            $.log("开始上期问答挑战抽奖");
+            await this.luckDraw(banner);
+        }
+    }
+
+    async getOrders() {
+        const options = {
+            method: 'GET',
+            url: `https://ulp.michelin.com.cn/op/orders`,
+            headers: {
+                "Host": "ulp.michelin.com.cn",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36 MicroMessenger/7.0.20.1781 NetType/WIFI MiniProgramEnv/Windows WindowsWechat/WMPF XWEB/50249",
+                "Authorization": this.token,
+            }
+        };
+        try {
+            let { data: rs } = await axios.request(options);
+            if (rs.code === 200 && rs.data && rs.data.length > 0) {
+                const orderStatus = {
+                    "TO_BE_SEND": "待发货",
+                    "TO_BE_RECEIVED": "待收货"
+                };
+                let orderIndex = 1;
+                let found = false;
+                for (let order of rs.data) {
+                    if (orderStatus[order.status]) {
+                        found = true;
+                        $.log(`订单【${orderIndex}】`);
+                        $.log(`下单时间：${order.orderTime}`);
+                        $.log(`订单状态：${orderStatus[order.status]}`);
+                        for (let orderGoods of order.items) {
+                            $.log(`商品名：${orderGoods.name}`);
+                        }
+                        orderIndex++;
+                    }
+                }
+                if (!found) $.log('未查询到待发货或待收货订单');
+            } else {
+                $.log('未查询到订单');
+            }
+        } catch(e) {
+            $.log(`查询订单失败`);
+        }
+    }
+
+    async getGoods() {
+        const options = {
+            method: 'POST',
+            url: `https://ulp.michelin.com.cn/op/points/product/search`,
+            headers: {
+                "Host": "ulp.michelin.com.cn",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36 MicroMessenger/7.0.20.1781 NetType/WIFI MiniProgramEnv/Windows WindowsWechat/WMPF XWEB/50249",
+                "Authorization": this.token,
+            },
+            data: {
+                "premium": "N",
+                "category": null,
+                "endPrice": null,
+                "page": 1,
+                "pageSize": 50,
+                "startPrice": null,
+                "type": "GOODS"
+            }
+        };
+        try {
+            let { data: rs } = await axios.request(options);
+            if (rs.code === 200 && rs.data && rs.data.records) {
+                global.goodsList = global.goodsList || [];
+                if (global.goodsList.length === 0) {
+                    for (let goods of rs.data.records) {
+                        if (goods.status === "AVAILABLE") {
+                            global.goodsList.push({ name: goods.name, price: goods.price });
+                        }
+                    }
+                }
+            }
+        } catch(e) { }
+    }
+
     async getUserToken(code) {
         let options = {
             method: 'GET',
@@ -144,15 +428,10 @@ class Task {
 
 
             if (result?.data?.points) {
-                $.log(`账号[${this.index}] 获取用户积分成功:${result?.data?.points}`)
-            } else {
-                $.log(`账号[${this.index}] 获取用户积分失败❌`)
+                this.points = result.data.points;
             }
-
-
         } catch (e) {
             this.ckStatus = false;
-            console.log(`❌查询积分失败！原因为:${e}`);
         }
     }
     async doPaper() {
@@ -204,10 +483,12 @@ class Task {
             $.log(`帐号[${this.index}]本次调查问卷为${result?.data?.npsPaperCode}，总共${result?.data?.questionNum}道题目,状态为${result?.data?.status}`);
             //如果已经答题，则跳过执行答题任务
             if (result?.data?.status == 'DONE') this.paperStatus = false;
+            else this.paperStatus = true;
             //获取本期问卷期数
             this.npsPaperCode = result?.data?.npsPaperCode;
             //获取本期问卷验证编号
             this.paperCode = result?.data?.paperCode;
+            this.saveQuestionBanner(this.paperCode);
         } else {
             this.ckStatus = false;
         }
@@ -228,13 +509,14 @@ class Task {
 
         //post方法
         let result = await axios.request(options);
-        if (result?.success) {
+        if (result?.data?.success || result?.data?.code == 200 || (result?.data && result?.data?.stdAnswers)) {
+            let dat = result.data.data ? result.data.data : result.data;
             //答案
-            this.stdAnswers = result?.data?.stdAnswers;
+            this.stdAnswers = dat?.stdAnswers || [];
             //题目
-            this.questionList = result?.data?.questionList;
+            this.questionList = dat?.questionList || [];
         } else {
-            $.log(`🔴帐号[${this.index}]获取问卷列表失败！${result?.message}`)
+            $.log(`🔴帐号[${this.index}]获取问卷列表失败！${result?.data?.message || ''}`)
         }
 
     }
@@ -263,17 +545,20 @@ class Task {
         try {
             const options = {
                 url: `https://ulp.michelin.com.cn/campaign/paper/score/${paperCode}`,
+                method: 'POST',
+                headers: {
+                    "Host": "ulp.michelin.com.cn",
+                    "Authorization": this.token,
+                },
                 data: {}
             };
             //post方法
             let { data: res } = await axios.request(options);
-            $.log(`提交问卷:本期问卷正确率为${res?.data?.score}%,排名${res.data.rank}`);
+            $.log(`提交问卷:本期问卷正确率为${res?.data?.score}%,排名${res?.data?.rank}`);
         } catch (e) {
             console.log(`❌提交问卷失败！原因为:${e}`);
         }
     }
-
-
 
 }
 
@@ -283,6 +568,13 @@ class Task {
     if (process.env['WECHAT_SERVER'] && process.env['WX_ID']) {
         for (let user of $.userList) {
             await new Task(user).run();
+        }
+        
+        if (global.goodsList && global.goodsList.length > 0) {
+            $.log(`\n----------- 🎊 可兑换商品 🎊 -----------`);
+            for (let goods of global.goodsList) {
+                $.log(`[${goods.price}积分] ${goods.name}`);
+            }
         }
     } else {
 
