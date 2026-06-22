@@ -1,4 +1,5 @@
 
+const { getSingleCode } = require('./getCode.js');
 class Env {
     constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; this.logs = []; const originalLog = console.log; console.log = (...args) => { this.logs.push(args.join(" ")); originalLog.apply(console, args); }; }
     log(...args) { console.log(...args); this.logs.push(args.join(" ")); }
@@ -8,6 +9,19 @@ class Env {
         else console.log('未找到环境变量 WX_ID');
     }
     async done() { try { const notify = require('./sendNotify'); await notify.sendNotify(this.name, this.logs.join('\n')); } catch(e) { console.log('通知发送失败', e); } }
+}
+
+class WeChatServer {
+    constructor(config) { this.config = config; }
+    async getCode(wxid) {
+        try {
+            const actualWxid = String(wxid).split('#')[0].trim();
+            const code = await getSingleCode(this.config.appid, actualWxid);
+            return { data: { status: true, code, data: { code } } };
+        } catch (e) {
+            return { data: {} };
+        }
+    }
 }
 /*
 ------------------------------------------
@@ -52,6 +66,10 @@ const PAGE_VERSION = "87";
 const API_BASE = "https://member.guoyuejiu.com/api";
 const TOKEN_CACHE_FILE = path.join(__dirname, "gyjj_token_cache.json");
 const defaultUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_7_15 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.70(0x1800462d) NetType/WIFI Language/zh_CN";
+let wechat = new WeChatServer({
+    url: process.env.WECHAT_SERVER || "http://192.168.6.222:8011",
+    appid: MINI_APP_ID,
+});
 
 function readTokenCache() {
     try {
@@ -199,12 +217,11 @@ class Task {
             appid: MINI_APP_ID,
             openid: this.raw,
         }, {
-            headers: { auth: process.env.WX_ID },
             timeout: 45000,
             validateStatus: () => true,
         });
         const result = data?.data || {};
-        if (!data?.status || !result.code) throw new Error(`wx_server 未返回code: ${JSON.stringify(data)}`);
+        if (!data?.status || !result.code) throw new Error(`wx_server 未返回code(当前协议可能不支持此接口): ${JSON.stringify(data)}`);
         let userInfo = {};
         try {
             userInfo = JSON.parse(result.data || "{}");
@@ -214,7 +231,15 @@ class Task {
 
     async loginByWxCode() {
         try {
-            const wxData = await this.getOperateData();
+            let wxData;
+            // 优先使用 getCode.js 获取 code
+            let { data: codeRes } = await wechat.getCode(this.accountId);
+            if (codeRes?.status && codeRes?.code) {
+                wxData = { code: codeRes.code, userInfo: {} };
+            } else {
+                // 回退到 operatedata 接口
+                wxData = await this.getOperateData();
+            }
             const user = wxData.userInfo || {};
             const payload = {
                 avatarUrl: user.avatarUrl || "",
