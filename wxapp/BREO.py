@@ -12,6 +12,7 @@ import json
 import os
 import sys
 import time
+import random
 from pathlib import Path
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -181,15 +182,36 @@ def get_token_for_account(account_id, index):
     return auth_info["token"]
 
 def get_random_one_word():
-    try:
-        response = requests.get("https://uapis.cn/api/say")
-        if response.status_code == 200:
-            return response.text.strip()
-        else:
-            return "无法获取一言"
-    except Exception as e:
-        print(f"获取一言时出错: {e}")
-        return "无法获取一言"
+    """内置一言评论内容"""
+    quotes = [
+        "今天也是元气满满的一天！",
+        "生活明朗，万物可爱",
+        "保持热爱，奔赴山海",
+        "努力成为更好的自己",
+        "每一天都是新的开始",
+        "加油，未来可期！",
+        "简单的生活，简单的快乐",
+        "愿所有的美好如期而至",
+        "用心感受生活的美好",
+        "做最好的自己，不负韶华",
+        "阳光总在风雨后",
+        "脚踏实地，仰望星空",
+        "珍惜当下，活在当下",
+        "笑对人生，快乐常伴",
+        "坚持就是胜利",
+        "平凡的日子也有光芒",
+        "心怀梦想，脚踏实地",
+        "感恩生活中的每一份温暖",
+        "越努力，越幸运",
+        "愿我们都被这个世界温柔以待",
+        "不忘初心，方得始终",
+        "知足常乐，随遇而安",
+        "用微笑面对每一天",
+        "相信自己，你一定可以",
+        "岁月静好，现世安稳",
+        "星光不问赶路人，时光不负有心人",
+    ]
+    return random.choice(quotes)
 
 def get_proclamation():
     primary_url = "https://github.com/3288588344/toulu/raw/refs/heads/main/tl.txt"
