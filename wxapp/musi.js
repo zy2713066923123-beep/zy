@@ -22,6 +22,23 @@ class Env {
         else console.log('未找到环境变量 WX_ID');
     }
     wait(time) { return new Promise(resolve => setTimeout(resolve, time)); }
+    time(fmt) {
+        const d = new Date();
+        const o = {
+            'M+': d.getMonth() + 1,
+            'd+': d.getDate(),
+            'H+': d.getHours(),
+            'm+': d.getMinutes(),
+            's+': d.getSeconds(),
+            'q+': Math.floor((d.getMonth() + 3) / 3),
+            'S': d.getMilliseconds()
+        };
+        if (/(y+)/.test(fmt)) fmt = fmt.replace(RegExp.$1, (d.getFullYear() + '').substr(4 - RegExp.$1.length));
+        for (let k in o) {
+            if (new RegExp('(' + k + ')').test(fmt)) fmt = fmt.replace(RegExp.$1, RegExp.$1.length === 1 ? o[k] : ('00' + o[k]).substr(('' + o[k]).length));
+        }
+        return fmt;
+    }
     async done() { try { const notify = require('./sendNotify'); await notify.sendNotify(this.name, this.logs.join('\n')); } catch(e) { console.log('通知发送失败', e); } }
 }
 
