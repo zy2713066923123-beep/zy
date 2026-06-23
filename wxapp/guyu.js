@@ -79,6 +79,8 @@ class Task {
         this.token = null
         this.wcsid = this.user[0]
         this.isSign = false
+        this.customerId = null   // 新增：customerId
+        this.openId = null        // 新增：openId
     }
 
     async run() {
@@ -91,6 +93,10 @@ class Task {
         if (!this.token) {
             $.log(`账号[${this.index}] 获取用户Token失败❌`)
             return
+        }
+        // 如果customerId为空，尝试获取用户详情
+        if (!this.customerId) {
+            await this.getCustomerInfo()
         }
         await this.signIn()
         await this.getUserPoints()
@@ -133,7 +139,10 @@ class Task {
 
         if (result?.success) {
             this.token = result.result.mobileToken
-            $.log(`🌸账号[${this.index}] 获取用户Token成功:${this.token}`)
+            // 保存customerId和openId
+            this.customerId = result.result?.customerId || null
+            this.openId = result.result?.openId || null
+            $.log(`🌸账号[${this.index}] 获取用户Token成功, customerId=${this.customerId || '空'}, openId=${this.openId || '空'}`)
         } else {
             $.log(`🌸账号[${this.index}] 获取用户Token-失败:${result.message}❌`)
         }
@@ -192,6 +201,31 @@ class Task {
 
         return axios.request(options)
     }
+    async getCustomerInfo() {
+        // 尝试获取用户详情接口，可能能刷新customerId
+        try {
+            let options = {
+                method: 'GET',
+                url: `https://mall-mobile-v6.vecrp.com/mobile/customer/detail`,
+                params: { shopId: '100186753' },
+                headers: {}
+            }
+            let { data: result } = await this.request(options)
+            if (result?.success && result.result) {
+                const info = result.result
+                if (info.customerId) {
+                    this.customerId = info.customerId
+                    $.log(`🌸账号[${this.index}] 获取到用户ID:${this.customerId}`)
+                }
+                if (info.openId && !this.openId) {
+                    this.openId = info.openId
+                }
+            }
+        } catch (e) {
+            $.log(`🌸账号[${this.index}] 获取用户详情失败:${e.message || e}`)
+        }
+    }
+
     async signIn() {
         let options = {
             method: 'POST',
@@ -202,6 +236,8 @@ class Task {
                 activityId: 'cdd30467-abb8-4944-8941-2879aa950a86',
                 shopId: '100186753',
                 signDate: $.time(`yyyy-M-dd`),
+                // 尝试传入customerId或openId解决"用户id不能为空"
+                ...(this.customerId ? { customerId: this.customerId } : (this.openId ? { openId: this.openId } : {}))
             }
 
         };
