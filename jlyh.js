@@ -304,6 +304,11 @@ class UserInfo {
 
 // 变量检查与处理
 !(async () => {
+    // 随机延迟 5~120 秒，模拟人工操作
+    const delay = Math.floor(Math.random() * 115 + 5) * 1000;
+    console.log(`⏳ 随机延迟 ${Math.round(delay / 1000)} 秒后开始...`);
+    await $.wait(delay);
+
     const userCookie = ($.isNode() ? process.env[ckName] : $.getdata(ckName)) || "";
     if (!userCookie) {
         console.log("未找到CK");
