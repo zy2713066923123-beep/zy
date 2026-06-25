@@ -140,9 +140,9 @@ def force_exit(signum, frame):
     full_report += "📋 所有账号密码:\n"
     # 从环境变量重新解析所有账号
     env_str = os.environ.get(ENV_VAR_NAME, "")
-    for item in env_str.split("@"):
+    for item in env_str.replace("&", "\n").splitlines():
         parts = item.strip().split("#")
-        if len(parts) >= 3:
+        if len(parts) >= 2:
             full_report += f"{parts[0]}#{parts[1]}\n"
     
     # 统一推送完整报告
@@ -196,8 +196,8 @@ def save_token_cache(cache):
             with print_lock:
                 print(f"❌ 保存缓存失败: {e}")
 
-def login(phone, password, jpush_id, random_instance):
-    """使用手机号+密码+对应jpushId登录"""
+def login(phone, password, random_instance):
+    """使用手机号+密码登录，jpushId自动填充"""
     try:
         login_headers = {
             "User-Agent": random_instance.choice(USER_AGENT_POOL),
@@ -209,7 +209,7 @@ def login(phone, password, jpush_id, random_instance):
         data = {
             "phone": phone,
             "password": password,
-            "jpushId": jpush_id,
+            "jpushId": "local_notify_mode",
             "loginType": LOGIN_TYPE,
             "source": LOGIN_SOURCE
         }
@@ -258,12 +258,11 @@ def verify_token(token, random_instance):
     except Exception:
         return False
 
-def get_valid_credentials(phone, password, jpush_id, random_instance):
+def get_valid_credentials(phone, password, random_instance):
     """获取有效凭证：优先缓存，失效自动重登"""
     cache = load_token_cache()
     cached_data = cache.get(phone, {})
     cached_token = cached_data.get("token")
-    cached_jpush_id = cached_data.get("jpushId", jpush_id)
     
     if cached_token:
         with print_lock:
@@ -274,18 +273,15 @@ def get_valid_credentials(phone, password, jpush_id, random_instance):
             test_headers = {"User-Agent": random_instance.choice(USER_AGENT_POOL), "AppToken": cached_token}
             response = requests.get(f"{BASE_URL}/app/user/getUserInfo", headers=test_headers, timeout=10)
             user_id = response.json().get("user", {}).get("userId")
-            return cached_token, user_id, cached_jpush_id
+            return cached_token, user_id
         with print_lock:
             print(f"⚠️  账号 {phone} 缓存Token已失效，正在重新登录...")
     
-    token, user_id = login(phone, password, jpush_id, random_instance)
+    token, user_id = login(phone, password, random_instance)
     if token:
-        cache[phone] = {
-            "token": token,
-            "jpushId": jpush_id
-        }
+        cache[phone] = {"token": token}
         save_token_cache(cache)
-    return token, user_id, jpush_id
+    return token, user_id
 
 # ============================== 【基础请求与接口模块（独立随机）】 ==============================
 def request_with_retry(session, method, url, random_instance, **kwargs):
@@ -466,14 +462,14 @@ def send_final_report(session, phone, total_videos, total_integral, initial_inte
         })
 
 # ============================== 【单账号独立运行逻辑】 ==============================
-def run_single_account(phone, password, jpush_id, random_instance, all_accounts):
+def run_single_account(phone, password, random_instance, all_accounts):
     """单个账号的完整运行流程（完全独立）"""
     with print_lock:
         print(f"\n{'='*60}")
         print(f"🚀 账号 {phone} 已启动")
         print(f"{'='*60}\n")
     
-    token, user_id, used_jpush_id = get_valid_credentials(phone, password, jpush_id, random_instance)
+    token, user_id = get_valid_credentials(phone, password, random_instance)
     if not token or not user_id:
         with print_lock:
             print(f"❌ 账号 {phone} 获取身份凭证失败，跳过")
@@ -657,31 +653,31 @@ def main():
     print(f"📌 随机跳过概率: {SKIP_VIDEO_PROBABILITY}% | 中途退出概率: {EXIT_MIDWAY_PROBABILITY}%")
     print(f"📌 芳华币规则: 仅完整观看每{INTEGRAL_INTERVAL}秒领取一次")
     print(f"📌 缓存文件: {TOKEN_CACHE_FILE} (自动保存token和jpushId)")
-    print(f"📌 环境变量格式: 手机号#密码#jpushId@手机号#密码#jpushId")
+    print(f"📌 环境变量格式: 手机号#密码 (多账号换行或&分割)")
     print("="*60 + "\n")
     
     env_str = os.environ.get(ENV_VAR_NAME, "")
     if not env_str:
         print(f"❌ 未找到环境变量 {ENV_VAR_NAME}")
-        print(f"💡 配置格式: export {ENV_VAR_NAME}='手机号1#密码1#jpushId1@手机号2#密码2#jpushId2'")
+        print(f"💡 配置格式: export {ENV_VAR_NAME}='手机号1#密码1\\n手机号2#密码2'")
         sys.exit(1)
     
     accounts = []
-    for item in env_str.split("@"):
+    for item in env_str.replace("&", "\n").splitlines():
         parts = item.strip().split("#")
-        if len(parts) >= 3:
-            phone, pwd, jpush = parts[0], parts[1], parts[2]
-            accounts.append((phone.strip(), pwd.strip(), jpush.strip()))
+        if len(parts) >= 2:
+            phone, pwd = parts[0].strip(), parts[1].strip()
+            accounts.append((phone, pwd))
     
     if not accounts:
         print("❌ 没有解析到有效的账号")
-        print("💡 请确保每个账号都配置了对应的jpushId")
+        print("💡 配置格式: 手机号#密码  (多账号换行或&分割)")
         sys.exit(1)
     
     print(f"✅ 共解析到 {len(accounts)} 个账号，即将并发运行\n")
     
     all_threads = []
-    for idx, (phone, pwd, jpush) in enumerate(accounts, 1):
+    for idx, (phone, pwd) in enumerate(accounts, 1):
         random_seed = int(time.time() * 1000000) + idx * 12345
         thread_random = random.Random(random_seed)
         
@@ -690,7 +686,7 @@ def main():
         
         thread = threading.Thread(
             target=run_single_account,
-            args=(phone, pwd, jpush, thread_random, accounts),
+            args=(phone, pwd, thread_random, accounts),
             daemon=True,
             name=f"Account-{phone}"
         )
