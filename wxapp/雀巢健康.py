@@ -42,8 +42,14 @@ STAFF_PREFIX = "/staff-api"
 REFERER = "https://servicewechat.com/wx853b3ae8d25c1dd3/312/page-frame.html"
 ACTIVITY_PLAN_CODE = "Nestle_Thrive_Companion_180_Days"
 
-WECHAT_SERVER = os.getenv("WECHAT_SERVER", "").rstrip("/")
-WX_CODE_API = f"{WECHAT_SERVER}/api/v1/wx/app/get/code" if WECHAT_SERVER else ""
+DEFAULT_WECHAT_SERVER = "http://127.0.0.1:8011"
+
+WECHAT_SERVER = os.getenv("WECHAT_SERVER", DEFAULT_WECHAT_SERVER).rstrip("/")
+WX_CODE_API = (
+    WECHAT_SERVER
+    if WECHAT_SERVER.endswith("/get/code") or WECHAT_SERVER.endswith("/code")
+    else f"{WECHAT_SERVER}/api/v1/wx/app/get/code"
+)
 ENABLE_MONSTER_TASK = os.getenv("NESTLE_SANXIA_MONSTER_TASK", "1").lower() not in {"0", "false", "no", "off"}
 ENABLE_MONSTER_REGISTER = os.getenv("NESTLE_SANXIA_MONSTER_REGISTER", "1").lower() not in {"0", "false", "no", "off"}
 MONSTER_GOODS_TYPE = os.getenv("NESTLE_SANXIA_MONSTER_GOODS_TYPE", "Althera")
@@ -152,45 +158,27 @@ def is_activity_success(data: Optional[dict]) -> bool:
 
 
 def get_code(wxid: str) -> Optional[str]:
-    if not WECHAT_SERVER:
+    if not WX_CODE_API:
         log("未配置 WECHAT_SERVER，无法通过 wxid 获取微信 code")
         return None
+    try:
+        resp = requests.post(
+            WX_CODE_API,
+            json={"wxid": wxid, "appid": WX_APP_ID},
+            timeout=30,
+            proxies={"http": None, "https": None},
+        )
+        result = resp.json()
+    except Exception as exc:
+        log(f"获取 code 异常：{exc}")
+        return None
 
-    actual_wxid = str(wxid).split('#')[0].strip()
-    endpoints = [
-        "/api/v1/wx/app/get/code",
-        "/api/v1/wx/app/get/code/",
-        "/api/v1/wx/get/code",
-    ]
-
-    for endpoint in endpoints:
-        url = f"{WECHAT_SERVER}{endpoint}"
-        payload = {"wxid": actual_wxid, "appid": WX_APP_ID}
-        try:
-            resp = requests.post(url, json=payload, timeout=15)
-            result = resp.json()
-        except Exception as exc:
-            log(f"请求 {endpoint} 异常：{exc}")
-            continue
-
-        # 多种方式提取 code
-        code = result.get("code")
-        if not code and isinstance(result.get("data"), dict):
-            code = result["data"].get("code")
-        if not code and isinstance(result.get("Data"), dict):
-            code = result["Data"].get("code")
-        if not code and isinstance(result.get("Data"), str):
-            code = result["Data"]
-        if not code and isinstance(result.get("data"), str):
-            code = result["data"]
-
-        if isinstance(code, str) and len(code) > 5:
-            return code
-
-        # 记录最后一次失败原因
-        msg = result.get("Message") or result.get("message") or result.get("msg") or ""
-        log(f"获取 code 失败 ({endpoint})：{msg or result}")
-
+    data = result.get("Data") if isinstance(result.get("Data"), dict) else result.get("data")
+    code = data.get("code") if isinstance(data, dict) else None
+    if code:
+        return code
+    msg = result.get("Message") or result.get("msg") or result.get("message") or "unknown"
+    log(f"获取 code 失败：{msg}")
     return None
 
 
@@ -480,8 +468,13 @@ def parse_accounts() -> List[Tuple[str, str]]:
         line = line.strip()
         if not line or line.startswith("#") or "#" not in line:
             continue
-        alias, wxid = line.split("#", 1)
-        alias, wxid = alias.strip(), wxid.strip()
+        # 兼容两种格式：wxid#备注 或 备注#wxid
+        parts = line.split("#", 1)
+        part_a, part_b = parts[0].strip(), parts[1].strip()
+        if part_a.startswith("wxid_"):
+            alias, wxid = part_b, part_a
+        else:
+            alias, wxid = part_a, part_b
         if alias and wxid:
             accounts.append((alias, wxid))
     return accounts
@@ -554,14 +547,14 @@ def process_account(alias: str, wxid: str, tokens_cache: Dict[str, Dict[str, str
 
 def push_notification(success_count: int, total: int) -> None:
     try:
-        notify_send("雀巢三峡会员签到结果", "\n".join(log_messages))
+        notify_send("雀巢健康科学会员签到结果", "\n".join(log_messages))
         print("消息推送完成")
     except Exception as exc:
         print(f"推送异常：{exc}")
 
 
 def main() -> None:
-    print("雀巢三峡会员小程序每日签到")
+    print("雀巢健康科学会员小程序每日签到")
     print(f"运行时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     accounts = parse_accounts()
