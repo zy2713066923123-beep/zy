@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-青龙脚本：雀巢三峡会员小程序每日签到
+青龙脚本：雀巢健康科学会员中心小程序每日签到
 
 环境变量：
   WX_ID           必填，格式：别名#wxid，多账号换行 / & 分隔
@@ -152,27 +152,46 @@ def is_activity_success(data: Optional[dict]) -> bool:
 
 
 def get_code(wxid: str) -> Optional[str]:
-    if not WX_CODE_API:
+    if not WECHAT_SERVER:
         log("未配置 WECHAT_SERVER，无法通过 wxid 获取微信 code")
         return None
 
-    payload = {"wxid": wxid, "appid": WX_APP_ID}
-    data = request_json("POST", WX_CODE_API, json=payload)
-    if not data:
-        return None
+    actual_wxid = str(wxid).split('#')[0].strip()
+    endpoints = [
+        "/api/v1/wx/app/get/code",
+        "/api/v1/wx/app/get/code/",
+        "/api/v1/wx/get/code",
+    ]
 
-    success = data.get("Success")
-    if success is None:
-        success = data.get("success")
-    if success is not True:
-        log(f"获取 code 失败：{data.get('Message') or data.get('message') or data}")
-        return None
+    for endpoint in endpoints:
+        url = f"{WECHAT_SERVER}{endpoint}"
+        payload = {"wxid": actual_wxid, "appid": WX_APP_ID}
+        try:
+            resp = requests.post(url, json=payload, timeout=15)
+            result = resp.json()
+        except Exception as exc:
+            log(f"请求 {endpoint} 异常：{exc}")
+            continue
 
-    code = (data.get("Data") or data.get("data") or {}).get("code")
-    if not code:
-        log(f"获取 code 成功但未找到 Data.code：{data}")
-        return None
-    return code
+        # 多种方式提取 code
+        code = result.get("code")
+        if not code and isinstance(result.get("data"), dict):
+            code = result["data"].get("code")
+        if not code and isinstance(result.get("Data"), dict):
+            code = result["Data"].get("code")
+        if not code and isinstance(result.get("Data"), str):
+            code = result["Data"]
+        if not code and isinstance(result.get("data"), str):
+            code = result["data"]
+
+        if isinstance(code, str) and len(code) > 5:
+            return code
+
+        # 记录最后一次失败原因
+        msg = result.get("Message") or result.get("message") or result.get("msg") or ""
+        log(f"获取 code 失败 ({endpoint})：{msg or result}")
+
+    return None
 
 
 def login_with_code(code: str) -> Optional[dict]:
