@@ -459,26 +459,44 @@ class Task {
     }
 
     async loginByWxCode() {
-        const checkData = {
-            appId: MINI_APP_ID,
-            thirdType: "WX_APPLET",
-            fingerprint: "",
-            authCode: await this.getLoginCode(),
-        };
-        const check = await this.miniPost(`${BASE_HOST}/mine/${API_VERSION}/publicApi/login/checkLoginType`, checkData);
-        const loginData = {
-            appId: MINI_APP_ID,
-            authCode: await this.getLoginCode(),
-            isNew: false,
-            thirdType: "WX_APPLET",
-            fingerprint: "",
-            ticket: check?.ticket || "",
-        };
-        const login = await this.miniPost(`${BASE_HOST}/mine/${API_VERSION}/publicApi/login/loginByMiniApp`, loginData);
-        this.applyToken(login);
-        if (!this.token) throw new Error(`登录响应未返回 token: ${JSON.stringify(login)}`);
-        this.saveCachedToken();
-        $.log(`账号[${this.index}] 登录成功: token=${shortValue(this.token)} lmid=${shortValue(this.lmid)}`);
+        const maxRetry = 2;
+        for (let attempt = 1; attempt <= maxRetry; attempt++) {
+            try {
+                const checkData = {
+                    appId: MINI_APP_ID,
+                    thirdType: "WX_APPLET",
+                    fingerprint: "",
+                    authCode: await this.getLoginCode(),
+                };
+                $.log(`账号[${this.index}] 第${attempt}次登录: 获取checkLoginType code成功`);
+                const check = await this.miniPost(`${BASE_HOST}/mine/${API_VERSION}/publicApi/login/checkLoginType`, checkData);
+                $.log(`账号[${this.index}] 第${attempt}次登录: check完成, ticket=${check?.ticket ? check.ticket.slice(0, 16) + '...' : '无'}`);
+
+                const loginData = {
+                    appId: MINI_APP_ID,
+                    authCode: await this.getLoginCode(),
+                    isNew: false,
+                    thirdType: "WX_APPLET",
+                    fingerprint: "",
+                    ticket: check?.ticket || "",
+                };
+                $.log(`账号[${this.index}] 第${attempt}次登录: 获取loginByMiniApp code成功`);
+                const login = await this.miniPost(`${BASE_HOST}/mine/${API_VERSION}/publicApi/login/loginByMiniApp`, loginData);
+                this.applyToken(login);
+                if (!this.token) throw new Error(`登录响应未返回 token: ${JSON.stringify(login)}`);
+                this.saveCachedToken();
+                $.log(`账号[${this.index}] 登录成功: token=${shortValue(this.token)} lmid=${shortValue(this.lmid)}`);
+                return;
+            } catch (e) {
+                $.log(`账号[${this.index}] 第${attempt}/${maxRetry}次登录失败: ${e.message || e}`);
+                if (attempt < maxRetry) {
+                    $.log(`账号[${this.index}] 等待3秒后重试...`);
+                    await new Promise(r => setTimeout(r, 3000));
+                } else {
+                    throw e;
+                }
+            }
+        }
     }
 
     findActivityNo(payload) {
