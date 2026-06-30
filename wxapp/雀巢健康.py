@@ -4,7 +4,7 @@
 青龙脚本：雀巢健康科学会员中心小程序每日签到
 
 环境变量：
-  WX_ID           必填，格式：别名#wxid，多账号换行 / & 分隔
+  WX_ID           必填，格式：wxid#别名（兼容别名#wxid），多账号换行 / & 分隔
   WECHAT_SERVER   必填，用于通过 wxid 获取 wx.login code
   NESTLE_SANXIA_MONSTER_TASK 可选，默认开启，0/false/off 关闭小怪兽限定任务
   NESTLE_SANXIA_MONSTER_REGISTER
@@ -559,7 +559,7 @@ def main() -> None:
 
     accounts = parse_accounts()
     if not accounts:
-        print("未找到账号变量，请配置环境变量 WX_ID，格式：别名#wxid")
+        print("未找到账号变量，请配置环境变量 WX_ID，格式：wxid#别名")
         return
 
     print(f"账号数量：{len(accounts)}")
