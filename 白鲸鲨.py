@@ -8,7 +8,7 @@ APP抓包
 1.微信搜索白鲸回收,然后微信授权手机登陆。注:登陆后不需要绑定手机如绑定就会同步APP数据,不绑定手机可以撸实物,绑定可以同步APP撸现金需知晓。
 2.打开抓包软件抓https://www.52bjy.com/api/app/user.php此域名下的username和auth的2个参数跟APP的CK参数有区别切勿混淆。
 *提交格式:备注#username#auth"""
-import requests,json,re,os,sys,time,random,datetime,threading,execjs,hashlib,base64,urllib3,certifi
+import requests,json,re,os,sys,time,random,datetime,threading,hashlib,base64,urllib3,certifi
 from urllib.parse import quote
 retrycount = 1
 environ = "bjhs"

@@ -6,7 +6,7 @@
 环境变量mpcbh=备注#auth_token
 #小程序://毛铺草本荟/lxJAUyTkGwBivyj
 """
-import requests, json, re, os, sys, time, random, datetime, threading, execjs, hashlib, base64, urllib3, certifi
+import requests, json, re, os, sys, time, random, datetime, threading, hashlib, base64, urllib3, certifi
 retrycount = 1 
 environ = "mpcbh"
 name = "꧁༺ 毛铺༒草本 ༻꧂"
