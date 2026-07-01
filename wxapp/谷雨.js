@@ -94,9 +94,14 @@ class Task {
             $.log(`账号[${this.index}] 获取用户Token失败❌`)
             return
         }
-        // 如果customerId为空，尝试获取用户详情
+        // 如果customerId为空，尝试获取或注册用户
         if (!this.customerId) {
-            await this.getCustomerInfo()
+            await this.ensureCustomerId()
+        }
+        if (!this.customerId) {
+            $.log(`账号[${this.index}] 无法获取用户ID(可能是未注册)，跳过签到❌`)
+            await this.getUserPoints()
+            return
         }
         await this.signIn()
         await this.getUserPoints()
@@ -201,6 +206,58 @@ class Task {
 
         return axios.request(options)
     }
+    async ensureCustomerId() {
+        // 方法1：尝试获取用户详情（原逻辑）
+        await this.getCustomerInfo()
+        if (this.customerId) return
+
+        // 方法2：尝试通过 openId 查询/注册用户
+        if (this.openId) {
+            $.log(`🌸账号[${this.index}] 尝试通过openId查询用户信息...`)
+            try {
+                let options = {
+                    method: 'POST',
+                    url: `https://mall-mobile-v6.vecrp.com/mobile/customer/getByOpenId`,
+                    headers: {},
+                    data: { openId: this.openId, shopId: '100186753' }
+                }
+                let { data: result } = await this.request(options)
+                if (result?.success && result.result?.customerId) {
+                    this.customerId = result.result.customerId
+                    $.log(`🌸账号[${this.index}] 通过openId获取到用户ID:${this.customerId}`)
+                    return
+                }
+            } catch (e) {
+                $.log(`🌸账号[${this.index}] openId查询失败:${e.message || e}`)
+            }
+
+            // 方法3：尝试自动注册
+            $.log(`🌸账号[${this.index}] 尝试自动注册用户...`)
+            try {
+                let options = {
+                    method: 'POST',
+                    url: `https://mall-mobile-v6.vecrp.com/mobile/customer/registerOrGet`,
+                    headers: {},
+                    data: {
+                        openId: this.openId,
+                        shopId: '100186753',
+                        appid: 'wxda948f3be0afc375',
+                        customerName: `谷雨会员_${this.openId.slice(-6)}`
+                    }
+                }
+                let { data: result } = await this.request(options)
+                if (result?.success && result.result?.customerId) {
+                    this.customerId = result.result.customerId
+                    $.log(`🌸账号[${this.index}] 注册成功，获取到用户ID:${this.customerId}`)
+                    return
+                }
+                $.log(`🌸账号[${this.index}] 自动注册结果:${JSON.stringify(result?.result || result)}`)
+            } catch (e) {
+                $.log(`🌸账号[${this.index}] 自动注册失败:${e.message || e}`)
+            }
+        }
+    }
+
     async getCustomerInfo() {
         // 尝试获取用户详情接口，可能能刷新customerId
         try {
