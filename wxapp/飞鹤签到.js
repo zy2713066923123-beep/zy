@@ -295,7 +295,7 @@ class Task {
 
 !(async () => {
     $.checkEnv(ckName);
-    if (!$.userCount) return;
+    if (!$.userList.length) return;
 
     for (const account of $.userList) {
         const task = new Task(account);
