@@ -342,18 +342,16 @@ class Task {
     }
 }
 
-// 暂停主运行：当前七彩虹后端首次换取业务 Token 需要微信手机号授权 code，
-// 现有 wx_server 只能提供 wx.login code，恢复前不要自动执行任务。
-// !(async () => {
-//     await getNotice();
-//     $.checkEnv(ckName);
-//
-//     for (const user of $.userList) {
-//         await new Task(user).run();
-//     }
-// })()
-//     .catch((e) => console.log(e))
-//     .finally(() => $.done());
+(async () => {
+    await getNotice();
+    $.checkEnv(ckName);
+
+    for (const user of $.userList) {
+        await new Task(user).run();
+    }
+})()
+    .catch((e) => console.log(e))
+    .finally(() => $.done());
 
 async function getNotice() {
     try {
