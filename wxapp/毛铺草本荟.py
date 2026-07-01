@@ -1,15 +1,42 @@
 """
-每天跑之前需要打开小程序如果跑起来就是2积分就是黑号/黑号无解
-跑起来抽奖抽到现金显示待解锁需要购买码子去兑换
-购买码子地址:https://www.jcw6.cn/login.php
-本子支持所有功能任务+抽奖 CK有效期7天
-环境变量mpcbh=备注#auth_token
+青龙脚本：毛铺草本荟小程序每日签到 + 抽奖
+
+环境变量：
+  WX_ID           必填，格式：wxid#别名（兼容别名#wxid），多账号换行 / & 分隔
+  WECHAT_SERVER   必填，用于通过 wxid 获取 wx.login code
+
+定时建议：
+  15 8 * * *
 #小程序://毛铺草本荟/lxJAUyTkGwBivyj
 """
-import requests, json, re, os, sys, time, random, datetime, threading, hashlib, base64, urllib3, certifi
-retrycount = 1 
-environ = "mpcbh"
+import requests, json, re, os, sys, time, random, datetime, hashlib, base64
+
+try:
+    from notify import send as notify_send
+except ImportError:
+    def notify_send(title, content):
+        print(f"--- 通知 ---\n{title}\n{content}\n-------------")
+
+retrycount = 1
+environ = "WX_ID"
 name = "꧁༺ 毛铺༒草本 ༻꧂"
+WX_APPID = "wxefd0fe341e06b815"
+DEFAULT_WECHAT_SERVER = "http://127.0.0.1:8011"
+LOGIN_URL = "https://mpb.jingjiu.com/proxy-he/jp/api/loginauto"
+TOKEN_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mpcbh_wxid_tokens.json")
+MINI_REFERER = f"https://servicewechat.com/{WX_APPID}/741/page-frame.html"
+MINI_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 "
+    "MicroMessenger/7.0.20.1781(0x6700143B) NetType/WIFI "
+    "MiniProgramEnv/Windows WindowsWechat/WMPF WindowsWechat(0x63090a1b)XWEB/14185"
+)
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
 
 def calculate_appsign(data, auth_token, sign_secret, param_order):
     """计算appsign"""
@@ -30,6 +57,235 @@ def random_wait(min_sec=3, max_sec=8, print_log=False):
     if print_log:
         print(f"⏳ 随机等待 {wait_time} 秒...")
     time.sleep(wait_time)
+
+def split_multi(raw):
+    """拆分多账号变量，兼容换行、&、@。"""
+    return [item.strip() for item in re.split(r"[\n&@]+", raw or "") if item.strip()]
+
+def mask_text(value, left=3, right=3):
+    if not value:
+        return ""
+    if len(value) <= left + right:
+        return value
+    return value[:left] + "*****" + value[-right:]
+
+def parse_wxid_item(item):
+    """兼容 wxid#备注 和 备注#wxid 两种写法。"""
+    if "#" not in item:
+        return item.strip(), item.strip()
+    first, second = [x.strip() for x in item.split("#", 1)]
+    if second.startswith("wxid_") and not first.startswith("wxid_"):
+        return second, first
+    return first, second or first
+
+def build_code_url():
+    server = (os.environ.get("WECHAT_SERVER") or DEFAULT_WECHAT_SERVER).strip().rstrip("/")
+    if not server:
+        return ""
+    if server.endswith("/api/v1/wx/app/get/code"):
+        return server
+    return server + "/api/v1/wx/app/get/code"
+
+def extract_wx_code(data):
+    if not isinstance(data, dict):
+        return ""
+    nested = data.get("Data") or data.get("data") or {}
+    if isinstance(nested, dict) and nested.get("code"):
+        return str(nested.get("code"))
+    return str(data.get("code") or "")
+
+def load_token_cache():
+    if not os.path.exists(TOKEN_CACHE_FILE):
+        return {"accounts": {}}
+    try:
+        with open(TOKEN_CACHE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict) and isinstance(data.get("accounts"), dict):
+            return data
+        return {"accounts": {}}
+    except Exception as e:
+        print(f"⭕读取token缓存失败，将忽略缓存：{str(e)}")
+        return {"accounts": {}}
+
+def save_token_cache(cache):
+    try:
+        with open(TOKEN_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"⭕保存token缓存失败：{str(e)}")
+
+def decode_jwt_payload(token):
+    try:
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        return json.loads(base64.urlsafe_b64decode(payload.encode("utf-8")).decode("utf-8"))
+    except Exception:
+        return {}
+
+def token_expire_time(token):
+    payload = decode_jwt_payload(token)
+    try:
+        return int(payload.get("exp") or 0)
+    except Exception:
+        return 0
+
+def token_user_id(token):
+    payload = decode_jwt_payload(token)
+    return str(payload.get("user_id") or "")
+
+def get_cached_auth_token(cache, wxid):
+    record = (cache.get("accounts") or {}).get(wxid) or {}
+    token = record.get("auth_token") or ""
+    expires_at = int(record.get("expires_at") or token_expire_time(token) or 0)
+    if not token:
+        return ""
+    if expires_at and expires_at > int(time.time()) + 600:
+        expire_text = datetime.datetime.fromtimestamp(expires_at).strftime("%Y-%m-%d %H:%M:%S")
+        print(f"☁️使用缓存token：有效期至 {expire_text}")
+        return token
+    print("☁️缓存token已过期或无有效期，重新登录")
+    remove_cached_auth_token(cache, wxid, save=False)
+    return ""
+
+def save_cached_auth_token(cache, wxid, comment, auth_token):
+    cache.setdefault("accounts", {})[wxid] = {
+        "comment": comment,
+        "auth_token": auth_token,
+        "user_id": token_user_id(auth_token),
+        "expires_at": token_expire_time(auth_token),
+        "updated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    save_token_cache(cache)
+
+def remove_cached_auth_token(cache, wxid, save=True):
+    accounts = cache.setdefault("accounts", {})
+    if wxid in accounts:
+        accounts.pop(wxid, None)
+        if save:
+            save_token_cache(cache)
+
+def get_wx_code(wxid):
+    """通过微信协议中转服务器获取毛铺小程序 wx.login code。"""
+    code_url = build_code_url()
+    if not code_url:
+        print("⭕自动登录失败：未配置 WECHAT_SERVER")
+        return ""
+    try:
+        response = requests.post(
+            code_url,
+            headers={"Content-Type": "application/json"},
+            json={"wxid": wxid, "appid": WX_APPID},
+            timeout=15,
+        )
+        result = response.json()
+        success = result.get("Success")
+        if success is None:
+            success = result.get("success")
+        code = extract_wx_code(result)
+        if success is False or not code:
+            print(f"⭕获取微信code失败：{json.dumps(result, ensure_ascii=False)[:200]}")
+            return ""
+        return code
+    except Exception as e:
+        print(f"⭕获取微信code异常：{str(e)}")
+        return ""
+
+def build_login_system():
+    """按抓包补齐 loginauto 的 system 字段。"""
+    return {
+        "albumAuthorized": True,
+        "benchmarkLevel": -1,
+        "bluetoothEnabled": False,
+        "brand": "microsoft",
+        "cameraAuthorized": True,
+        "fontSizeSetting": 15,
+        "language": "zh_CN",
+        "locationAuthorized": True,
+        "locationEnabled": True,
+        "microphoneAuthorized": True,
+        "model": "microsoft",
+        "notificationAuthorized": True,
+        "notificationSoundEnabled": True,
+        "pixelRatio": 1,
+        "platform": "windows",
+        "power": 100,
+        "safeArea": {"bottom": 780, "height": 780, "left": 0, "right": 414, "top": 0, "width": 414},
+        "screenHeight": 780,
+        "screenWidth": 414,
+        "statusBarHeight": 20,
+        "system": "Windows 11 x64",
+        "theme": "light",
+        "version": "3.9.10",
+        "wifiEnabled": True,
+        "windowHeight": 780,
+        "windowWidth": 414,
+        "SDKVersion": "3.10.3",
+        "enableDebug": False,
+        "host": {"appId": "", "env": "WeChat"},
+        "appName": "wechat",
+        "devicePixelRatio": 1,
+    }
+
+def login_by_wxid(wxid, session):
+    """wxid -> wx.login code -> 毛铺 access_token。"""
+    code = get_wx_code(wxid)
+    if not code:
+        return ""
+    now_ts = int(datetime.datetime.now().timestamp())
+    login_data = {
+        "code": code,
+        "unionid": "",
+        "user_id": "",
+        "user_sources": "0",
+        "system": build_login_system(),
+        "itime": now_ts,
+        "isource": hashlib.md5(f"{wxid}{now_ts}{random.random()}".encode("utf-8")).hexdigest().upper(),
+    }
+    headers = {
+        "Accept": "*/*",
+        "Content-Type": "application/json",
+        "Referer": MINI_REFERER,
+        "User-Agent": MINI_UA,
+        "x-version": "0.0.1",
+        "xweb_xhr": "1",
+        "Authorization": "",
+    }
+    try:
+        response = session.post(
+            LOGIN_URL,
+            headers=headers,
+            data=json.dumps(login_data, ensure_ascii=False),
+            timeout=15,
+        )
+        result = response.json()
+        if result.get("code") != 0:
+            print(f"⭕自动登录失败：{result.get('message') or json.dumps(result, ensure_ascii=False)[:200]}")
+            return ""
+        token = ((result.get("data") or {}).get("access_token") or "").strip()
+        if not token:
+            print(f"⭕自动登录失败：响应缺少access_token {json.dumps(result, ensure_ascii=False)[:200]}")
+            return ""
+        print(f"☁️自动登录成功：token={token[:8]}...")
+        return token
+    except Exception as e:
+        print(f"⭕自动登录异常：{str(e)}")
+        return ""
+
+log_messages = []
+
+def log(msg):
+    print(msg)
+    log_messages.append(msg)
+
+def parse_accounts():
+    """优先读取 WX_ID 自动登录；同时保留手动 token 兼容。"""
+    accounts = []
+    raw_wxid = os.environ.get(environ, "")
+    for item in split_multi(raw_wxid):
+        wxid, comment = parse_wxid_item(item)
+        if wxid:
+            accounts.append({"mode": "wxid", "wxid": wxid, "comment": comment or wxid})
+    return accounts
 
 def daily_sign_in(auth_token, session):
     """每日签到"""
@@ -376,8 +632,8 @@ def run(auth_token, session):
     """执行单个账号的所有任务"""
     # 执行签到任务
     result = daily_sign_in(auth_token, session)
-    if "授权过期" in result:
-        return
+    if result and "授权过期" in result:
+        return "auth_expired"
     #------------活动-----------
     #好友帮帮
     random_wait()
@@ -414,40 +670,71 @@ def run(auth_token, session):
     # 查询最终积分
     points = query_user_points(auth_token, session)
     print(f"☁️当前积分：{points} 积分")
+    return "ok"
+
+def push_notification():
+    try:
+        notify_send("毛铺草本荟签到结果", "\n".join(log_messages))
+        print("消息推送完成")
+    except Exception as exc:
+        print(f"推送异常：{exc}")
 
 def main():
     global id,base_headers
-    if os.environ.get(environ):
-        ck = os.environ.get(environ)
-    else:
-        ck = ""
-        if ck == "":
-            print("⭕请设置变量")
-            sys.exit()
-    ck_run = ck.split('\n')
-    ck_run = [item for item in ck_run if item]
-    print(f"{' ' * 7}{name}\n\n")
-    print(f"-------- ☁️ 开 始  执 行 ☁️ --------")
+    accounts = parse_accounts()
+    if not accounts:
+        log(f"⭕请设置变量：{environ}=wxid#别名")
+        sys.exit()
+    log(f"{' ' * 7}{name}\n\n")
+    log(f"-------- ☁️ 开 始 执 行 ☁️ --------")
     base_headers = {
-        "content-length": "2",
         "content-type": "application/json",
         "x-version": "0.0.1",
-        "authorization": "",
+        "Authorization": "",
         "charset": "utf-8",
         "user-agent": "Mozilla/5.0 (Linux; Android 10; MI 8 Build/QKQ1.190828.002; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/138.0.7204.180 Mobile Safari/537.36 XWEB/1380327 MMWEBSDK/20250904 MMWEBID/6533 MicroMessenger/8.0.65.2960(0x28004151) WeChat/arm64 Weixin NetType/WIFI Language/zh_CN ABI/arm64 MiniProgramEnv/android",
     }
-    for i, ck_run_n in enumerate(ck_run):
+    token_cache = load_token_cache()
+    for i, account in enumerate(accounts):
         try:
             session = requests.session()
-            comment,auth_token = ck_run_n.strip().split("#", 1)
+            comment = account.get("comment") or f"账号{i + 1}"
+            used_cache = False
+            if account["mode"] == "wxid":
+                log(f"\n\n 账号 [{i + 1}/{len(accounts)}]:")
+                id = mask_text(comment)
+                log(f"☁️当前账号：{id}")
+                log(f"☁️登录方式：wxid自动登录")
+                auth_token = get_cached_auth_token(token_cache, account["wxid"])
+                used_cache = bool(auth_token)
+                if not auth_token:
+                    auth_token = login_by_wxid(account["wxid"], session)
+                    if auth_token:
+                        save_cached_auth_token(token_cache, account["wxid"], comment, auth_token)
+                if not auth_token:
+                    log("⭕账号跳过：自动登录未获取到auth_token")
+                    continue
+            else:
+                auth_token = account["auth_token"]
+                log(f"\n\n 账号 [{i + 1}/{len(accounts)}]:")
+                id = mask_text(comment)
+                log(f"☁️当前账号：{id}")
+                log(f"☁️登录方式：手动auth_token")
             base_headers["Authorization"] = auth_token
-            print(f"\n\n 账号 [{i + 1}/{len(ck_run)}]:")
-            id = comment[:3] + "*****" + comment[-3:] if len(comment) > 6 else comment
-            print(f"☁️当前账号：{id}")
-            run(auth_token, session)
+            run_status = run(auth_token, session)
+            if account["mode"] == "wxid" and run_status == "auth_expired":
+                log("☁️缓存/登录token已授权过期，清理缓存后重登一次")
+                remove_cached_auth_token(token_cache, account["wxid"])
+                if used_cache:
+                    auth_token = login_by_wxid(account["wxid"], session)
+                    if auth_token:
+                        save_cached_auth_token(token_cache, account["wxid"], comment, auth_token)
+                        base_headers["Authorization"] = auth_token
+                        run(auth_token, session)
         except Exception as e:
-            print(f"❌ 账号处理异常：{str(e)}")
-    print(f"\n\n-------- ☁️ 执 行  结 束 ☁️ --------\n\n")
+            log(f"❌ 账号处理异常：{str(e)}")
+    log(f"\n\n-------- ☁️ 执 行 结 束 ☁️ --------\n\n")
+    push_notification()
 
 
 if __name__ == '__main__':
