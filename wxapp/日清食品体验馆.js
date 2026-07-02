@@ -57,6 +57,13 @@ const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
 
 let ckName = "WX_ID";
 
+// 小游戏配置
+const GAME_PLAY = process.env.NISSIN_PLAY_GAME !== "0" && process.env.NISSIN_PLAY_GAME !== "false";
+const GAME_TIMES = parseInt(process.env.NISSIN_GAME_TIMES, 10) || 1;
+const GAME_SCORE = parseInt(process.env.NISSIN_GAME_SCORE, 10) || 3890;
+const GAME_DELAY = parseInt(process.env.NISSIN_GAME_DELAY, 10) || 3;
+const GAME_REFERER = "https://foodhall-prod.nissinfoodium.com.cn/";
+
 const wechat = new WeChatServer({
     url: process.env.WECHAT_SERVER || "http://192.168.6.222:8011",
     appid: MINI_APP_ID,
@@ -118,7 +125,7 @@ class Task {
         await this.getUser();
         await this.getSignInInfo();
         await this.doSign();
-        await this.enterGame();
+        await this.runGame();
     }
 
     getCachedToken() {
@@ -156,10 +163,11 @@ class Task {
         this.userId = data.userId || data.user_id || "";
     }
 
-    getHeaders(extra = {}) {
+    getHeaders(extra = {}, refererOverride) {
+        const referer = refererOverride || `https://servicewechat.com/${MINI_APP_ID}/${PAGE_VERSION}/page-frame.html`;
         const headers = {
             "User-Agent": USER_AGENT,
-            "Referer": `https://servicewechat.com/${MINI_APP_ID}/${PAGE_VERSION}/page-frame.html`,
+            "Referer": referer,
             "Accept": "application/json, text/plain, */*",
             ...extra,
         };
@@ -167,11 +175,11 @@ class Task {
         return headers;
     }
 
-    async request({ method = "GET", apiPath, data, params, skipToken = false }) {
+    async request({ method = "GET", apiPath, data, params, skipToken = false, refererOverride }) {
         const options = {
             method,
             url: `${API_BASE}${apiPath.startsWith("/") ? apiPath : `/${apiPath}`}`,
-            headers: this.getHeaders(method === "POST" ? { "Content-Type": "application/json" } : {}),
+            headers: this.getHeaders(method === "POST" ? { "Content-Type": "application/json" } : {}, refererOverride),
             timeout: 15000,
             validateStatus: () => true,
         };
@@ -300,52 +308,101 @@ class Task {
         }
     }
 
-    async enterGame() {
+    // ---- 小游戏相关方法 ----
+
+    async gameCount() {
+        return await this.request({ apiPath: "/game/count", refererOverride: GAME_REFERER });
+    }
+
+    async gameProp() {
         try {
-            const beforeTasks = await this.getTaskList();
-            const gameTask = beforeTasks.find((item) => item?.ruleType === "PLAY_GAME");
-            if (gameTask) {
-                $.log(`账号[${this.index}] 玩游戏任务: ${gameTask.complete ? "已完成" : "未完成"}`);
-            }
-
-            const gameConfig = await this.request({ apiPath: "/game/config" });
-            await this.request({
-                method: "POST",
-                apiPath: "/game/login",
-                data: {
-                    loginIp: "",
-                    loginLocation: "",
-                },
-            });
-            const playCount = await this.request({ apiPath: "/game/count" });
-            const gameUrl = `https://foodhall-prod.nissinfoodium.com.cn/game/index.html?version=${Date.now()}&token=${encodeURIComponent(this.token)}&user_id=${encodeURIComponent(this.userId || this.user.id || "")}&webViewHeight=800`;
-            const page = await axios.get(gameUrl, {
-                headers: {
-                    "User-Agent": USER_AGENT,
-                    "Referer": `https://servicewechat.com/${MINI_APP_ID}/${PAGE_VERSION}/page-frame.html`,
-                },
-                timeout: 15000,
-                validateStatus: () => true,
-            });
-            if (page.status >= 200 && page.status < 400) {
-                $.log(`账号[${this.index}] 已进入游戏: ${gameConfig?.shareTitle || "日清消消乐"} 剩余次数=${playCount ?? "未知"}`);
-            } else {
-                $.log(`账号[${this.index}] 进入游戏页面异常: HTTP ${page.status}`);
-            }
-
-            const afterTasks = await this.getTaskList();
-            const updatedGameTask = afterTasks.find((item) => item?.ruleType === "PLAY_GAME");
-            if (updatedGameTask) {
-                $.log(`账号[${this.index}] 玩游戏任务更新: ${updatedGameTask.complete ? "已完成" : "未完成"}`);
-            }
+            return await this.request({ apiPath: "/game/prop", refererOverride: GAME_REFERER });
         } catch (e) {
-            $.log(`账号[${this.index}] 进入游戏失败: ${e.message || e}`);
-            if (isTokenError(e)) this.removeCachedToken();
+            $.log(`账号[${this.index}] 查询游戏道具失败: ${e.message || e}`);
+            return null;
         }
+    }
+
+    async gameBegin() {
+        return await this.request({
+            method: "POST",
+            apiPath: "/game/begin",
+            data: { loginIp: "" },
+            refererOverride: GAME_REFERER,
+        });
+    }
+
+    async gameEnd(playId, score) {
+        return await this.request({
+            method: "POST",
+            apiPath: "/game/end",
+            data: { score, playId },
+            refererOverride: GAME_REFERER,
+        });
+    }
+
+    async runGame() {
+        if (!GAME_PLAY) {
+            $.log(`账号[${this.index}] 小游戏已关闭 (NISSIN_PLAY_GAME=0)`);
+            return;
+        }
+        $.log(`账号[${this.index}] ☼ ――――  小 游 戏  ―――― ☼`);
+
+        // 查询剩余次数
+        let remainCount = 0;
+        try {
+            const countData = await this.gameCount();
+            remainCount = countData?.count ?? countData?.num ?? countData?.remainCount ?? countData?.remainingCount ?? 0;
+            if (typeof remainCount !== "number") remainCount = 0;
+            let runTimes = Math.min(GAME_TIMES, remainCount);
+            if (remainCount <= 0) {
+                $.log(`账号[${this.index}] 小游戏次数: 0，跳过`);
+                return;
+            }
+            $.log(`账号[${this.index}] 小游戏剩余 ${remainCount} 次，本次执行 ${runTimes} 次`);
+        } catch (e) {
+            $.log(`账号[${this.index}] 查询游戏次数失败，按配置尝试执行: ${e.message || e}`);
+            var runTimes = GAME_TIMES;
+        }
+
+        // 查询道具
+        try {
+            const propData = await this.gameProp();
+            if (propData) $.log(`账号[${this.index}] 游戏道具: ${JSON.stringify(propData)}`);
+        } catch (e) {}
+
+        // 循环执行小游戏
+        for (var i = 1; i <= runTimes; i++) {
+            try {
+                const beginData = await this.gameBegin();
+                const playId = beginData?.playId || beginData?.id || beginData;
+                if (!playId) {
+                    $.log(`账号[${this.index}] 小游戏第${i}次开始失败: 未返回playId`);
+                    continue;
+                }
+                $.log(`账号[${this.index}] 小游戏第${i}次开始成功: playId=${playId}`);
+                if (GAME_DELAY > 0) await new Promise(r => setTimeout(r, GAME_DELAY * 1000));
+                const endData = await this.gameEnd(String(playId), GAME_SCORE);
+                const msg = endData?.msg || endData?.message || "成功";
+                $.log(`账号[${this.index}] 小游戏第${i}次提交: score=${GAME_SCORE}, ${msg}`);
+                await new Promise(r => setTimeout(r, 1000));
+            } catch (e) {
+                $.log(`账号[${this.index}] 小游戏第${i}次失败: ${e.message || e}`);
+            }
+        }
+    }
+
+    async enterGame() {
+        // 保留用于单独检查任务状态（runGame 中已包含实际游戏逻辑）
+        try {
+            const tasks = await this.getTaskList();
+            const gameTask = tasks.find((item) => item?.ruleType === "PLAY_GAME");
+            if (gameTask) $.log(`账号[${this.index}] 玩游戏任务: ${gameTask.complete ? "已完成" : "未完成"}`);
+        } catch (e) {}
     }
 }
 
-!(async () => {
+(async () => {
     $.checkEnv(ckName);
     for (const openid of $.userList) {
         await new Task(openid).run();
