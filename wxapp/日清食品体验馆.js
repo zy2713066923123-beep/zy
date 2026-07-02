@@ -60,8 +60,17 @@ let ckName = "WX_ID";
 // 小游戏配置
 const GAME_PLAY = process.env.NISSIN_PLAY_GAME !== "0" && process.env.NISSIN_PLAY_GAME !== "false";
 const GAME_TIMES = parseInt(process.env.NISSIN_GAME_TIMES, 10) || 1;
-const GAME_SCORE = parseInt(process.env.NISSIN_GAME_SCORE, 10) || 3890;
+const GAME_SCORE_MIN = parseInt(process.env.NISSIN_GAME_SCORE_MIN, 10) || 14600;
+const GAME_SCORE_MAX = parseInt(process.env.NISSIN_GAME_SCORE_MAX, 10) || 14999;
 const GAME_DELAY = parseInt(process.env.NISSIN_GAME_DELAY, 10) || 3;
+
+// 兼容旧版固定分数（优先使用 NISSIN_GAME_SCORE）
+function getGameScore() {
+    const fixedScore = parseInt(process.env.NISSIN_GAME_SCORE, 10);
+    if (fixedScore > 0) return fixedScore;
+    // 随机分数 [GAME_SCORE_MIN, GAME_SCORE_MAX]
+    return Math.floor(Math.random() * (GAME_SCORE_MAX - GAME_SCORE_MIN + 1)) + GAME_SCORE_MIN;
+}
 const GAME_REFERER = "https://foodhall-prod.nissinfoodium.com.cn/";
 
 const wechat = new WeChatServer({
@@ -256,8 +265,13 @@ class Task {
         try {
             const data = await this.request({ apiPath: "/auth/user/current" });
             this.user = data || {};
+            // 兼容多种字段名
+            const nick = data?.nickname || data?.nickName || data?.name || data?.memberName || "";
+            const phone = data?.mobile || data?.phone || data?.phoneNumber || "";
+            const uid = data?.id || data?.userId || data?.memberId || "";
+            $.log(`账号[${this.index}] 用户: ${nick || "未知"} ${maskPhone(phone) || ""} ID:${uid || "未知"}`);
+            if (uid) this.userId = String(uid);
             this.saveCachedToken();
-            $.log(`账号[${this.index}] 用户: ${data?.nickname || data?.name || ""} ${maskPhone(data?.mobile) || ""}`);
         } catch (e) {
             $.log(`账号[${this.index}] 查询用户失败: ${e.message || e}`);
             if (isTokenError(e)) this.removeCachedToken();
@@ -348,13 +362,32 @@ class Task {
         }
         $.log(`账号[${this.index}] ☼ ――――  小 游 戏  ―――― ☼`);
 
+        // 先登录游戏（这是获取次数的前提）
+        try {
+            const loginRes = await this.request({
+                method: "POST",
+                apiPath: "/game/login",
+                data: { loginIp: "", loginLocation: "" },
+                refererOverride: GAME_REFERER,
+            });
+            $.log(`账号[${this.index}] 游戏登录成功: ${JSON.stringify(loginRes)}`);
+        } catch (e) {
+            $.log(`账号[${this.index}] 游戏登录失败: ${e.message || e}`);
+        }
+
         // 查询剩余次数
         let remainCount = 0;
+        let runTimes = GAME_TIMES;  // 声明在 try 外面，确保 for 循环能访问
         try {
             const countData = await this.gameCount();
-            remainCount = countData?.count ?? countData?.num ?? countData?.remainCount ?? countData?.remainingCount ?? 0;
+            // /game/count 可能返回纯数字(如 1) 或对象({ count: 1 })
+            if (typeof countData === "number") {
+                remainCount = countData;
+            } else {
+                remainCount = countData?.count ?? countData?.num ?? countData?.remainCount ?? countData?.remainingCount ?? 0;
+            }
             if (typeof remainCount !== "number") remainCount = 0;
-            let runTimes = Math.min(GAME_TIMES, remainCount);
+            runTimes = Math.min(GAME_TIMES, remainCount);
             if (remainCount <= 0) {
                 $.log(`账号[${this.index}] 小游戏次数: 0，跳过`);
                 return;
@@ -362,7 +395,6 @@ class Task {
             $.log(`账号[${this.index}] 小游戏剩余 ${remainCount} 次，本次执行 ${runTimes} 次`);
         } catch (e) {
             $.log(`账号[${this.index}] 查询游戏次数失败，按配置尝试执行: ${e.message || e}`);
-            var runTimes = GAME_TIMES;
         }
 
         // 查询道具
@@ -382,9 +414,10 @@ class Task {
                 }
                 $.log(`账号[${this.index}] 小游戏第${i}次开始成功: playId=${playId}`);
                 if (GAME_DELAY > 0) await new Promise(r => setTimeout(r, GAME_DELAY * 1000));
-                const endData = await this.gameEnd(String(playId), GAME_SCORE);
+                const score = getGameScore();
+                const endData = await this.gameEnd(String(playId), score);
                 const msg = endData?.msg || endData?.message || "成功";
-                $.log(`账号[${this.index}] 小游戏第${i}次提交: score=${GAME_SCORE}, ${msg}`);
+                $.log(`账号[${this.index}] 小游戏第${i}次提交: score=${score}, ${msg}`);
                 await new Promise(r => setTimeout(r, 1000));
             } catch (e) {
                 $.log(`账号[${this.index}] 小游戏第${i}次失败: ${e.message || e}`);
