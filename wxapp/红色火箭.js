@@ -723,7 +723,7 @@ async function doRoeReward(session, wxid, cache, cacheKey, activityEntry = null)
 
     // 从活动内容中提取指数代码
     const skipLink = activity.skipLink || '';
-    const codeMatch = skipLink.match(/code=([A-Z0-9.]+)/);
+    const codeMatch = skipLink.match(/[?&]code=([^&]+)/i);
     const securityCode = codeMatch ? codeMatch[1] : '930707.CSI';
     log('  📊 指数: ' + securityCode);
 
@@ -1339,7 +1339,7 @@ async function main() {
         const pendingRedPacketAmount = account.pendingRedPacketAmount || 0;
         const claimedAmount = account.claimedAmount || 0;
         totalClaimed += claimedAmount;
-        log('当前账号: ' + display + ' 当前积分: ' + currentPoint + ' 总获得红包:' + formatMoney(redPacketAmount) + '元 未领红包: ' + formatMoney(pendingRedPacketAmount) + '元 本次提现: ' + formatMoney(claimedAmount) + '元');
+        log('当前账号: ' + display + ' 当前积分: ' + currentPoint + ' 当前总获得红包:' + formatMoney(redPacketAmount) + '元 当前未领红包: ' + formatMoney(pendingRedPacketAmount) + '元 本次自动提现: ' + formatMoney(claimedAmount) + '元');
     }
     if (totalClaimed > 0) {
         log('\n💰 全部账号本次自动提现合计: ' + formatMoney(totalClaimed) + '元');
