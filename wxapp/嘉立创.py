@@ -28,6 +28,18 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
+# ===================== 通知推送 =====================
+try:
+    from notify import send as notify_send
+except ImportError:
+    def notify_send(title, content):
+        print(f"--- 通知 ---\n{title}\n{content}\n-------------")
+
+# 日志收集
+log_lines = []
+SCRIPT_NAME = "JLC 嘉立创签到"
+# ===================================================
+
 # ===================== 手动调试开关 =====================
 DEBUG = False
 DEBUG_ENV = {
@@ -315,12 +327,11 @@ def get_doudou_total(s, token, secret) -> Dict[str, Any]:
 
 
 def try_send_notify(title: str, content: str) -> None:
-    """青龙通知"""
+    """青龙通知（兼容）"""
     try:
-        from notify import send  # type: ignore
-        send(title, content)
+        notify_send(title, content)
     except Exception as e:
-        print(f"（未检测到 notify.py 或推送失败：{e}，已跳过推送）")
+        print(f"（推送失败：{e}）")
 
 
 def format_line(ok: bool, text: str) -> str:
@@ -428,69 +439,60 @@ def run_one_account(idx: int, remark: str, token: str, secret: str) -> Tuple[boo
 
 
 def main() -> int:
+    global log_lines
+    
     accounts = parse_accounts()
-
-    all_logs: List[str] = []
-    push_lines: List[str] = []
     any_fail = False
 
-    all_logs.append("============ JLC 签到 ============")
-    all_logs.append(f"账号数量：{len(accounts)}")
-    all_logs.append("---------------------------------")
+    log_lines.append(f"\n{' ' * 5}{SCRIPT_NAME}")
+    log_lines.append("-------- 开 始 执 行 --------")
+    log_lines.append(f"账号数量：{len(accounts)}")
+    print(f"\n{' ' * 5}{SCRIPT_NAME}")
+    print("-------- 开 始 执 行 --------")
+    print(f"账号数量：{len(accounts)}")
 
     for idx, acc in enumerate(accounts, start=1):
         remark = acc["remark"]
+
+        log_lines.append(f"\n📋 账号 [{idx}/{len(accounts)}]")
+        log_lines.append(f"📋 当前账号：{remark or f'账号{idx}'}")
+        print(f"\n📋 账号 [{idx}/{len(accounts)}]")
+        print(f"📋 当前账号：{remark or f'账号{idx}'}")
 
         # wxid 模式：先用微信协议服务登录换取 token
         if acc.get("mode") == "wxid":
             try:
                 token, secret = get_token_for_account(acc["wxid"], remark)
+                log_lines.append("✅ 登录成功")
             except Exception as e:
                 any_fail = True
-                all_logs.append(format_line(False, f"[{remark}] 登录失败: {e}"))
-                all_logs.append("---------------------------------")
-                push_lines.append(f"{remark}：登录失败")
+                log_lines.append(format_line(False, f"❌ 登录失败: {e}"))
+                print(format_line(False, f"❌ 登录失败: {e}"))
                 if idx < len(accounts):
                     time.sleep(2)
                 continue
         else:
             token, secret = acc["token"], acc["secret"]
+            log_lines.append("📌 手动模式，跳过登录")
 
         ok, log_text, res = run_one_account(idx, remark, token, secret)
-        all_logs.append(log_text)
-        all_logs.append("---------------------------------")
+        log_lines.append(log_text)
 
-        # 推送摘要
-        if ok:
-            total = res.get("total")
-            gain_signin = res.get("gain_signin")
-            gain_day7 = res.get("gain_day7")
-
-            gained_parts = []
-            if gain_signin is not None:
-                gained_parts.append(f"+{gain_signin}")
-            if gain_day7 is not None:
-                gained_parts.append(f"+{gain_day7}(第7天)")
-
-            if gained_parts:
-                push_lines.append(f"{remark}：{' '.join(gained_parts)}；总豆豆 {total}")
-            else:
-                push_lines.append(f"{remark}：已签到/无需重复；总豆豆 {total}")
-        else:
+        if not ok:
             any_fail = True
-            push_lines.append(f"{remark}：失败（看日志）")
 
         # 账号间延迟
         if idx < len(accounts):
             time.sleep(2)
 
-    final_log = "\n".join(all_logs)
-    print(final_log)
+    log_lines.append("\n-------- 执 行 结 束 --------")
+    print("\n-------- 执 行 结 束 --------")
 
-    # 推送
-    title = "JLC 签到结果"
-    content = "\n".join(push_lines)
-    try_send_notify(title, content)
+    # 推送完整日志
+    try:
+        notify_send(f"{SCRIPT_NAME} 运行日志", "\n".join(log_lines))
+    except Exception:
+        pass
 
     return 1 if any_fail else 0
 
