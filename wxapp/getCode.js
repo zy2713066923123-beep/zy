@@ -373,11 +373,17 @@ class WechatAdapter {
                 
                 const result = r.data;
                 
-                let code = result?.code ||
-                          (typeof result?.data === 'object' ? result.data.code : null) ||
-                          (typeof result?.Data === 'object' ? result.Data.code : null) ||
-                          (typeof result?.data === 'string' ? result.data : null) ||
-                          (typeof result?.Data === 'string' ? result.Data : null);
+                // 防御性检查：result 为 null/undefined 时直接跳过
+                if (!result || typeof result !== 'object') {
+                    console.log(`[牛子] 响应数据无效(非对象): ${JSON.stringify(result)}`);
+                    continue;
+                }
+                
+                let code = result.code ||
+                          (typeof result.data === 'object' ? result.data.code : null) ||
+                          (typeof result.Data === 'object' ? result.Data.code : null) ||
+                          (typeof result.data === 'string' ? result.data : null) ||
+                          (typeof result.Data === 'string' ? result.Data : null);
                 
                 if (code && typeof code === 'string' && code.length > 5) return code;
                 
@@ -577,6 +583,7 @@ class WeChatCodeGetter {
     /**
      * 获取单个账号的code（支持双协议fallback）
      * 优先使用主适配器，失败后自动切换到备用适配器重试
+     * 如果没有预配置备用适配器，会尝试动态创建应用宝适配器
      */
     async getAppletCode(appId, identifier) {
         // 先尝试主适配器（牛子）
@@ -584,7 +591,7 @@ class WeChatCodeGetter {
             const code = await this.primaryAdapter.getCode(identifier, appId);
             return code;
         } catch (primaryError) {
-            // 如果有备用适配器，尝试备用
+            // 1. 优先使用已配置的备用适配器
             if (this.fallbackAdapter) {
                 console.log(`[getCode] ⚠ 主服务获取失败，切换到备用服务重试...`);
                 try {
@@ -599,7 +606,34 @@ class WeChatCodeGetter {
                     );
                 }
             }
-            // 没有备用，直接抛出原错误
+
+            // 2. 动态 fallback：即使初始化时应用宝检测失败，运行时再尝试一次
+            const isPrimaryWechat = this.primaryAdapter instanceof WechatAdapter;
+            if (isPrimaryWechat) {
+                console.log(`[getCode] ⚠ 牛子服务失败，动态尝试应用宝服务...`);
+                try {
+                    const dynamicYyb = new YYBAdapter(this.yybServer);
+                    const yybHealthOk = await dynamicYyb.healthCheck();
+                    
+                    if (yybHealthOk) {
+                        console.log(`[getCode] ✓ 应用宝服务可用，切换获取code`);
+                        const code = await dynamicYyb.getCode(identifier, appId);
+                        console.log(`[getCode] ✓ 应用宝获取成功`);
+                        
+                        // 缓存成功的服务实例供后续使用
+                        if (!this.fallbackAdapter) {
+                            this.fallbackAdapter = dynamicYyb;
+                        }
+                        return code;
+                    } else {
+                        console.log(`[getCode] ✗ 应用宝服务不可用`);
+                    }
+                } catch (dynamicError) {
+                    console.log(`[getCode] ✗ 应用宝动态请求失败: ${dynamicError.message}`);
+                }
+            }
+
+            // 所有方式都失败
             throw primaryError;
         }
     }
