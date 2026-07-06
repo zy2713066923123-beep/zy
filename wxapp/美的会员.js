@@ -1,3 +1,5 @@
+// cron: 12 11 * * *
+// cron: 56 21 * * *
 /**
  * cron 27 19 * * *  wx_midea.js
  * Show:每天运行一次

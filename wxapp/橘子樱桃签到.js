@@ -1,3 +1,5 @@
+// cron: 40 10 * * *
+// cron: 48 19 * * *
 
 class Env {
     constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; this.logs = []; const originalLog = console.log; console.log = (...args) => { this.logs.push(args.join(" ")); originalLog.apply(console, args); }; }
@@ -30,6 +32,8 @@ WX_ID 格式：
 */
 
 
+const { getSingleCode } = require('./getCode.js');
+const getWxCode = (wxid, appid) => getSingleCode(appid, String(wxid).split('#')[0].trim());
 const $ = new Env("橘子樱桃微信小程序签到");
 const axios = require("axios");
 const fs = require("fs");
@@ -191,29 +195,9 @@ class Task {
         return result.data;
     }
 
+    /** 通过 getCode.js 统一接口获取微信 login code */
     async getWxCode() {
-        const wxServerUrl = (process.env.WECHAT_SERVER || "http://192.168.6.222:8011").replace(/\/+$/, "");
-        const endpoints = ['/api/v1/wx/app/get/code', '/api/v1/wx/app/get/code/', '/api/v1/wx/get/code'];
-        let lastError = null;
-        for (const endpoint of endpoints) {
-            try {
-                const { status, data } = await axios.post(
-                    wxServerUrl + endpoint,
-                    { appid: MINI_APP_ID, wxid: this.openid || this.account || this.wcsid || this.raw || "" },
-                    {
-                        headers: { "Content-Type": "application/json", "Accept": "application/json" },
-                        timeout: 15000,
-                        validateStatus: () => true,
-                    }
-                );
-                const code = data?.code || data?.data?.code || data?.Data?.code || (typeof data?.Data === 'string' ? data.Data : '') || (typeof data?.data === 'string' ? data.data : '') || "";
-                if (typeof code === 'string' && code.length > 5) return code;
-                lastError = new Error(`无 code：${JSON.stringify(data)}`);
-            } catch (error) {
-                lastError = error;
-            }
-        }
-        throw new Error(`获取微信 code 失败：${lastError ? lastError.message : '未知错误'}`);
+        return getSingleCode(MINI_APP_ID, this.openid);
     }
 
 

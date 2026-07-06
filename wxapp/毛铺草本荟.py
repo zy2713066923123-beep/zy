@@ -1,3 +1,6 @@
+# cron: 19 9 * * *
+# cron: 52 14 * * *
+
 """
 青龙脚本：毛铺草本荟小程序每日签到 + 抽奖
 
@@ -10,6 +13,7 @@
 #小程序://毛铺草本荟/lxJAUyTkGwBivyj
 """
 import requests, json, re, os, sys, time, random, datetime, hashlib, base64
+from getCode import get_single_code
 
 try:
     from notify import send as notify_send
@@ -79,12 +83,8 @@ def parse_wxid_item(item):
     return first, second or first
 
 def build_code_url():
-    server = (os.environ.get("WECHAT_SERVER") or DEFAULT_WECHAT_SERVER).strip().rstrip("/")
-    if not server:
-        return ""
-    if server.endswith("/api/v1/wx/app/get/code"):
-        return server
-    return server + "/api/v1/wx/app/get/code"
+    """已废弃：现使用 getCode.py 统一接口"""
+    return ""
 
 def extract_wx_code(data):
     if not isinstance(data, dict):
@@ -165,27 +165,10 @@ def remove_cached_auth_token(cache, wxid, save=True):
             save_token_cache(cache)
 
 def get_wx_code(wxid):
-    """通过微信协议中转服务器获取毛铺小程序 wx.login code。"""
-    code_url = build_code_url()
-    if not code_url:
-        print("⭕自动登录失败：未配置 WECHAT_SERVER")
-        return ""
+    """通过 getCode.py 统一接口获取毛铺小程序 wx.login code。"""
     try:
-        response = requests.post(
-            code_url,
-            headers={"Content-Type": "application/json"},
-            json={"wxid": wxid, "appid": WX_APPID},
-            timeout=15,
-        )
-        result = response.json()
-        success = result.get("Success")
-        if success is None:
-            success = result.get("success")
-        code = extract_wx_code(result)
-        if success is False or not code:
-            print(f"⭕获取微信code失败：{json.dumps(result, ensure_ascii=False)[:200]}")
-            return ""
-        return code
+        code = get_single_code(WX_APPID, wxid)
+        return code if code else ""
     except Exception as e:
         print(f"⭕获取微信code异常：{str(e)}")
         return ""

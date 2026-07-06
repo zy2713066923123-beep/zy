@@ -1,3 +1,6 @@
+// cron: 6 11 * * *
+// cron: 32 21 * * *
+
 /**
  * 红色火箭（华泰基金指慧家）
  *
@@ -9,6 +12,8 @@
 
 'use strict';
 
+const { getSingleCode } = require('./getCode.js');
+const getWxCode = (wxid, appid) => getSingleCode(appid, String(wxid).split('#')[0].trim());
 const axios = require('axios');
 const fs = require('fs');
 const pathMod = require('path');
@@ -319,12 +324,7 @@ async function apiRequest(method, url, data, token, encryptVer, openId, userId, 
 }
 
 // ==================== 微信登录 ====================
-async function getWxCode(wxid) {
-    if (!WECHAT_SERVER) throw new Error('未设置 WECHAT_SERVER');
-    const resp = await axios.post(WECHAT_SERVER + '/api/v1/wx/app/get/code', { wxid, appid: APPID });
-    if (resp.data?.Code === 0 && resp.data?.Data?.code) return resp.data.Data.code;
-    throw new Error('wx.login失败: ' + JSON.stringify(resp.data || resp));
-}
+// 使用 getCode.js 统一接口
 
 // ==================== 业务逻辑 ====================
 
@@ -912,11 +912,8 @@ async function resolveH5Openid(wxid, ticketCode, cache, cacheKey) {
     if (!wxid || !WECHAT_SERVER || !ticketCode) return '';
 
     try {
-        // 1. 通过桥接服务获取 H5 公众号 code
-        const codeResp = await axios.post(WECHAT_SERVER + '/api/v1/wx/app/get/code', {
-            wxid, appid: H5_OAUTH_APPID
-        });
-        const code = codeResp.data?.Data?.code || codeResp.data?.data?.code || '';
+        // 1. 通过 getCode.js 统一接口获取 H5 公众号 code
+        const code = await getSingleCode(H5_OAUTH_APPID, String(wxid).split('#')[0].trim());
         if (!code) {
             if (debug) log('  ⚠️ 桥接服务未返回H5 code');
             return '';

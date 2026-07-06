@@ -1,18 +1,26 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-微信小程序登录Code获取模块
-用于通过微信iPad协议接口获取小程序登录Code值
-模块作者：3iXi
-创建时间：2025/07/04
-修改时间：2025/08/08
-！！需要先搭建WeChatPadPro、iwechat或牛子协议才能使用此模块！！
+微信小程序登录Code获取模块（双协议支持）
+支持两种服务：
+  1) Wechat (牛子协议) - 微信iPad/iPhone协议服务
+  2) YYBServer (应用宝) - yyb_go 微信扫码代理服务
+
 环境变量：
-    WECHAT_SERVER: 协议服务IP地址和端口
-    ADMIN_KEY: 与搭建时设置的ADMIN_KEY一致（仅WeChatPadPro或iwechat需要，牛子协议不需要）
-    WX_ID: 可选，指定要获取Code的微信账号ID，多个用&分隔
-           对应iwechat接口的wx_id字段或WeChatPadPro接口的deviceId字段或牛子协议的wxid字段
-           如果不设置则获取所有有效账号的Code
+    WECHAT_SERVER:  牛子协议服务地址（默认 http://192.168.6.222:8011）
+    YYB_SERVER:     应用宝服务地址（默认 http://127.0.0.1:8000）
+    SERVER_TYPE:    强制指定服务类型：wechat / yyb （不设则自动检测）
+    ADMIN_KEY:      牛子协议管理密钥（仅WeChatPadPro/iwechat需要）
+    WX_ID:          可选，指定要获取Code的微信账号ID
+
+使用方式：
+    # 自动检测模式（优先YYB，其次Wechat）
+    from getCode import get_single_code, get_wechat_codes
+    
+    code = get_single_code("wxd4185d00bf7e08ac", "wxid_xxx")
+    
+    # 或强制指定
+    os.environ["SERVER_TYPE"] = "wechat"
 """
 
 import os
@@ -21,295 +29,318 @@ import json
 import pathlib
 from typing import List, Dict, Tuple, Optional, Literal
 
-ProtocolType = Literal["WeChatPadPro", "iwechat", "Niuzi", "Unknown"]
+ProtocolType = Literal["Wechat", "YYB", "Unknown"]
 
+# ============================================================
+#  全局配置缓存（避免重复初始化检测）
+# ============================================================
+_config_cache: Dict = {}
 
-class WeChatCodeGetter:
-    """微信小程序Code获取模块"""
+# ============================================================
+#  YYB Server（应用宝）适配器
+# ============================================================
+
+class YYBAdapter:
+    """应用宝(yyb_go) 服务适配器"""
     
-    def __init__(self):
-        """初始化，获取环境变量和配置"""
-        wechat_server_env = os.getenv('WECHAT_SERVER') or 'http://192.168.6.222:8011'
-        self.wechat_server = wechat_server_env.rstrip('/')
-        self.admin_key = os.getenv('ADMIN_KEY')
-        self.wx_id_filter = os.getenv('WX_ID')
-        self.script_dir = pathlib.Path(__file__).parent.absolute()
-        self.env_check_file = self.script_dir / "env_check.json"
-        self.protocol_type: ProtocolType = "Unknown"
-
-        if not self.wechat_server.lower().startswith(('http://', 'https://')):
-            self.wechat_server = f"http://{self.wechat_server}"
+    def __init__(self, server_url: str):
+        self.server_url = server_url.rstrip('/')
+        self._accounts_cache = None
+        self._cache_time = 0
+    
+    def health_check(self) -> bool:
+        """健康检查"""
+        try:
+            r = requests.get(f"{self.server_url}/health", timeout=5)
+            return r.status_code == 200 and r.json().get("code") == 0
+        except Exception:
+            return False
+    
+    def get_accounts(self) -> List[Dict]:
+        """获取在线账号列表"""
+        try:
+            r = requests.get(f"{self.server_url}/accounts", timeout=15)
+            r.raise_for_status()
+            data = r.json()
             
-        self._determine_protocol_type()
-
-        self.target_wx_ids = []
-        if self.wx_id_filter:
-            self.target_wx_ids = [wx_id.strip() for wx_id in self.wx_id_filter.split('&') if wx_id.strip()]
-            print(f"检测到WX_ID环境变量，将筛选指定账号: {', '.join(self.target_wx_ids)}")
+            if data.get("code") != 0:
+                raise Exception(data.get("msg", "获取账号失败"))
+            
+            accounts = data.get("data", [])
+            if not isinstance(accounts, list):
+                raise Exception(f"返回格式错误: {type(accounts)}")
+            
+            # 只返回存活账号
+            valid = []
+            for acc in accounts:
+                status = str(acc.get("status", "")).lower()
+                if status in ("alive", "", "unknown"):
+                    valid.append({
+                        "wxid": acc.get("openid", ""),
+                        "openid": acc.get("openid", ""),
+                        "uin": acc.get("uin"),
+                        "nickname": acc.get("nickname"),
+                        "alias": acc.get("alias"),
+                        "avatar": acc.get("avatar"),
+                        "status": 1,
+                        "loginState": 1,
+                        "_ref": str(acc.get("id", "")) or acc.get("openid", ""),
+                    })
+            
+            return valid
+            
+        except requests.RequestException as e:
+            raise Exception(f"应用宝获取账号列表失败: {e}")
+        except json.JSONDecodeError:
+            raise Exception("应用宝账号列表响应格式错误")
     
-    def _determine_protocol_type(self):
-        """确定当前使用的协议服务类型"""
-        if self.env_check_file.exists():
-            try:
-                with open(self.env_check_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    if 'protocol_type' in data:
-                        self.protocol_type = data['protocol_type']
-                        print(f"从配置文件读取到协议服务类型: {self.protocol_type}")
-                        if self.protocol_type == "Unknown":
-                            try:
-                                self.env_check_file.unlink()
-                                print("配置文件中标记为 Unknown，将重新检测协议服务类型")
-                            except Exception as e:
-                                print(f"无法删除配置文件 env_check.json: {e}")
-                        else:
-                            return
-            except Exception as e:
-                print(f"读取配置文件失败: {e}")
+    def get_code(self, ref: str, app_id: str) -> str:
+        """获取小程序登录Code
+        
+        Args:
+            ref: 账号标识 (id/uin/openid)
+            app_id: 小程序AppID
+            
+        Returns:
+            str: 微信小程序登录code
+        """
+        url = f"{self.server_url}/wxapp/getCode"
+        payload = {
+            "ref": ref,
+            "app_id": app_id
+        }
+        
+        headers = {"Content-Type": "application/json"}
         
         try:
-            response = requests.get(f"{self.wechat_server}/admin/GetAuthKey", 
-                                 params={"key": self.admin_key}, timeout=5)
-            if response.status_code == 200:
-                self.protocol_type = "iwechat"
-            elif response.status_code == 404:
-                response = requests.get(f"{self.wechat_server}/admin/GetAllDevices", 
-                                     params={"key": self.admin_key}, timeout=5)
-                if response.status_code == 200:
-                    self.protocol_type = "WeChatPadPro"
-                elif response.status_code == 404:
-                    response = requests.get(f"{self.wechat_server}/api/v1/wx/user/status", timeout=5)
-                    if response.status_code == 200:
-                        self.protocol_type = "Niuzi"
-        except:
+            r = requests.post(url, json=payload, headers=headers, timeout=30)
+            result = r.json()
+            
+            code_val = 0
+            if isinstance(result, dict):
+                code_val = result.get("code", -1)
+                
+            # HTTP层错误或业务错误
+            if r.status_code == 409:
+                raise Exception("账号login_buffer已过期，需要重新扫码登录")
+            if code_val != 0:
+                msg = result.get("msg", f"HTTP {r.status_code}")
+                raiseException(f"[{code_val}] {msg}")
+            
+            # 从 data.result.code 提取
+            data = result.get("data", {})
+            if not isinstance(data, dict):
+                raise Exception(f"响应data异常: {str(data)[:100]}")
+                
+            inner = data.get("result", {})
+            if not isinstance(inner, dict):
+                raise Exception(f"result异常: {str(inner)[:100]}")
+                
+            code = inner.get("code")
+            if not code or not isinstance(code, str) or len(code) < 5:
+                raise Exception(f"未拿到有效code: {json.dumps(result, ensure_ascii=False)}")
+            
+            return code
+            
+        except requests.RequestException as e:
+            raise Exception(f"应用宝请求code失败: {e}")
+        except json.JSONDecodeError:
+            raise Exception("应用宝code响应格式错误")
+
+
+# ============================================================
+#  Wechat (牛子协议) 适配器
+# ============================================================
+
+class WechatAdapter:
+    """牛子(wechat) 协议服务适配器"""
+    
+    def __init__(self, server_url: str, admin_key: str = None):
+        self.server_url = server_url.rstrip('/')
+        self.admin_key = admin_key
+        self.sub_type: Optional[Literal["Niuzi", "WeChatPadPro", "iwechat"]] = None
+    
+    def _detect_sub_protocol(self) -> Literal["Niuzi", "WeChatPadPro", "iwechat"]:
+        """检测牛子子协议类型"""
+        if self.sub_type:
+            return self.sub_type
+            
+        try:
+            # 尝试 iwechat
+            params = {}
+            if self.admin_key:
+                params["key"] = self.admin_key
+            r = requests.get(f"{self.server_url}/admin/GetAuthKey", 
+                           params=params, timeout=5)
+            if r.status_code == 200:
+                self.sub_type = "iwechat"
+                return self.sub_type
+                
+            # 尝试 WeChatPadPro
+            r = requests.get(f"{self.server_url}/admin/GetAllDevices",
+                           params=params, timeout=5)
+            if r.status_code == 200:
+                self.sub_type = "WeChatPadPro"
+                return self.sub_type
+                
+        except Exception:
             pass
-
-        try:
-            with open(self.env_check_file, 'w', encoding='utf-8') as f:
-                json.dump({"protocol_type": self.protocol_type}, f, ensure_ascii=False, indent=2)
-            print(f"当前使用的协议服务: {self.protocol_type}")
-        except Exception as e:
-            print(f"保存配置文件失败: {e}")
-
-        if self.protocol_type in ["WeChatPadPro", "iwechat"] and not self.admin_key:
-            raise ValueError("环境变量 ADMIN_KEY 未设置")
-
-    def _is_account_valid(self, account: Dict) -> bool:
-        """检查账号是否有效（基于status字段）"""
-        status = account.get('status', 0)
-        return status == 1
-
-    def _filter_accounts_by_wx_id(self, accounts: List[Dict]) -> List[Dict]:
-        """根据WX_ID环境变量筛选账号"""
-        if not self.target_wx_ids:
-            return accounts
-
-        filtered_accounts = []
-        for account in accounts:
-            wx_id = account.get('wx_id') or account.get('deviceId', '')
-            if wx_id in self.target_wx_ids:
-                filtered_accounts.append(account)
-
-        if filtered_accounts:
-            print(f"根据WX_ID筛选后获得{len(filtered_accounts)}个账号")
-        else:
-            print(f"警告：根据WX_ID筛选后没有找到匹配的账号")
-
-        return filtered_accounts
-    
-    def get_auth_keys(self) -> List[Dict]:
-        """获取授权码列表"""
-        if self.protocol_type == "Niuzi":
-            return self._get_niuzi_accounts()
-        elif self.protocol_type == "WeChatPadPro":
-            return self._get_devices_auth_keys()
-        elif self.protocol_type == "iwechat":
-            return self._get_iwechat_auth_keys()
-        else:
-            raise Exception("未知的协议服务类型")
-
-    def _get_niuzi_accounts(self) -> List[Dict]:
-        """从牛子协议获取账号列表"""
-        url = f"{self.wechat_server}/api/v1/wx/user/status"
-        
-        try:
-            response = requests.get(url, timeout=60)
-            response.raise_for_status()
             
-            result = response.json()
+        # 默认 Niuzi
+        try:
+            r = requests.get(f"{self.server_url}/api/v1/wx/user/status", timeout=5)
+            if r.status_code == 200:
+                self.sub_type = "Niuzi"
+                return self.sub_type
+        except Exception:
+            pass
+            
+        self.sub_type = "Niuzi"
+        return self.sub_type
+    
+    def health_check(self) -> bool:
+        """健康检查"""
+        try:
+            r = requests.get(f"{self.server_url}/api/v1/wx/user/status", timeout=5)
+            return r.status_code == 200
+        except Exception:
+            return False
+    
+    def get_accounts(self) -> List[Dict]:
+        """获取在线账号列表"""
+        sub_type = self._detect_sub_protocol()
+        
+        if sub_type == "Niuzi":
+            return self._get_niuzi_accounts()
+        elif sub_type == "WeChatPadPro":
+            return self._get_padpro_accounts()
+        elif sub_type == "iwechat":
+            return self._get_iwechat_accounts()
+        else:
+            return []
+    
+    def _get_niuzi_accounts(self) -> List[Dict]:
+        """牛子协议获取账号"""
+        url = f"{self.server_url}/api/v1/wx/user/status"
+        try:
+            r = requests.get(url, timeout=60)
+            r.raise_for_status()
+            result = r.json()
+            
             if not result.get('status'):
                 raise Exception(f"获取在线账号失败: {result.get('message', '未知错误')}")
             
             accounts_data = result.get('data', {})
             if not isinstance(accounts_data, dict):
-                raise ValueError("API返回的数据格式错误，data应为对象")
+                raise ValueError("API返回的数据格式错误")
             
             accounts = []
-            for wxid, account_info in accounts_data.items():
-                if (isinstance(account_info, dict) and 
-                    'wxid' in account_info and 
-                    'nickname' in account_info and
-                    account_info.get('survival') == 1):
-                    account_info['status'] = 1
-                    account_info['nick_name'] = account_info['nickname']
-                    account_info['wx_id'] = account_info['wxid']
-                    account_info['license'] = account_info['wxid']
-                    account_info['authKey'] = account_info['wxid']
-                    account_info['loginState'] = 1
-                    account_info['onlineTime'] = account_info.get('loginDate', 0)
-                    accounts.append(account_info)
-            
-            print(f"从牛子协议获取到{len(accounts)}个在线账号")
-            filtered_accounts = self._filter_accounts_by_wx_id(accounts)
-            return filtered_accounts
+            for wxid, info in accounts_data.items():
+                if (isinstance(info, dict) and 
+                    'wxid' in info and 'nickname' in info and
+                    info.get('survival') == 1):
+                    accounts.append({
+                        "wxid": info['wxid'],
+                        "openid": info['wxid'],
+                        "nickname": info.get('nickname'),
+                        "alias": None,
+                        "avatar": None,
+                        "status": 1,
+                        "loginState": 1,
+                        "_ref": info['wxid'],
+                    })
+            return accounts
             
         except requests.RequestException as e:
-            raise Exception(f"获取账号列表失败: {e}")
-        except json.JSONDecodeError:
-            raise Exception("账号列表响应数据格式错误")
-
-    def _get_iwechat_auth_keys(self) -> List[Dict]:
-        """获取授权码列表（iwechat）"""
-        url = f"{self.wechat_server}/admin/GetAuthKey"
+            raise Exception(f"牛子获取账号列表失败: {e}")
+    
+    def _get_iwechat_accounts(self) -> List[Dict]:
+        """iwechat获取账号"""
+        url = f"{self.server_url}/admin/GetAuthKey"
         params = {"key": self.admin_key}
-
         try:
-            response = requests.get(url, params=params, timeout=60)
-            response.raise_for_status()
-
-            auth_data = response.json()
+            r = requests.get(url, params=params, timeout=60)
+            r.raise_for_status()
+            auth_data = r.json()
             if not isinstance(auth_data, list):
-                raise ValueError("获取授权码响应格式错误")
-
-            valid_accounts = []
-            for account in auth_data:
-                if self._is_account_valid(account):
-                    valid_accounts.append(account)
-
-            filtered_accounts = self._filter_accounts_by_wx_id(valid_accounts)
-            return filtered_accounts
-
+                raise ValueError("响应格式错误")
+            
+            valid = []
+            for acc in auth_data:
+                if acc.get('status') == 1:
+                    valid.append({
+                        "wxid": acc.get('wx_id', ''),
+                        "openid": acc.get('wx_id', ''),
+                        "nickname": acc.get('nick_name'),
+                        "alias": None,
+                        "avatar": None,
+                        "status": 1,
+                        "loginState": 1,
+                        "_ref": acc.get('license', '') or acc.get('authKey', ''),
+                    })
+            return valid
+            
         except requests.RequestException as e:
-            raise Exception(f"获取授权码失败: {e}")
-        except json.JSONDecodeError:
-            raise Exception("授权码响应数据格式错误")
-
-    def _get_devices_auth_keys(self) -> List[Dict]:
-        """获取授权码列表（WeChatPadPro）"""
-        url = f"{self.wechat_server}/admin/GetAllDevices"
+            raise Exception(f"iwechat获取账号失败: {e}")
+    
+    def _get_padpro_accounts(self) -> List[Dict]:
+        """WeChatPadPro获取账号"""
+        url = f"{self.server_url}/admin/GetAllDevices"
         params = {"key": self.admin_key}
-
         try:
-            response = requests.get(url, params=params, timeout=60)
-            response.raise_for_status()
-
-            devices_data = response.json()
-
-            if isinstance(devices_data, dict) and 'Data' in devices_data:
-                data_section = devices_data['Data']
-                if 'devices' in data_section:
-                    auth_data = data_section['devices']
+            r = requests.get(url, params=params, timeout=60)
+            r.raise_for_status()
+            data = r.json()
+            
+            # 兼容多种响应格式
+            devices = []
+            if isinstance(data, dict):
+                if 'Data' in data and isinstance(data['Data'], dict):
+                    devices = data['Data'].get('devices', [])
+                elif 'data' in data:
+                    devices = data['data']
                 else:
-                    raise ValueError("GetAllDevices响应中Data部分缺少devices字段")
-            elif isinstance(devices_data, list):
-                auth_data = devices_data
-            elif isinstance(devices_data, dict):
-                if 'data' in devices_data:
-                    auth_data = devices_data['data']
-                elif 'devices' in devices_data:
-                    auth_data = devices_data['devices']
-                else:
-                    auth_data = [devices_data]
-            else:
-                raise ValueError("GetAllDevices响应格式错误")
-
-            if not isinstance(auth_data, list):
-                raise ValueError("GetAllDevices响应格式错误")
-
-            valid_accounts = []
-            for account in auth_data:
-                if self._is_account_valid(account):
-                    valid_accounts.append(account)
-
-            print(f"通过GetAllDevices接口获取到{len(valid_accounts)}个有效账号")
-
-            filtered_accounts = self._filter_accounts_by_wx_id(valid_accounts)
-            return filtered_accounts
-
+                    devices = [data]
+            elif isinstance(data, list):
+                devices = data
+            
+            if not isinstance(devices, list):
+                raise ValueError("响应格式错误")
+            
+            valid = []
+            for acc in devices:
+                if acc.get('status') == 1:
+                    valid.append({
+                        "wxid": acc.get('deviceId', ''),
+                        "openid": acc.get('deviceId', ''),
+                        "nickname": acc.get('deviceName'),
+                        "alias": None,
+                        "avatar": None,
+                        "status": 1,
+                        "loginState": 1,
+                        "_ref": acc.get('license', '') or acc.get('authKey', ''),
+                    })
+            return valid
+            
         except requests.RequestException as e:
-            raise Exception(f"通过GetAllDevices获取授权码失败: {e}")
-        except json.JSONDecodeError:
-            raise Exception("GetAllDevices响应数据格式错误")
-
-    def get_login_status(self, license: str) -> Dict:
-        """获取登录状态"""
-        url = f"{self.wechat_server}/login/GetLoginStatus"
-        params = {"key": license}
+            raise Exception(f"WeChatPadPro获取账号失败: {e}")
+    
+    def get_code(self, wxid_or_license: str, app_id: str) -> str:
+        """获取小程序登录Code
         
-        try:
-            response = requests.get(url, params=params, timeout=60)
-            response.raise_for_status()
-            
-            status_data = response.json()
-            if status_data.get('Code') != 200:
-                raise Exception(f"获取登录状态失败: {status_data.get('Text', '未知错误')}")
-            
-            return status_data.get('Data', {})
-            
-        except requests.RequestException as e:
-            raise Exception(f"获取登录状态失败: {e}")
-        except json.JSONDecodeError:
-            raise Exception("登录状态响应数据格式错误")
-    
-    def get_online_accounts(self) -> List[Tuple[Dict, Dict]]:
-        """获取在线账号列表"""
-        accounts = self.get_auth_keys()
-        online_accounts = []
-
-        if self.protocol_type == "Niuzi":
-            for account in accounts:
-                login_status = {
-                    'loginState': 1,
-                    'onlineTime': account.get('loginDate', 0),
-                    'device': account.get('device', '')
-                }
-                online_accounts.append((account, login_status))
+        Args:
+            wxid_or_license: 牛子=wxid, Padpro/iwechat=license
+            app_id: 小程序AppID
+        """
+        sub_type = self._detect_sub_protocol()
+        
+        if sub_type == "Niuzi":
+            return self._niuzi_get_code(wxid_or_license, app_id)
         else:
-            for account in accounts:
-                license = account.get('license') or account.get('authKey')
-                if not license:
-                    continue
-
-                try:
-                    login_status = self.get_login_status(license)
-                    if login_status.get('loginState') == 1:
-                        online_accounts.append((account, login_status))
-                except Exception as e:
-                    nick_name = account.get('nick_name') or account.get('deviceName') or '未知'
-                    print(f"检查账号 {nick_name} 登录状态失败: {e}")
-                    continue
-
-        return online_accounts
+            return self._legacy_get_code(wxid_or_license, app_id)
     
-    def print_online_status(self):
-        """打印在线账号状态"""
-        online_accounts = self.get_online_accounts()
-
-        print(f"当前有{len(online_accounts)}个账号在线")
-        for account, status in online_accounts:
-            nick_name = account.get('nick_name') or account.get('deviceName') or '未知昵称'
-            online_time = status.get('onlineTime', '未知在线时间')
-            print(f"{nick_name} {online_time}")
-    
-    def get_applet_code(self, app_id: str, license_or_wxid: str) -> str:
-        """获取小程序登录Code"""
-        if self.protocol_type == "Niuzi":
-            return self._get_niuzi_applet_code(app_id, license_or_wxid)
-        else:
-            return self._get_legacy_applet_code(app_id, license_or_wxid)
-
-    def _get_niuzi_applet_code(self, app_id: str, wxid: str) -> str:
-        """获取小程序登录Code（牛子协议）"""
+    def _niuzi_get_code(self, wxid: str, app_id: str) -> str:
+        """牛子协议获取code"""
         actual_wxid = str(wxid).split('#')[0].strip()
         endpoints = [
             "/api/v1/wx/app/get/code",
@@ -319,50 +350,35 @@ class WeChatCodeGetter:
         
         last_error = None
         for endpoint in endpoints:
-            url = f"{self.wechat_server}{endpoint}"
-            payload = {
-                "wxid": actual_wxid,
-                "appid": app_id
-            }
+            url = f"{self.server_url}{endpoint}"
+            payload = {"wxid": actual_wxid, "appid": app_id}
             
             try:
-                response = requests.post(url, json=payload, timeout=15)
+                r = requests.post(url, json=payload, timeout=15)
+                result = r.json() if r.status_code == 200 else {}
                 
-                if response.status_code != 200:
-                    try:
-                        result = response.json()
-                    except json.JSONDecodeError:
-                        last_error = Exception(f"HTTP {response.status_code}: {response.text[:200]}")
-                        continue
-                else:
-                    result = response.json()
+                # 提取code (多层级兼容)
+                code = (result.get('code') or
+                       (isinstance(result.get('data'), dict) and result['data'].get('code')) or
+                       (isinstance(result.get('Data'), dict) and result['Data'].get('code')) or
+                       (isinstance(result.get('data'), str) and result['data']) or
+                       (isinstance(result.get('Data'), str) and result['Data']))
                 
-                code = result.get('code')
-                if not code and 'data' in result and isinstance(result['data'], dict):
-                    code = result['data'].get('code')
-                if not code and 'Data' in result:
-                    if isinstance(result['Data'], dict):
-                        code = result['Data'].get('code')
-                    elif isinstance(result['Data'], str):
-                        code = result['Data']
-                if not code and 'data' in result and isinstance(result['data'], str):
-                    code = result['data']
-                    
                 if isinstance(code, str) and len(code) > 5:
                     return code
-                
-                last_error = Exception(f"无 code：{json.dumps(result, ensure_ascii=False)}")
+                    
+                last_error = Exception(f"无有效code: {json.dumps(result, ensure_ascii=False)[:150]}")
                 
             except requests.RequestException as e:
-                last_error = Exception(f"请求小程序Code失败: {e}")
+                last_error = Exception(f"请求失败: {e}")
             except json.JSONDecodeError:
-                last_error = Exception("小程序Code响应数据格式错误")
-                
-        raise Exception(f"获取微信 code 失败：{last_error}")
-
-    def _get_legacy_applet_code(self, app_id: str, license: str) -> str:
-        """获取小程序登录Code（WeChatPadPro/iwechat接口）"""
-        url = f"{self.wechat_server}/applet/JsLogin"
+                last_error = Exception("响应格式错误")
+        
+        raise last_error or Exception("牛子获取code失败")
+    
+    def _legacy_get_code(self, license: str, app_id: str) -> str:
+        """传统协议(PadPro/iwechat)获取code"""
+        url = f"{self.server_url}/applet/JsLogin"
         params = {"key": license}
         payload = {
             "AppId": app_id,
@@ -373,140 +389,326 @@ class WeChatCodeGetter:
         }
         
         try:
-            response = requests.post(url, params=params, json=payload, timeout=60)
-            response.raise_for_status()
+            r = requests.post(url, params=params, json=payload, timeout=60)
+            r.raise_for_status()
+            result = r.json()
             
-            result = response.json()
             if result.get('Code') != 200:
-                raise Exception(f"获取小程序Code失败: {result.get('Text', '未知错误')}")
+                raise Exception(f"获取code失败: {result.get('Text', '未知错误')}")
             
             data = result.get('Data', {})
             code = data.get('Code')
             if not code:
-                raise Exception("响应中未找到Code值")
+                raise Exception("响应中无Code字段")
             
             return code
             
         except requests.RequestException as e:
-            raise Exception(f"请求小程序Code失败: {e}")
-        except json.JSONDecodeError:
-            raise Exception("小程序Code响应数据格式错误")
+            raise Exception(f"传统协议请求失败: {e}")
+
+
+# ============================================================
+#  统一入口类
+# ============================================================
+
+class WeChatCodeGetter:
+    """
+    微信小程序Code获取模块（统一入口）
+    自动检测或手动指定服务类型：
+      - YYB: 应用宝(yyb_go) 服务
+      - Wechat: 牛子协议服务
+    """
     
-    def get_codes_for_all_online_accounts(self, app_id: str) -> Dict[str, str]:
-        """为所有在线账号获取小程序Code"""
-        codes = {}
-
-        if self.protocol_type == "Niuzi":
-            online_accounts = self.get_online_accounts()
-            for i, (account, _) in enumerate(online_accounts, 1):
-                wxid = account.get('wxid')
-                base_nick_name = account.get('nickname') or account.get('nick_name') or '未知昵称'
-
-                if not base_nick_name.strip() or base_nick_name.strip() == 'ㅤ':
-                    if wxid:
-                        nick_name = f"账号_{wxid[-6:]}"
-                    else:
-                        nick_name = f"账号_{i}"
-                else:
-                    nick_name = base_nick_name
-
-                original_nick_name = nick_name
-                counter = 1
-                while nick_name in codes:
-                    nick_name = f"{original_nick_name}_{counter}"
-                    counter += 1
-
-                if not wxid:
-                    print(f"账号 {nick_name} 缺少wxid，跳过")
-                    continue
-
-                try:
-                    code = self.get_applet_code(app_id, wxid)
-                    codes[nick_name] = code
-                    print(f"获取 {nick_name} 的Code成功: {code}")
-                except Exception as e:
-                    print(f"获取 {nick_name} 的Code失败: {e}")
-                    print(f"提示：如果持续获取失败，账号 {nick_name} 可能需要重新登录")
-                    continue
+    def __init__(self, force_type: ProtocolType = None):
+        global _config_cache
+        
+        # 使用缓存的配置（避免重复初始化检测）
+        if _config_cache and not force_type:
+            self.__dict__.update(_config_cache)
+            return
+            
+        # 环境变量读取
+        env_server_type = os.getenv("SERVER_TYPE", "").lower()
+        
+        # 服务地址配置
+        yyb_server = (os.getenv("YYB_SERVER") or 
+                     os.getenv("YINGYOGBAO_SERVER") or 
+                     "http://127.0.0.1:8000")
+        
+        wechat_server = (os.getenv("WECHAT_SERVER") or 
+                        "http://192.168.6.222:8011")
+        
+        admin_key = os.getenv("ADMIN_KEY")
+        wx_id_filter = os.getenv("WX_ID")
+        
+        script_dir = pathlib.Path(__file__).parent.absolute()
+        env_check_file = script_dir / "env_check.json"
+        
+        # 确定协议类型
+        if force_type:
+            protocol_type = force_type
+        elif env_server_type:
+            protocol_type = {
+                "yyb": "YYB",
+                "yingyongbao": "YYB",  
+                "应用宝": "YYB",
+                "wechat": "Wechat",
+                "niuzi": "Wechat",
+                "牛子": "Wechat",
+            }.get(env_server_type, "Unknown")
+        elif env_check_file.exists():
+            try:
+                with open(env_check_file, 'r', encoding='utf-8') as f:
+                    saved = json.load(f)
+                    protocol_type = saved.get("protocol_type", "Unknown")
+            except Exception:
+                protocol_type = "Unknown"
         else:
-            online_accounts = self.get_online_accounts()
-            for i, (account, _) in enumerate(online_accounts, 1):
-                license = account.get('license') or account.get('authKey')
-                base_nick_name = account.get('nick_name') or account.get('deviceName') or '未知昵称'
-
-                device_id = account.get('deviceId', '')
-                if not base_nick_name.strip() or base_nick_name.strip() == 'ㅤ':
-                    if device_id:
-                        nick_name = f"设备_{device_id[-6:]}"
-                    else:
-                        nick_name = f"账号_{i}"
+            protocol_type = "Unknown"
+        
+        # 自动检测
+        if protocol_type == "Unknown":
+            print("[getCode] 正在自动检测服务类型...")
+            
+            # 优先检测应用宝
+            test_yyb = YYBAdapter(yyb_server)
+            if test_yyb.health_check():
+                protocol_type = "YYB"
+                print(f"[getCode] ✓ 检测到 应用宝 服务: {yyb_server}")
+            else:
+                # 其次检测牛子
+                test_wx = WechatAdapter(wechat_server, admin_key)
+                if test_wx.health_check():
+                    protocol_type = "Wechat"
+                    print(f"[getCode] ✓ 检测到 牛子 服务: {wechat_server}")
                 else:
-                    nick_name = base_nick_name
-
-                original_nick_name = nick_name
-                counter = 1
-                while nick_name in codes:
-                    nick_name = f"{original_nick_name}_{counter}"
-                    counter += 1
-
-                if not license:
-                    print(f"账号 {nick_name} 缺少license/authKey，跳过")
-                    continue
-
-                try:
-                    code = self.get_applet_code(app_id, license)
-                    codes[nick_name] = code
-                    print(f"获取 {nick_name} 的Code成功: {code}")
-                except Exception as e:
-                    print(f"获取 {nick_name} 的Code失败: {e}")
-                    print(f"提示：如果持续获取失败，账号 {nick_name} 可能需要重新登录")
-                    continue
-
+                    print(f"[getCode] ✗ 未检测到可用服务")
+                    print(f"[getCode]   应用宝({yyb_server}): 不可达")
+                    print(f"[codegen]   牛子({wechat_server}): 不可达")
+        
+        # 初始化对应适配器
+        self.protocol_type = protocol_type
+        self.wx_id_filter = wx_id_filter
+        
+        if protocol_type == "YYB":
+            self.adapter = YYBAdapter(yyb_server)
+            self.server_url = yyb_server
+        elif protocol_type == "Wechat":
+            self.adapter = WechatAdapter(wechat_server, admin_key)
+            self.server_url = wechat_server
+        else:
+            raise ValueError(
+                "无法确定服务类型！请设置环境变量：\n"
+                "  WECHAT_SERVER=http://你的牛子地址:端口\n"
+                "  YYB_SERVER=http://你的应用宝地址:端口\n"
+                "  或设置 SERVER_TYPE=wechat / SERVER_TYPE=yyb 强制指定"
+            )
+        
+        # 处理 WX_ID 过滤
+        self.target_wx_ids = []
+        if wx_id_filter:
+            self.target_wx_ids = [x.strip() for x in wx_id_filter.split('&') if x.strip()]
+            print(f"[getCode] WX_ID筛选: {', '.join(self.target_wx_ids)}")
+        
+        # 保存检测结果到文件
+        try:
+            with open(env_check_file, 'w', encoding='utf-8') as f:
+                json.dump({"protocol_type": protocol_type}, f, ensure_ascii=False)
+        except Exception:
+            pass
+        
+        print(f"[getCode] 当前服务: {protocol_type} @ {self.server_url}")
+        
+        # 缓存配置
+        _config_cache = {
+            "protocol_type": protocol_type,
+            "adapter": self.adapter,
+            "server_url": self.server_url,
+            "wx_id_filter": wx_id_filter,
+            "target_wx_ids": self.target_wx_ids,
+        }
+        self.__dict__.update(_config_cache)
+    
+    def _filter_accounts(self, accounts: List[Dict]) -> List[Dict]:
+        """根据WX_ID过滤账号"""
+        if not self.target_wx_ids:
+            return accounts
+        
+        filtered = []
+        for acc in accounts:
+            ref = acc.get("_ref", "")
+            wxid = acc.get("wxid", "")
+            openid = acc.get("openid", "")
+            
+            if any(t in (ref, wxid, openid) for t in self.target_wx_ids):
+                filtered.append(acc)
+        
+        if filtered:
+            print(f"[getCode] 筛选后剩余 {len(filtered)} 个账号")
+        else:
+            print(f"[getCode] 警告：WX_ID筛选无匹配账号")
+        
+        return filtered
+    
+    def get_online_accounts(self) -> List[Tuple[Dict, Dict]]:
+        """获取在线账号列表 [(account_info, login_status), ...]"""
+        accounts = self.adapter.get_accounts()
+        accounts = self._filter_accounts(accounts)
+        
+        online = []
+        for acc in accounts:
+            status = {
+                "loginState": acc.get("loginState", 1),
+                "onlineTime": acc.get("last_checked_at", 0),
+                "device": acc.get("avatar", ""),
+            }
+            online.append((acc, status))
+        
+        return online
+    
+    def print_online_status(self):
+        """打印在线状态"""
+        online = self.get_online_accounts()
+        print(f"\n当前有 {len(online)} 个账号在线 ({self.protocol_type})")
+        
+        for acc, status in online:
+            name = (acc.get("nickname") or 
+                   acc.get("alias") or 
+                   acc.get("wxid", "未知")[:12])
+            t = status.get("onlineTime", "?")
+            print(f"  {name}  (上线时间: {t})")
+    
+    def get_applet_code(self, app_id: str, identifier: str) -> str:
+        """为单个账号获取小程序Code
+        
+        Args:
+            app_id: 小程序AppID
+            identifier: 
+              - 牛子协议: wxid
+              - 应用宝: id/uin/openid
+              
+        Returns:
+            str: 登录code
+        """
+        return self.adapter.get_code(identifier, app_id)
+    
+    def get_codes_for_all_online(self, app_id: str) -> Dict[str, str]:
+        """为所有在线账号获取code
+        
+        Returns:
+            {昵称: code, ...}
+        """
+        online = self.get_online_accounts()
+        codes = {}
+        
+        for i, (acc, _) in enumerate(online, 1):
+            # 确定显示名
+            base_name = (acc.get("nickname") or 
+                        acc.get("alias") or 
+                        f"账号_{i}")
+            
+            if not base_name.strip() or base_name.strip() == '\u3164':
+                wxid = acc.get("wxid", "")
+                base_name = f"账号_{wxid[-6:]}" if wxid else f"账号_{i}"
+            
+            # 防重名
+            name = base_name
+            counter = 1
+            while name in codes:
+                name = f"{base_name}_{counter}"
+                counter += 1
+            
+            ref = acc.get("_ref", "")
+            if not ref:
+                print(f"[getCode] {name}: 缺少标识符，跳过")
+                continue
+            
+            try:
+                code = self.adapter.get_code(ref, app_id)
+                codes[name] = code
+                print(f"[getCode] ✓ {name}: {code[:20]}...")
+            except Exception as e:
+                print(f"[getCode] ✗ {name}: {e}")
+        
         return codes
 
 
+# ============================================================
+#  便捷函数（保持向后兼容）
+# ============================================================
+
 def get_wechat_codes(app_id: str) -> Dict[str, str]:
-    """
-    获取所有在线微信账号的小程序登录Code
-    
-    Args:
-        app_id (str): 小程序AppId
-        
-    Returns:
-        Dict[str, str]: 账号昵称到Code的映射字典
-        
-    Raises:
-        ValueError: 环境变量未设置
-        Exception: 网络请求或数据处理错误
-    """
+    """获取所有在线账号的code（便捷函数）"""
     getter = WeChatCodeGetter()
-    return getter.get_codes_for_all_online_accounts(app_id)
+    return getter.get_codes_for_all_online(app_id)
 
 
 def print_online_status():
-    """打印当前在线账号状态"""
+    """打印在线状态（便捷函数）"""
     getter = WeChatCodeGetter()
     getter.print_online_status()
 
 
-def get_single_code(app_id: str, license: str) -> str:
+def get_single_code(app_id: str, identifier: str) -> str:
     """
-    为指定授权码获取小程序登录Code
-
+    为指定账号获取单个code（便捷函数）
+    
     Args:
-        app_id (str): 小程序AppId
-        license (str): 微信账号授权码
-
+        app_id: 小程序AppID
+        identifier: 
+          - 牛子: wxid
+          - 应用宝: id/uin/openid
+          
     Returns:
-        str: 小程序登录Code
-
-    Raises:
-        ValueError: 环境变量未设置
-        Exception: 网络请求或数据处理错误
+        str: 登录code
     """
     getter = WeChatCodeGetter()
     try:
-        return getter.get_applet_code(app_id, license)
+        return getter.get_applet_code(app_id, identifier)
     except Exception as e:
-        print(f"提示：如果持续获取失败，该账号可能需要重新登录")
-        raise e
+        print(f"[getCode] 获取失败（可能需重新登录）: {e}")
+        raise
+
+
+# ============================================================
+#  直接运行测试
+# ============================================================
+
+if __name__ == '__main__':
+    import sys
+    
+    print("=" * 50)
+    print("  微信小程序 Code 获取工具（双协议版）")
+    print("=" * 50)
+    
+    # 测试参数
+    TEST_APPID = sys.argv[1] if len(sys.argv) > 1 else input("请输入测试 AppID: ").strip()
+    
+    if not TEST_APPID:
+        print("未提供 AppID，退出")
+        sys.exit(1)
+    
+    # 初始化并打印状态
+    try:
+        getter = WeChatCodeGetter()
+    except ValueError as e:
+        print(f"\n❌ 错误: {e}")
+        sys.exit(1)
+    
+    print("\n" + "-" * 40)
+    
+    # 打印在线状态
+    getter.print_online_status()
+    
+    print("\n" + "-" * 40)
+    print(f"开始获取 Code (AppID={TEST_APPID})...")
+    
+    # 获取所有账号的code
+    codes = getter.get_codes_for_all_online(TEST_APPID)
+    
+    if codes:
+        print(f"\n✓ 成功获取 {len(codes)} 个 Code:")
+        for name, code in codes.items():
+            print(f"  {name}: {code}")
+    else:
+        print("\n✗ 未获取到任何 Code")

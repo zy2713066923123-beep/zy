@@ -1,3 +1,6 @@
+// cron: 40 11 * * *
+// cron: 48 23 * * *
+
 const ckName = "WX_ID";
 
 // 工具类

@@ -1,4 +1,7 @@
 
+// cron: 0 10 * * *
+// cron: 8 17 * * *
+
 const { getSingleCode } = require('./getCode.js');
 class Env {
     constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; this.logs = []; const originalLog = console.log; console.log = (...args) => { this.logs.push(args.join(" ")); originalLog.apply(console, args); }; }

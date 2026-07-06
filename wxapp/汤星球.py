@@ -1,3 +1,6 @@
+# cron: 22 9 * * *
+# cron: 0 15 * * *
+
 """
 作者: 吉吉国王大人
 日期: 2026/6/30
@@ -30,6 +33,8 @@ import traceback
 
 import requests
 
+from getCode import get_single_code
+
 try:
     from notify import send as notify_send
 except ImportError:
@@ -48,29 +53,15 @@ SIGN_ACTIVITY_ID = 11
 LOGIN_PATH = "/vip-api/auth/ma/login"
 
 
+# build_code_url 和 get_code 已统一到 getCode.py，此处保留兼容
 def build_code_url(raw_url):
-    """兼容：填基址或完整 code 接口都可用。"""
-    value = (raw_url or "").strip().rstrip("/")
-    if not value:
-        return ""
-    if value.endswith("/get/code") or value.endswith("/code"):
-        return value
-    return f"{value}/api/v1/wx/app/get/code"
+    """已废弃，保留兼容"""
+    return ""
 
-
-def get_code(wxid, server):
-    """POST {server} body {wxid, appid} -> code"""
-    if not server:
-        print("微信: 未配置 WECHAT_SERVER")
-        return None
+def get_code(wxid, _server=None):
+    """通过 getCode.py 统一接口获取微信 code"""
     try:
-        resp = requests.post(
-            server,
-            json={"wxid": wxid, "appid": WX_APPID},
-            timeout=30,
-            proxies={"http": None, "https": None},
-        )
-        result = resp.json()
+        return get_single_code(WX_APPID, wxid)
     except Exception as exc:
         print(f"微信: 获取 code 异常: {exc}")
         return None

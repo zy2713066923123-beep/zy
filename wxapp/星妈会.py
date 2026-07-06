@@ -1,3 +1,5 @@
+# cron: 16 9 * * *
+# cron: 44 14 * * *
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -39,6 +41,8 @@ import os
 import sys
 from datetime import datetime
 from urllib.parse import urlencode
+
+from getCode import get_single_code
 
 # 消息通知开关 (True/False)
 ENABLE_NOTIFY = False
@@ -161,20 +165,10 @@ class FeiheClient:
             return None
 
     def _get_wx_code(self):
-        """通过微信协议服务获取小程序 code"""
-        if not self.wechat_server:
-            raise RuntimeError("未配置 WECHAT_SERVER")
+        """通过 getCode.py 统一接口获取小程序 code"""
         if not self.wxid:
             raise RuntimeError("未配置 wxid")
-
-        url = f"{self.wechat_server}/api/v1/wx/app/get/code"
-        payload = {"wxid": self.wxid, "appid": self.appid}
-        resp = self.session.post(url, json=payload, timeout=20)
-        resp.raise_for_status()
-        data = resp.json()
-        if data.get("Code") == 0 and (data.get("Data") or {}).get("code"):
-            return data["Data"]["code"]
-        raise RuntimeError(f"微信协议取code失败: {data}")
+        return get_single_code(self.appid, self.wxid)
 
     def _login_by_code(self, code):
         """

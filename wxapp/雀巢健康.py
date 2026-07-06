@@ -1,3 +1,5 @@
+# cron: 31 9 * * *
+# cron: 24 15 * * *
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -27,6 +29,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
+from getCode import get_single_code
 
 try:
     from notify import send as notify_send
@@ -45,11 +48,7 @@ ACTIVITY_PLAN_CODE = "Nestle_Thrive_Companion_180_Days"
 DEFAULT_WECHAT_SERVER = "http://127.0.0.1:8011"
 
 WECHAT_SERVER = os.getenv("WECHAT_SERVER", DEFAULT_WECHAT_SERVER).rstrip("/")
-WX_CODE_API = (
-    WECHAT_SERVER
-    if WECHAT_SERVER.endswith("/get/code") or WECHAT_SERVER.endswith("/code")
-    else f"{WECHAT_SERVER}/api/v1/wx/app/get/code"
-)
+WX_CODE_API = ""  # 已废弃：现使用 getCode.py 统一接口
 ENABLE_MONSTER_TASK = os.getenv("NESTLE_SANXIA_MONSTER_TASK", "1").lower() not in {"0", "false", "no", "off"}
 ENABLE_MONSTER_REGISTER = os.getenv("NESTLE_SANXIA_MONSTER_REGISTER", "1").lower() not in {"0", "false", "no", "off"}
 MONSTER_GOODS_TYPE = os.getenv("NESTLE_SANXIA_MONSTER_GOODS_TYPE", "Althera")
@@ -158,28 +157,12 @@ def is_activity_success(data: Optional[dict]) -> bool:
 
 
 def get_code(wxid: str) -> Optional[str]:
-    if not WX_CODE_API:
-        log("未配置 WECHAT_SERVER，无法通过 wxid 获取微信 code")
-        return None
+    """通过 getCode.py 统一接口获取微信 login code"""
     try:
-        resp = requests.post(
-            WX_CODE_API,
-            json={"wxid": wxid, "appid": WX_APP_ID},
-            timeout=30,
-            proxies={"http": None, "https": None},
-        )
-        result = resp.json()
+        return get_single_code(WX_APP_ID, wxid)
     except Exception as exc:
         log(f"获取 code 异常：{exc}")
         return None
-
-    data = result.get("Data") if isinstance(result.get("Data"), dict) else result.get("data")
-    code = data.get("code") if isinstance(data, dict) else None
-    if code:
-        return code
-    msg = result.get("Message") or result.get("msg") or result.get("message") or "unknown"
-    log(f"获取 code 失败：{msg}")
-    return None
 
 
 def login_with_code(code: str) -> Optional[dict]:

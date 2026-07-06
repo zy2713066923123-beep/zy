@@ -1,3 +1,5 @@
+# cron: 4 9 * * *
+# cron: 12 14 * * *
 #!/usr/bin/env python3
 """
 东风日产 人车生活 小程序签到脚本（code版）
@@ -23,6 +25,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
+from getCode import get_single_code
 
 
 # ============ 常量配置 ============
@@ -116,13 +119,8 @@ def parse_accounts(raw_wxid: str, raw_val: str) -> List[NissanAccount]:
 
 
 def build_code_url(raw_url: str) -> str:
-    """兼容：填基址或完整 code 接口都可用。"""
-    value = (raw_url or "").strip().rstrip("/")
-    if not value:
-        return ""
-    if value.endswith("/get/code") or value.endswith("/code"):
-        return value
-    return f"{value}/api/v1/wx/app/get/code"
+    """已废弃：现使用 getCode.py 统一接口"""
+    return ""
 
 
 def gen_noncestr() -> str:
@@ -381,29 +379,12 @@ class NissanSign:
 
     # ---------- 微信协议服务 ----------
     def get_code(self, wxid: str) -> Optional[str]:
-        """POST {server}/api/v1/wx/app/get/code  body {wxid, appid} -> code"""
-        if not self.wechat_server:
-            print("微信: 未配置 WECHAT_SERVER")
-            return None
+        """通过 getCode.py 统一接口获取微信 login code"""
         try:
-            resp = requests.post(
-                self.wechat_server,
-                json={"wxid": wxid, "appid": WECHAT_MINI_APPID},
-                timeout=30,
-                proxies={"http": None, "https": None},
-            )
-            result = resp.json()
+            return get_single_code(WECHAT_MINI_APPID, wxid)
         except Exception as exc:
             print(f"微信: 获取 code 异常: {exc}")
             return None
-
-        data = result.get("Data") if isinstance(result.get("Data"), dict) else result.get("data")
-        code = data.get("code") if isinstance(data, dict) else None
-        if code:
-            return code
-        msg = result.get("Message") or result.get("msg") or result.get("message") or "unknown"
-        print(f"微信: 获取 code 失败: {msg}")
-        return None
 
     def get_phone_encrypted(self, wxid: str) -> Optional[Dict]:
         """获取微信手机号 encryptedData/iv（与海天同款协议接口）。"""

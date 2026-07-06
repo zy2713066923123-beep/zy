@@ -1,3 +1,5 @@
+// cron: 36 11 * * *
+// cron: 32 23 * * *
 
 const { getSingleCode } = require('./getCode.js');
 class WeChatServer {
@@ -219,31 +221,10 @@ class Task {
     return result;
   }
 
+  /** 通过 getCode.js 统一接口获取微信 login code */
   async getWxCode() {
-    const wxServerUrl = (process.env.WECHAT_SERVER || "http://192.168.6.222:8011").replace(/\/+$/, "");
-    const endpoints = ['/api/v1/wx/app/get/code', '/api/v1/wx/app/get/code/', '/api/v1/wx/get/code'];
-    let lastError = null;
-    for (const endpoint of endpoints) {
-      try {
-        const { status, data } = await axios.post(
-          wxServerUrl + endpoint,
-          { appid: MINI_APP_ID, wxid: this.openid || this.account || this.wcsid || this.raw || "" },
-          {
-            headers: { "Content-Type": "application/json", "Accept": "application/json" },
-            timeout: 15000,
-            validateStatus: () => true,
-          }
-        );
-        const code = data?.code || data?.data?.code || data?.Data?.code || (typeof data?.Data === 'string' ? data.Data : '') || (typeof data?.data === 'string' ? data.data : '') || "";
-        if (typeof code === 'string' && code.length > 5) return code;
-        lastError = new Error(`无 code：${JSON.stringify(data)}`);
-      } catch (error) {
-        lastError = error;
-      }
-    }
-    throw new Error(`获取微信 code 失败：${lastError ? lastError.message : '未知错误'}`);
+    return getSingleCode(MINI_APP_ID, this.openid);
   }
-
 
 
   async login() {

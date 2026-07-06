@@ -1,3 +1,5 @@
+// cron: 34 10 * * *
+// cron: 24 19 * * *
 #!/usr/bin/env node
 'use strict';
 
@@ -20,6 +22,8 @@
  *   QYQD_SKIP_LOTTERY=1  跳过抽奖
  */
 
+const { getSingleCode } = require('./getCode.js');
+const getWxCode = (wxid, appid) => getSingleCode(appid, String(wxid).split('#')[0].trim());
 const http = require('http');
 const https = require('https');
 const { URL } = require('url');
@@ -84,12 +88,9 @@ function makeDeviceId(seed) {
   return `d_${Math.abs(hash).toString(36)}_${Date.now().toString(36)}`;
 }
 
-/** 兼容基址或完整 code 接口的微信协议地址。 */
+/** 兼容基址或完整 code 接口的微信协议地址。（已废弃：现使用 getCode.js 统一接口） */
 function buildWechatCodeUrl(rawUrl) {
-  const value = String(rawUrl || '').trim().replace(/\/+$/, '');
-  if (!value) return '';
-  if (/\/api\/v1\/wx\/app\/get\/code$/i.test(value)) return value;
-  return `${value}/api/v1/wx/app/get/code`;
+  return '';
 }
 
 /** 简单脱敏 wxid，避免日志里完整暴露。 */
@@ -171,20 +172,12 @@ function parseAccounts() {
   return [];
 }
 
-/** 请求微信协议中转服务器，用 wxid 换小程序临时 code。 */
+/**
+ * 通过 getCode.js 统一接口获取微信小程序 login code
+ * 支持 YYB(应用宝) / Wechat(牛子) 双协议自动检测
+ */
 function getWxCode(wxid) {
-  if (!CONFIG.wechatServer) {
-    throw new Error('未配置 WECHAT_SERVER，无法使用 wxid 自动登录');
-  }
-  return requestJson('POST', CONFIG.wechatServer, {
-    wxid,
-    appid: CONFIG.miniAppId,
-  }).then((res) => {
-    const data = res.Data || res.data || {};
-    const code = data.code || data.Code;
-    if (code) return code;
-    throw new Error(res.Message || res.message || res.msg || '获取微信 code 失败');
-  });
+  return getSingleCode(CONFIG.miniAppId, String(wxid).split('#')[0].trim());
 }
 
 /** 通用 JSON HTTP 请求，支持 http/https，用于中转服务器。 */

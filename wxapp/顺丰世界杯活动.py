@@ -1,3 +1,6 @@
+# cron: 37 9 * * *
+# cron: 40 15 * * *
+
 """
 顺丰2026世界杯活动 - 射门游戏 + 比赛竞猜 + 每日礼物
 Author: 广哥哥整合
@@ -26,6 +29,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 import requests
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
+from getCode import get_single_code
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
@@ -262,20 +266,8 @@ def _wx_sign_headers(body_obj: Dict[str, Any], suuid: str = "", device_id: str =
 
 
 def _get_wx_code(wechat_server: str, wxid: str) -> str:
-    url = f"{wechat_server.rstrip('/')}/api/v1/wx/app/get/code"
-    resp = requests.post(url, json={"wxid": wxid, "appid": WX_APPID}, timeout=20)
-    data = resp.json() if resp.text else {}
-
-    code = (
-        (data.get("Data") or {}).get("code")
-        or (data.get("data") or {}).get("code")
-        or data.get("code")
-    )
-    if not code:
-        raise Exception(f"获取微信code失败: {data}")
-    if data.get("Code") not in (0, None) and not data.get("Success", True):
-        raise Exception(f"协议服务异常: {data}")
-    return str(code)
+    """通过 getCode.py 统一接口获取微信 login code"""
+    return get_single_code(WX_APPID, wxid)
 
 
 def _refresh_wxsf_item_via_protocol(wxid: str, old_item: Dict[str, Any], wechat_server: str) -> Dict[str, Any]:

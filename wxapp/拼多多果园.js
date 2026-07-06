@@ -1,3 +1,6 @@
+// cron: 24 10 * * *
+// cron: 44 18 * * *
+
 /**
  * 拼多多果园（微信协议版）
  *
@@ -7,6 +10,8 @@
  *   PDD_NO_RELOGIN  设为 '0' 或 'false' 关闭自动重登（默认开启）
  */
 
+const { getSingleCode } = require('./getCode.js');
+const getWxCode = (wxid, appid) => getSingleCode(appid, String(wxid).split('#')[0].trim());
 const https = require('https');
 const http = require('http');
 const zlib = require('zlib');
@@ -218,16 +223,7 @@ async function jsonPost(url, headers, bodyObj) {
 }
 
 // ==================== 微信协议：获取 code ====================
-async function getWxCode(wxid) {
-    if (!WECHAT_SERVER) throw new Error('未设置 WECHAT_SERVER');
-    const resp = await jsonPost(
-        WECHAT_SERVER + '/api/v1/wx/app/get/code',
-        {},
-        { wxid, appid: MINI_APP_ID }
-    );
-    if (resp && resp.Code === 0 && resp.Data?.code) return resp.Data.code;
-    throw new Error('wx.login失败: ' + shortJson(resp));
-}
+// 使用 getCode.js 统一接口
 
 // ==================== PDD 登录（单步登录）====================
 async function pddSingleLogin(wxid) {

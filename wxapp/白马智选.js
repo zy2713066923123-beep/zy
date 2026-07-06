@@ -1,3 +1,7 @@
+// cron: 58 10 * * *
+// cron: 0 21 * * *
+const { getSingleCode } = require('./getCode.js');
+const getWxCode = (wxid, appid) => getSingleCode(appid, String(wxid).split('#')[0].trim());
 const https = require('https');
 const http = require('http');
 const zlib = require('zlib');
@@ -127,13 +131,7 @@ async function commonPost(action, body = '') {
 }
 
 // ==================== 微信协议 ====================
-async function getWxCode(wxid) {
-    if (!WECHAT_SERVER) throw new Error('未设置 WECHAT_SERVER');
-    const resp = await jsonPost(WECHAT_SERVER + '/api/v1/wx/app/get/code', {}, { wxid, appid: WX_APPID });
-    if (!resp) return false;
-    if (resp.Code === 0 && resp.Data?.code) return resp.Data.code;
-    throw new Error('wx.login失败: ' + JSON.stringify(resp).substring(0, 200));
-}
+// 使用 getCode.js 统一接口
 
 // ==================== 登录逻辑 ====================
 async function loginByCode(code) {

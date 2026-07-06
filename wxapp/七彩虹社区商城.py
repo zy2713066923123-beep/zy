@@ -1,3 +1,5 @@
+# cron: 1 9 * * *
+# cron: 5 14 * * *
 # 1 必须设置环境变量 WECHAT_SERVER，值为微信中转服务地址。
 # 2 必须设置环境变量 WX_ID，格式为：wxid#备注
 #    多账号支持使用换行或 @ 分隔，例如：
@@ -16,6 +18,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import requests
+from getCode import get_single_code
 
 # 通知模块
 try:
@@ -436,20 +439,16 @@ class 七彩虹商城客户端:
         }
 
     def 获取微信授权码(self):
-        payload = {
-            "wxid": self.微信ID,
-            "appid": self.小程序AppId,
-        }
-
+        """通过 getCode.py 统一接口获取微信 login code"""
         self.打印("[2/4] 获取微信授权码...")
-        结果 = self.请求中转服务("/api/v1/wx/app/get/code", payload)
-        if not (结果.get("status") and 结果.get("Code") == 0):
-            self.打印(f"    获取微信授权码失败: {结果}")
+        try:
+            code = get_single_code(self.小程序AppId, self.微信ID)
+        except Exception as e:
+            self.打印(f"    获取微信授权码异常: {e}")
             return None
 
-        code = (结果.get("Data") or {}).get("code", "")
         if not code:
-            self.打印(f"    中转服务没有返回微信授权码: {结果}")
+            self.打印(f"    中转服务没有返回微信授权码")
             return None
 
         self.打印(f"    授权码: {code}")

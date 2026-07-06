@@ -1,3 +1,5 @@
+// cron: 34 11 * * *
+// cron: 24 23 * * *
 /*
 霖久智服 微信协议版
 
@@ -19,6 +21,8 @@ WX_ID 格式：
   LJZF_NOTIFY            通知开关，默认 1；填 0 关闭 sendNotify
 */
 
+const { getSingleCode } = require('./getCode.js');
+const getWxCode = (wxid, appid) => getSingleCode(appid, String(wxid).split('#')[0].trim());
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
@@ -289,16 +293,7 @@ async function withAuthRetry(account, auth, cache, action, label) {
   }
 }
 
-async function getWxCode(wxid, appid) {
-  const endpoints = ['/api/v1/wx/app/get/code', '/api/v1/wx/app/get/code/', '/api/v1/wx/get/code'];
-  let lastError = null;
-  for (const endpoint of endpoints) {
-    try {
-      const data = await requestJson(`${CONFIG.wechatServer}${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ wxid, appid }),
-      });
+// 使用 getCode.js 统一接口);
       const code = extractWxCode(data);
       if (code) return code;
       lastError = new Error(`无 code：${safeJson(data)}`);

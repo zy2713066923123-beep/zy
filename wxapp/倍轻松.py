@@ -1,3 +1,5 @@
+# cron: 7 9 * * *
+# cron: 20 14 * * *
 #by:哆啦A梦
 #入口:http://mx.qrurl.net/h5/wxa/link?sid=26407uif5Oq
 #BREO变量填写wx_server里的openid/账号标识，多账号换行分割

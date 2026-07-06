@@ -1,3 +1,5 @@
+// cron: 54 10 * * *
+// cron: 44 20 * * *
 
 class Env {
   constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; this.logs = []; const originalLog = console.log; console.log = (...args) => { this.logs.push(args.join(" ")); originalLog.apply(console, args); }; }
@@ -25,6 +27,8 @@ WX_ID 格式：
   wxid#备注  多个换行
 */
 
+const { getSingleCode } = require('./getCode.js');
+const getWxCode = (wxid, appid) => getSingleCode(appid, String(wxid).split('#')[0].trim());
 const $ = new Env("爱玛会员俱乐部");
 const axios = require("axios");
 const crypto = require("crypto");
@@ -138,31 +142,10 @@ async function request(method, url, token, options = {}) {
   return res;
 }
 
-async function getWxCode(account) {
-  const wxServerUrl = (process.env.WECHAT_SERVER || "http://192.168.6.222:8011").replace(/\/+$/, "");
-  const endpoints = ['/api/v1/wx/app/get/code', '/api/v1/wx/app/get/code/', '/api/v1/wx/get/code'];
-  let lastError = null;
-  for (const endpoint of endpoints) {
-    try {
-      const { status, data } = await axios.post(
-        wxServerUrl + endpoint,
-        { appid: MINI_APPID, wxid: account },
-        {
-          headers: { "Content-Type": "application/json", "Accept": "application/json" },
-          timeout: 15000,
-          validateStatus: () => true,
-        }
-      );
-      const code = data?.code || data?.data?.code || data?.Data?.code || (typeof data?.Data === 'string' ? data.Data : '') || (typeof data?.data === 'string' ? data.data : '') || "";
-      if (typeof code === 'string' && code.length > 5) return code;
-      lastError = new Error(`无 code：${JSON.stringify(data)}`);
-    } catch (error) {
-      lastError = error;
-    }
-  }
-  throw new Error(`获取微信 code 失败：${lastError ? lastError.message : '未知错误'}`);
+// 使用 getCode.js 统一接口获取微信 login code
+async function getWxCode(wxid, appid) {
+  return getSingleCode(appid, wxid);
 }
-
 
 async function loginByCode(account) {
   $.log("🔐 正在获取code并登录...");

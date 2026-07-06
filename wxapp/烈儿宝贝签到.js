@@ -1,3 +1,5 @@
+// cron: 50 10 * * *
+// cron: 28 20 * * *
 
 const { getSingleCode } = require('./getCode.js');
 class WeChatServer {

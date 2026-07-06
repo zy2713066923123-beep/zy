@@ -1,8 +1,10 @@
+# cron: 13 9 * * *
+# cron: 36 14 * * *
 # -*- coding: utf-8 -*-
 """
 巅峰美缝师 青龙自动任务脚本
 功能：自动登录、获取手机号（新用户）、签到、获取积分，支持多账号
-版本：1.0.5
+版本：1.0.8
 更新日期：2026-07-04
 
 环境变量：
@@ -19,12 +21,14 @@
 
 import json
 import os
+import re
 import sys
 import time
 import random
 import hashlib
 import datetime
 import requests
+from getCode import get_single_code
 from typing import Optional, Dict, Any, List, Tuple
 
 # 通知模块
@@ -60,8 +64,8 @@ RETRY_BACKOFF_BASE = 2
 DELAY_MIN = 1.0
 DELAY_MAX = 5.0
 
-DEBUG_MODE = False   # 关闭调试日志，避免干扰输出
-TEST_MODE = False    # 关闭测试信息打印
+DEBUG_MODE = False
+TEST_MODE = False
 
 BLACKLIST_ALIASES = []
 
@@ -213,121 +217,82 @@ def get_day_before_yesterday() -> str:
     return (datetime.datetime.now() - datetime.timedelta(days=2)).strftime("%Y-%m-%d")
 
 # ============================================================
-# 微信 Code 获取（一号协议：登录code）
+# 微信 Code 获取（一号协议 / 牛子 Niuzi）
 # ============================================================
 
-def get_wx_login_code(wxid: str) -> Optional[str]:
-    """
-    从一号协议服务器获取微信登录 code
-    接口: POST {WECHAT_SERVER}/api/v1/wx/app/get/code
-    请求体: {"wxid": "xxx", "appid": "wxAppId"}
-    成功判断: Success is True 或 Code == 0
-    提取路径: Data.code
-    重试策略: 指数退避 [2,4,8] 秒
-    """
-    server = os.environ.get(ENV_WECHAT_SERVER)
-    if not server:
-        print("❌ 环境变量 WECHAT_SERVER 未设置")
+def get_wx_code(wxid: str) -> Optional[str]:
+    """通过 getCode.py 统一接口获取微信登录 code（牛子/应用宝双协议）"""
+    actual_wxid = str(wxid).split('#')[0].strip()
+    try:
+        return get_single_code(WX_APP_ID, actual_wxid)
+    except Exception as e:
+        print(f"⚠️ 获取登录code异常: {e}")
         return None
 
-    url = f"{server}/api/v1/wx/app/get/code"
-    payload = {"wxid": wxid, "appid": WX_APP_ID}
-
-    retry_delays = [2, 4, 8]
-    for attempt, delay in enumerate(retry_delays):
-        try:
-            resp = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
-            if resp.status_code != 200:
-                debug_log(f"服务返回 HTTP {resp.status_code}，重试 {attempt+1}")
-                time.sleep(delay)
-                continue
-
-            data = resp.json()
-            if data.get("Success") is True:
-                code = data.get("Data", {}).get("code")
-                if code:
-                    debug_log(f"获取登录code成功 (Success格式): {code[:10]}...")
-                    return code
-            elif data.get("Code") == 0:
-                code = data.get("Data", {}).get("code")
-                if code:
-                    debug_log(f"获取登录code成功 (Code格式): {code[:10]}...")
-                    return code
-
-            debug_log(f"获取登录code响应异常 (第{attempt+1}次): {json.dumps(data, ensure_ascii=False)[:200]}")
-        except Exception as e:
-            debug_log(f"获取登录code异常: {e}")
-
-        if attempt < len(retry_delays) - 1:
-            time.sleep(delay)
-
-    return None
-
-# ============================================================
-# 微信手机号 Code 获取（二号协议：手机号授权code）
-# ============================================================
 
 def get_wx_phone_code(wxid: str) -> Optional[str]:
     """
-    从二号协议服务器获取微信手机号授权 code（长code）
+    从中转服务获取手机号授权 code（二号协议）
     接口: POST {WECHAT_SERVER}/api/v1/wx/app/get/all/mobile
-    请求体: {"wxid": "xxx", "appid": "wxAppId", "data": "", "opt": 0}
-    成功判断: Success==true 且 Code==0
-    提取路径: 优先 Data.Data → wx_phone.code，其次 Data.ALLMobile[0].code，兜底 Data.code
-    重试策略: 指数退避 [2,4,8] 秒
     """
-    server = os.environ.get(ENV_WECHAT_SERVER)
-    if not server:
-        print("❌ 环境变量 WECHAT_SERVER 未设置")
+    raw_server = os.environ.get(ENV_WECHAT_SERVER, "").strip()
+    if not raw_server:
         return None
 
-    url = f"{server}/api/v1/wx/app/get/all/mobile"
+    base = raw_server.rstrip("/")
+    if base.endswith("/get/code"):
+        url = base.replace("/get/code", "/get/all/mobile")
+    elif base.endswith("/code"):
+        url = base.replace("/code", "/get/all/mobile")
+    else:
+        url = f"{base}/api/v1/wx/app/get/all/mobile"
+
     payload = {"wxid": wxid, "appid": WX_APP_ID, "data": "", "opt": 0}
 
-    retry_delays = [2, 4, 8]
-    for attempt, delay in enumerate(retry_delays):
+    for attempt in range(MAX_RETRIES):
         try:
-            resp = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
+            resp = requests.post(
+                url,
+                json=payload,
+                timeout=REQUEST_TIMEOUT,
+                proxies={"http": None, "https": None},
+            )
             if resp.status_code != 200:
-                debug_log(f"手机号服务返回 HTTP {resp.status_code}，重试 {attempt+1}")
-                time.sleep(delay)
+                time.sleep(RETRY_BACKOFF_BASE * attempt)
                 continue
 
             data = resp.json()
-            if data.get("Success") is True and data.get("Code") == 0:
-                # 方式1：从 Data.Data 中解析 wx_phone.code
-                data_str = data.get("Data", {}).get("Data")
-                if data_str:
-                    try:
-                        inner = json.loads(data_str)
-                        wx_phone = inner.get("wx_phone", {})
-                        code = wx_phone.get("code")
-                        if code:
-                            debug_log(f"获取手机号code成功 (wx_phone): {code[:10]}...")
-                            return code
-                    except json.JSONDecodeError:
-                        pass
 
-                # 方式2：直接从 Data.ALLMobile 中取第一个 code
-                all_mobile = data.get("Data", {}).get("ALLMobile")
-                if all_mobile and len(all_mobile) > 0:
-                    code = all_mobile[0].get("code")
+            # 方式1：Data.Data → wx_phone.code
+            data_str = data.get("Data", {}).get("Data")
+            if data_str:
+                try:
+                    inner = json.loads(data_str)
+                    code = inner.get("wx_phone", {}).get("code")
                     if code:
-                        debug_log(f"获取手机号code成功 (ALLMobile): {code[:10]}...")
-                        return code
+                        return str(code)
+                except (json.JSONDecodeError, AttributeError):
+                    pass
 
-                # 方式3：兜底，尝试 Data.code
-                code = data.get("Data", {}).get("code")
+            # 方式2：Data.ALLMobile[0].code
+            all_mobile = data.get("Data", {}).get("ALLMobile")
+            if all_mobile and len(all_mobile) > 0:
+                code = all_mobile[0].get("code")
                 if code:
-                    debug_log(f"获取手机号code成功 (Data.code): {code[:10]}...")
-                    return code
+                    return str(code)
 
-            debug_log(f"获取手机号code响应异常 (第{attempt+1}次): {json.dumps(data, ensure_ascii=False)[:200]}")
+            # 方式3：Data.code 兜底
+            code = data.get("Data", {}).get("code") if isinstance(data.get("Data"), dict) else None
+            if code:
+                return str(code)
+
+            debug_log(f"手机号code响应异常 (第{attempt+1}次)")
+
         except Exception as e:
             debug_log(f"获取手机号code异常: {e}")
 
-        if attempt < len(retry_delays) - 1:
-            time.sleep(delay)
+        if attempt < MAX_RETRIES - 1:
+            time.sleep(RETRY_BACKOFF_BASE * (2 ** attempt))
 
     return None
 
@@ -440,11 +405,11 @@ def process_account(alias: str, wxid: str, idx: int, total: int) -> Dict:
     try:
         random_delay()
 
-        # 1. 获取登录 code（一号协议）
+        # 1. 获取登录 code（使用 getCode 公共模块）
         print(f"│ 📱 获取登录 code...", end=" ")
-        code = get_wx_login_code(wxid)
+        code = get_wx_code(wxid)
         if not code:
-            print("❌ 获取失败（请检查 WECHAT_SERVER 环境变量及服务状态）")
+            print("❌ 获取失败")
             result["error"] = "获取登录code失败"
             print(f"└─────────────────────────────────────")
             return result
@@ -579,7 +544,7 @@ def process_account(alias: str, wxid: str, idx: int, total: int) -> Dict:
 
 def main():
     print("=" * 60)
-    print(" 巅峰美缝师 青龙自动任务脚本 v1.0.5")
+    print(" 巅峰美缝师 青龙自动任务脚本 v1.0.8")
     print(f" 执行时间: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
 
@@ -635,7 +600,7 @@ def main():
         p1 = history.get(day_before, "-")
         p2 = history.get(yesterday, "-")
         p3 = history.get(today, "-")
-        change = r.get("points_change", 0)
+        change = r.get("points_change") or 0
         change_str = f"+{change}" if change > 0 else str(change) if change != 0 else "0"
         status = "✅" if r.get("success") else "❌"
         print(f"{idx:<4} {alias:<12} {str(p1):<12} {str(p2):<12} {str(p3):<12} {change_str:<8} {status}")
@@ -646,9 +611,12 @@ def main():
     for r in results:
         alias = r.get("alias", "未知")
         status = "成功" if r.get("success") else f'失败: {r.get("error", "")}'
-        change = r.get("points_change", 0)
+        change = r.get("points_change") or 0
         points = r.get("points_after", "-")
-        line = f"【{alias}】积分: {points} 变化: {change:+d} 状态: {status}" if isinstance(change, int) else f"【{alias}】状态: {status}"
+        if isinstance(change, (int, float)):
+            line = f"【{alias}】积分: {points} 变化: {change:+d} 状态: {status}"
+        else:
+            line = f"【{alias}】状态: {status}"
         content_lines.append(line)
 
     title = f"巅峰美缝师任务完成"
