@@ -375,7 +375,7 @@ class WechatAdapter {
                 
                 // 防御性检查：result 为 null/undefined 时直接跳过
                 if (!result || typeof result !== 'object') {
-                    console.log(`[牛子] 响应数据无效(非对象): ${JSON.stringify(result)}`);
+                    console.log(`[牛子] ⚠ 响应数据无效(非对象): ${JSON.stringify(result)}，尝试下一个端点`);
                     continue;
                 }
                 
@@ -609,8 +609,9 @@ class WeChatCodeGetter {
 
             // 2. 动态 fallback：即使初始化时应用宝检测失败，运行时再尝试一次
             const isPrimaryWechat = this.primaryAdapter instanceof WechatAdapter;
+            console.log(`[getCode] 🔄 动态fallback检查: isPrimaryWechat=${isPrimaryWechat}, yybServer=${this.yybServer}`);
             if (isPrimaryWechat) {
-                console.log(`[getCode] ⚠ 牛子服务失败，动态尝试应用宝服务...`);
+                console.log(`[getCode] ⚠ 牛子服务失败(${primaryError.message})，动态尝试应用宝服务...`);
                 try {
                     const dynamicYyb = new YYBAdapter(this.yybServer);
                     const yybHealthOk = await dynamicYyb.healthCheck();

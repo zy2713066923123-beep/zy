@@ -51,9 +51,18 @@ class YYBAdapter:
     def health_check(self) -> bool:
         """健康检查"""
         try:
-            r = requests.get(f"{self.server_url}/health", timeout=5)
-            return r.status_code == 200 and r.json().get("code") == 0
-        except Exception:
+            url = f"{self.server_url}/health"
+            print(f"[YYB] 健康检查: {url}")
+            r = requests.get(url, timeout=5)
+            print(f"[YYB] 健康检查响应: status={r.status_code}, body={r.text[:100]}")
+            
+            if r.status_code != 200:
+                return False
+            
+            data = r.json()
+            return data.get("code") == 0
+        except Exception as e:
+            print(f"[YYB] 健康检查异常: {e}")
             return False
     
     def get_accounts(self) -> List[Dict]:
@@ -345,8 +354,12 @@ class WechatAdapter:
         endpoints = [
             "/api/v1/wx/app/get/code",
             "/api/v1/wx/app/get/code/",
-            "/api/v1/wx/get/code"
+            "/api/v1/wx/get/code",
+            "/wx/app/get/code",
+            "/api/wx/app/get/code",
         ]
+        
+        print(f"[牛子] 尝试获取code: wxid={actual_wxid}, appid={app_id}")
         
         last_error = None
         for endpoint in endpoints:
@@ -354,8 +367,24 @@ class WechatAdapter:
             payload = {"wxid": actual_wxid, "appid": app_id}
             
             try:
+                print(f"[牛子] 请求: POST {url}")
                 r = requests.post(url, json=payload, timeout=15)
-                result = r.json() if r.status_code == 200 else {}
+                print(f"[牛子] 响应状态: {r.status_code}")
+                
+                if r.status_code == 404:
+                    print(f"[牛子] ⚠ 端点不存在: {endpoint}")
+                    continue
+                
+                # 防御性检查：解析 JSON，处理 null 响应
+                try:
+                    result = r.json() if r.text and r.text.strip() else {}
+                except json.JSONDecodeError:
+                    result = {}
+                
+                # 响应数据无效（null/非对象）
+                if not result or not isinstance(result, dict):
+                    print(f"[牛子] ⚠ 响应数据无效(非对象): {str(result)[:100]}")
+                    continue
                 
                 # 提取code (多层级兼容)
                 code = (result.get('code') or
@@ -370,11 +399,12 @@ class WechatAdapter:
                 last_error = Exception(f"无有效code: {json.dumps(result, ensure_ascii=False)[:150]}")
                 
             except requests.RequestException as e:
+                print(f"[牛子] 请求失败({endpoint}): {e}")
                 last_error = Exception(f"请求失败: {e}")
             except json.JSONDecodeError:
                 last_error = Exception("响应格式错误")
         
-        raise last_error or Exception("牛子获取code失败")
+        raise last_error or Exception("所有API端点均不可达或返回无效数据(404)")
     
     def _legacy_get_code(self, license: str, app_id: str) -> str:
         """传统协议(PadPro/iwechat)获取code"""
@@ -579,7 +609,7 @@ class WeChatCodeGetter:
             print(f"  {name}  (上线时间: {t})")
     
     def get_applet_code(self, app_id: str, identifier: str) -> str:
-        """为单个账号获取小程序Code
+        """为单个账号获取小程序Code（支持动态fallback）
         
         Args:
             app_id: 小程序AppID
@@ -590,7 +620,30 @@ class WeChatCodeGetter:
         Returns:
             str: 登录code
         """
-        return self.adapter.get_code(identifier, app_id)
+        # 先尝试主适配器
+        try:
+            return self.adapter.get_code(identifier, app_id)
+        except Exception as primary_error:
+            # 动态 fallback：如果主服务是牛子且失败，尝试应用宝
+            if isinstance(self.adapter, WechatAdapter):
+                yyb_server = (os.getenv("YYB_SERVER") or 
+                             os.getenv("YINGYOGBAO_SERVER") or 
+                             "http://127.0.0.1:8000")
+                
+                print(f"[getCode] ⚠ 牛子服务失败({primary_error})，动态尝试应用宝服务 @ {yyb_server}...")
+                try:
+                    dynamic_yyb = YYBAdapter(yyb_server)
+                    if dynamic_yyb.health_check():
+                        print(f"[getCode] ✓ 应用宝服务可用，切换获取code")
+                        code = dynamic_yyb.get_code(identifier, app_id)
+                        print(f"[getCode] ✓ 应用宝获取成功")
+                        return code
+                    else:
+                        print(f"[getCode] ✗ 应用宝服务不可用")
+                except Exception as dynamic_err:
+                    print(f"[getCode] ✗ 应用宝动态请求失败: {dynamic_err}")
+            
+            raise primary_error
     
     def get_codes_for_all_online(self, app_id: str) -> Dict[str, str]:
         """为所有在线账号获取code
