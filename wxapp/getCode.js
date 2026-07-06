@@ -23,15 +23,75 @@ const path = require('path');
 class YYBAdapter {
     constructor(serverUrl) {
         this.serverUrl = serverUrl.replace(/\/+$/, '');
+        this._accountCache = null;  // 缓存账号列表
+        this._accountCacheTime = 0;
     }
 
     async healthCheck() {
         try {
             const r = await axios.get(`${this.serverUrl}/health`, { timeout: 5000 });
-            return r.status === 200 && r.data?.code === 0;
+            return r.status === 200 && r.data?.ok === true;
         } catch {
             return false;
         }
+    }
+    
+    /**
+     * 获取并缓存账号列表
+     */
+    async _getAccountList() {
+        const now = Date.now();
+        // 缓存5分钟
+        if (this._accountCache && (now - this._accountCacheTime) < 5 * 60 * 1000) {
+            return this._accountCache;
+        }
+        
+        try {
+            const r = await axios.get(`${this.serverUrl}/accounts`, { timeout: 15000 });
+            if (r.data?.code !== 0 || !Array.isArray(r.data?.data)) {
+                return [];
+            }
+            this._accountCache = r.data.data;
+            this._accountCacheTime = now;
+            return this._accountCache;
+        } catch (e) {
+            console.log(`[YYB] 获取账号列表失败: ${e.message}`);
+            return [];
+        }
+    }
+    
+    /**
+     * 根据 wxid/openid 查找 YYB 数据库中的 ref (优先用 id)
+     */
+    async _resolveRef(wxidOrOpenid) {
+        const accounts = await this._getAccountList();
+        
+        // 精确匹配 openid
+        for (const acc of accounts) {
+            if (acc.openid === wxidOrOpenid) {
+                console.log(`[YYB] 匹配成功: ${wxidOrOpenid} → id=${acc.id}, openid=${acc.openid}`);
+                // 优先使用 id（数字），其次用 openid
+                return String(acc.id);
+            }
+        }
+        
+        // 模糊匹配（部分包含）
+        for (const acc of accounts) {
+            if (acc.openid?.includes(wxidOrOpenid) || wxidOrOpenid.includes(acc.openid || '')) {
+                console.log(`[YYB] 模糊匹配: ${wxidOrOpenid} → id=${acc.id}, openid=${acc.openid}`);
+                return String(acc.id);
+            }
+        }
+        
+        // 打印所有可用账号帮助诊断
+        if (accounts.length > 0) {
+            console.log(`[YYB] 可用账号: ${accounts.map(a => `${a.id}:${a.openid}`).join(', ')}`);
+        } else {
+            console.log(`[YYB] ⚠ 无可用账号！请先在应用宝扫码登录`);
+        }
+        
+        // 返回原始值，让服务端报错以便调试
+        return wxidOrOpenid;
     }
 
     async getAccounts() {
@@ -71,18 +131,32 @@ class YYBAdapter {
     async getCode(ref, appId) {
         const url = `${this.serverUrl}/wxapp/getCode`;
         
+        // 先将 wxid/openid 转换为 YYB 数据库中的 ref（账号 ID）
+        const resolvedRef = await this._resolveRef(ref);
+        
         try {
-            const r = await axios.post(url, { ref, app_id: appId }, { 
+            console.log(`[YYB] 请求code: ref=${resolvedRef}, app_id=${appId}`);
+            const r = await axios.post(url, { ref: resolvedRef, app_id: appId }, { 
                 headers: { 'Content-Type': 'application/json' },
-                timeout: 30000 
+                timeout: 30000,
+                validateStatus: () => true
             });
             
-            const result = r.data;
+            console.log(`[YYB] 响应状态: ${r.status}`);
+            
+            if (r.status === 404) {
+                throw new Error('接口不存在(404)');
+            }
+            
+            if (r.status === 400) {
+                throw new Error(`参数错误 - 可能账号不存在: ${JSON.stringify(r.data)}`);
+            }
             
             if (r.status === 409) {
                 throw new Error('账号login_buffer已过期，需要重新扫码登录');
             }
             
+            const result = r.data;
             const codeVal = result?.code ?? -1;
             if (codeVal !== 0) {
                 throw new Error(`[${codeVal}] ${result?.msg || `HTTP ${r.status}`}`);
@@ -91,6 +165,10 @@ class YYBAdapter {
             // 从 data.result.code 提取
             const data = result?.data;
             if (!data || typeof data !== 'object') {
+                // YYB 新版格式可能直接返回 { openid, result: { code: "xxx" } }
+                if (data?.result?.code) {
+                    return data.result.code;
+                }
                 throw new Error(`响应data异常: ${JSON.stringify(data).slice(0, 100)}`);
             }
             
@@ -264,12 +342,29 @@ class WechatAdapter {
 
     async _niuziGetCode(wxid, appId) {
         const actualWxid = String(wxid).split('#')[0].trim();
-        const endpoints = ['/api/v1/wx/app/get/code', '/api/v1/wx/app/get/code/', '/api/v1/wx/get/code'];
+        // 尝试多个可能的 API 端点
+        const endpoints = [
+            '/api/v1/wx/app/get/code',
+            '/api/v1/wx/app/get/code/',
+            '/api/v1/wx/get/code',
+            '/wx/app/get/code',       // 某些变体
+            '/api/wx/app/get/code',    // 某些变体
+        ];
         
-        let lastError = null;
+        console.log(`[牛子] 尝试获取code: wxid=${actualWxid}, appid=${appId}`);
+        
         for (const ep of endpoints) {
+            const fullUrl = `${this.serverUrl}${ep}`;
             try {
-                const r = await axios.post(`${this.serverUrl}${ep}`, { wxid: actualWxid, appid: appId }, { timeout: 20000 });
+                console.log(`[牛子] 请求: POST ${fullUrl}`);
+                const r = await axios.post(fullUrl, { wxid: actualWxid, appid: appId }, { timeout: 20000, validateStatus: () => true });
+                console.log(`[牛子] 响应状态: ${r.status}`);
+                
+                if (r.status === 404) {
+                    console.log(`[牛子] ⚠ 端点不存在: ${ep}`);
+                    continue;  // 尝试下一个端点
+                }
+                
                 const result = r.data;
                 
                 let code = result?.code ||
@@ -280,12 +375,12 @@ class WechatAdapter {
                 
                 if (code && typeof code === 'string' && code.length > 5) return code;
                 
-                lastError = new Error(`无有效code: ${JSON.stringify(result).slice(0, 150)}`);
+                console.log(`[牛子] 无有效code: ${JSON.stringify(result).slice(0, 100)}`);
             } catch (e) {
-                lastError = e;
+                console.log(`[牛子] 请求失败(${ep}): ${e.message}`);
             }
         }
-        throw lastError || new Error('牛子获取code失败');
+        throw new Error('所有API端点均不可达或返回无效数据(404)');
     }
 
     async _legacyGetCode(license, appId) {
