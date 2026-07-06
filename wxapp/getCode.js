@@ -1,13 +1,13 @@
 /**
  * 微信小程序登录Code获取模块（双协议支持）
- * 支持两种服务：
- *   1) YYB (应用宝) - yyb_go 微信扫码代理服务
- *   2) Wechat (牛子) - 微信iPad/iPhone协议服务
+ * 
+ * 默认策略: 双协议 Fallback 模式
+ *   优先使用牛子(Wechat)获取code，失败后自动切换到应用宝(YYB)重试
  * 
  * 环境变量：
  *     WECHAT_SERVER: 牛子协议服务地址（默认 http://192.168.6.222:8011）
  *     YYB_SERVER:    应用宝服务地址（默认 http://127.0.0.1:8000）
- *     SERVER_TYPE:   强制指定: yyb / wechat（不设则自动检测）
+ *     SERVER_TYPE:   强制指定: yyb / wechat / auto（默认 auto = 双协议fallback）
  *     ADMIN_KEY:     牛子管理密钥（仅WeChatPadPro/iwechat需要）
  *     WX_ID:         可选，指定要获取Code的微信账号ID
  */
@@ -321,7 +321,10 @@ class WeChatCodeGetter {
         this.adminKey = process.env.ADMIN_KEY;
         this.wxIdFilter = process.env.WX_ID;
         this.protocolType = 'Unknown';
-        this.adapter = null;
+        
+        // 双协议适配器（fallback模式）
+        this.primaryAdapter = null;   // 主适配器
+        this.fallbackAdapter = null;  // 备用适配器
         this.serverUrl = '';
         
         this.scriptDir = __dirname;
@@ -346,49 +349,60 @@ class WeChatCodeGetter {
                 protocolType = {
                     'yyb': 'YYB', 'yingyongbao': 'YYB', '应用宝': 'YYB',
                     'wechat': 'Wechat', 'niuzi': 'Wechat', '牛子': 'Wechat',
-                }[envType] || 'Unknown';
+                    'auto': 'Auto',  // 显式指定自动模式
+                }[envType] || 'Auto';  // 默认 Auto = 双协议 fallback
             }
         }
         
-        if (!protocolType && fs.existsSync(this.envCheckFile)) {
-            try {
-                const saved = JSON.parse(fs.readFileSync(this.envCheckFile, 'utf-8'));
-                if (saved.protocol_type && saved.protocol_type !== 'Unknown') {
-                    protocolType = saved.protocol_type;
-                }
-            } catch (e) {}
-        }
-        
-        // 自动检测
+        // 默认使用 Auto（双协议 fallback）模式
         if (!protocolType || protocolType === 'Unknown') {
-            console.log('[getCode] 正在自动检测服务类型...');
-            
-            const testYyb = new YYBAdapter(this.yybServer);
-            if (await testYyb.healthCheck()) {
-                protocolType = 'YYB';
-                console.log(`[getCode] ✓ 检测到 应用宝 服务: ${this.yybServer}`);
-            } else {
-                const testWx = new WechatAdapter(this.wechatServer, this.adminKey);
-                if (await testWx.healthCheck()) {
-                    protocolType = 'Wechat';
-                    console.log(`[getCode] ✓ 检测到 牛子 服务: ${this.wechatServer}`);
-                } else {
-                    console.log(`[getCode] ✗ 未检测到可用服务`);
-                    console.log(`[getCode]   应用宝(${this.yybServer}): 不可达`);
-                    console.log(`[getCode]   牛子(${this.wechatServer}): 不可达`);
-                }
-            }
+            protocolType = 'Auto';
+        }
+
+        if (protocolType === 'Auto') {
+            // 双协议 Fallback 模式：牛子优先 + 应用宝备用
+            await this._initAutoMode();
+        } else if (protocolType === 'YYB') {
+            // 纯应用宝模式
+            this.primaryAdapter = new YYBAdapter(this.yybServer);
+            this.fallbackAdapter = null;
+            this.protocolType = 'YYB';
+            this.serverUrl = this.yybServer;
+            console.log(`[getCode] 当前服务: YYB(应用宝) @ ${this.yybServer}`);
+        } else if (protocolType === 'Wechat') {
+            // 纯牛子模式
+            this.primaryAdapter = new WechatAdapter(this.wechatServer, this.adminKey);
+            this.fallbackAdapter = null;
+            this.protocolType = 'Wechat';
+            this.serverUrl = this.wechatServer;
+            console.log(`[getCode] 当前服务: Wechat(牛子) @ ${this.wechatServer}`);
         }
         
-        this.protocolType = protocolType;
+        // 缓存检测结果
+        try {
+            fs.writeFileSync(this.envCheckFile, JSON.stringify({ 
+                protocol_type: protocolType,
+                primary: this.primaryAdapter ? this.protocolType : null,
+                fallback: this.fallbackAdapter ? (this.protocolType === 'Wechat' ? 'YYB' : 'Wechat') : null
+            }), 'utf-8');
+        } catch (e) {}
+    }
+
+    /**
+     * 初始化双协议 Fallback 模式
+     * 策略：牛子优先获取code → 失败自动切换到应用宝重试
+     */
+    async _initAutoMode() {
+        this.protocolType = 'Auto(Fallback)';
         
-        if (protocolType === 'YYB') {
-            this.adapter = new YYBAdapter(this.yybServer);
-            this.serverUrl = this.yybServer;
-        } else if (protocolType === 'Wechat') {
-            this.adapter = new WechatAdapter(this.wechatServer, this.adminKey);
-            this.serverUrl = this.wechatServer;
-        } else {
+        const wechatOk = await new WechatAdapter(this.wechatServer, this.adminKey).healthCheck();
+        const yybOk = await new YYBAdapter(this.yybServer).healthCheck();
+
+        let services = [];
+        if (wechatOk) services.push('Wechat');
+        if (yybOk) services.push('YYB');
+
+        if (services.length === 0) {
             throw new Error(
                 '无法确定服务类型！请设置环境变量：\n' +
                 '  WECHAT_SERVER=http://你的牛子地址:端口\n' +
@@ -396,13 +410,29 @@ class WeChatCodeGetter {
                 '  或设置 SERVER_TYPE=wechat / SERVER_TYPE=yyb 强制指定'
             );
         }
-        
-        // 缓存检测结果
-        try {
-            fs.writeFileSync(this.envCheckFile, JSON.stringify({ protocol_type: protocolType }), 'utf-8');
-        } catch (e) {}
-        
-        console.log(`[getCode] 当前服务: ${protocolType} @ ${this.serverUrl}`);
+
+        // 牛子优先作为主适配器
+        if (wechatOk) {
+            this.primaryAdapter = new WechatAdapter(this.wechatServer, this.adminKey);
+            this.serverUrl = `${this.wechatServer}(主)`;
+        } else {
+            this.primaryAdapter = new YYBAdapter(this.yybServer);
+            this.serverUrl = `${this.yybServer}(主)`;
+        }
+
+        // 配置备用适配器
+        if (wechatOk && yybOk) {
+            this.fallbackAdapter = new YYBAdapter(this.yybServer);
+            this.serverUrl = `${this.wechatServer}→${this.yybServer}`;
+            console.log(`[getCode] 双协议Fallback模式: 牛子(主) + 应用宝(备)`);
+        } else if (!wechatOk && yybOk) {
+            this.fallbackAdapter = null;  // 只有YYB可用，不需要fallback
+            this.serverUrl = this.yybServer;
+            console.log(`[getCode] 仅应用宝可用 @ ${this.yybServer}`);
+        } else {
+            this.fallbackAdapter = null;  // 只有牛子可用
+            console.log(`[getCode] 仅牛子可用 @ ${this.wechatServer}`);
+        }
     }
 
     _filterAccounts(accounts) {
@@ -424,7 +454,7 @@ class WeChatCodeGetter {
     }
 
     async getOnlineAccounts() {
-        const accounts = await this.adapter.getAccounts();
+        const accounts = await this.primaryAdapter.getAccounts();
         const filtered = this._filterAccounts(accounts);
         
         return filtered.map(acc => ({
@@ -443,8 +473,34 @@ class WeChatCodeGetter {
         }
     }
 
+    /**
+     * 获取单个账号的code（支持双协议fallback）
+     * 优先使用主适配器，失败后自动切换到备用适配器重试
+     */
     async getAppletCode(appId, identifier) {
-        return await this.adapter.getCode(identifier, appId);
+        // 先尝试主适配器（牛子）
+        try {
+            const code = await this.primaryAdapter.getCode(identifier, appId);
+            return code;
+        } catch (primaryError) {
+            // 如果有备用适配器，尝试备用
+            if (this.fallbackAdapter) {
+                console.log(`[getCode] ⚠ 主服务获取失败，切换到备用服务重试...`);
+                try {
+                    const code = await this.fallbackAdapter.getCode(identifier, appId);
+                    console.log(`[getCode] ✓ 备用服务获取成功`);
+                    return code;
+                } catch (fallbackError) {
+                    throw new Error(
+                        `主服务和备用服务均失败:\n` +
+                        `  [主] ${primaryError.message}\n` +
+                        `  [备] ${fallbackError.message}`
+                    );
+                }
+            }
+            // 没有备用，直接抛出原错误
+            throw primaryError;
+        }
     }
 
     async getCodesForAllOnlineAccounts(appId) {
@@ -473,7 +529,7 @@ class WeChatCodeGetter {
             }
             
             try {
-                const code = await this.adapter.getCode(ref, appId);
+                const code = await this.getAppletCode(appId, ref);
                 codes[name] = code;
                 console.log(`[getCode] ✓ ${name}: ${code.slice(0, 20)}...`);
             } catch (e) {
