@@ -73,6 +73,7 @@ class YYBAdapter {
     
     /**
      * 根据 wxid/openid 查找 YYB 数据库中的 ref (优先用 id)
+     * 如果精确匹配失败且有可用账号，会尝试模糊匹配或使用第一个可用账号
      */
     async _resolveRef(wxidOrOpenid) {
         const accounts = await this._getAccountList();
@@ -80,9 +81,18 @@ class YYBAdapter {
         // 精确匹配 openid
         for (const acc of accounts) {
             if (acc.openid === wxidOrOpenid) {
-                console.log(`[YYB] 匹配成功: ${wxidOrOpenid} → id=${acc.id}, openid=${acc.openid}`);
-                // 优先使用 id（数字），其次用 openid
+                console.log(`[YYB] 精确匹配: ${wxidOrOpenid} → id=${acc.id}, openid=${acc.openid}`);
                 return String(acc.id);
+            }
+        }
+        
+        // 匹配 id (数字)
+        if (/^\d+$/.test(String(wxidOrOpenid))) {
+            for (const acc of accounts) {
+                if (String(acc.id) === String(wxidOrOpenid)) {
+                    console.log(`[YYB] ID匹配: ${wxidOrOpenid} → id=${acc.id}, openid=${acc.openid}`);
+                    return String(acc.id);
+                }
             }
         }
         
@@ -93,10 +103,25 @@ class YYBAdapter {
                 return String(acc.id);
             }
         }
-        
+
         // 打印所有可用账号帮助诊断
         if (accounts.length > 0) {
-            console.log(`[YYB] 可用账号: ${accounts.map(a => `${a.id}:${a.openid}`).join(', ')}`);
+            console.log(`[YYB] ⚠ 无法精确匹配 "${wxidOrOpenid}"，可用账号: ${accounts.map(a => `${a.id}:${a.openid}`).join(', ')}`);
+            
+            // 如果只有一个可用账号，直接使用它（常见于单账号场景）
+            if (accounts.length === 1) {
+                console.log(`[YYB] 自动使用唯一可用账号: id=${accounts[0].id}, openid=${accounts[0].openid}`);
+                return String(accounts[0].id);
+            }
+            
+            // 多个账号时，让用户通过备注号(#数字)来选择
+            // 尝试从原始输入中提取备注号
+            const noteMatch = wxidOrOpenid.match(/#(\d+)$/);
+            if (noteMatch && accounts[noteMatch[1] - 1]) {
+                const selectedAcc = accounts[noteMatch[1] - 1];
+                console.log(`[YYB] 通过备注#${noteMatch[1]}选择: id=${selectedAcc.id}, openid=${selectedAcc.openid}`);
+                return String(selectedAcc.id);
+            }
         } else {
             console.log(`[YYB] ⚠ 无可用账号！请先在应用宝扫码登录`);
         }
@@ -156,11 +181,13 @@ class YYBAdapter {
             console.log(`[YYB] 响应状态: ${r.status}`);
             
             if (r.status === 404) {
-                throw new Error('接口不存在(404)');
+                // 404 可能是接口路径错误或账号不存在
+                const errMsg = r.data?.msg || r.data?.error || JSON.stringify(r.data).slice(0, 80);
+                throw new Error(`接口/账号不存在(404): ${errMsg}`);
             }
             
             if (r.status === 400) {
-                throw new Error(`参数错误 - 可能账号不存在: ${JSON.stringify(r.data)}`);
+                throw new Error(`参数错误 - 可能账号不存在: ${JSON.stringify(r.data).slice(0, 100)}`);
             }
             
             if (r.status === 409) {
