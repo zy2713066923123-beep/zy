@@ -29,9 +29,20 @@ class YYBAdapter {
 
     async healthCheck() {
         try {
-            const r = await axios.get(`${this.serverUrl}/health`, { timeout: 5000 });
-            return r.status === 200 && r.data?.ok === true;
-        } catch {
+            const url = `${this.serverUrl}/health`;
+            console.log(`[YYB] 健康检查: ${url}`);
+            const r = await axios.get(url, { timeout: 5000 });
+            console.log(`[YYB] 响应状态: ${r.status}, body: ${JSON.stringify(r.data).slice(0, 100)}`);
+            
+            // 兼容多种响应格式:
+            // - YYB Go: { code: 0, msg: "success", data: { ok: true } }
+            // - 其他: { ok: true }
+            if (r.status !== 200) return false;
+            
+            const d = r.data;
+            return d?.code === 0 || d?.data?.ok === true || d?.ok === true;
+        } catch (e) {
+            console.log(`[YYB] 健康检查异常: ${e.message}`);
             return false;
         }
     }
