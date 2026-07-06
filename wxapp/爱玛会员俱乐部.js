@@ -149,7 +149,7 @@ async function getWxCode(wxid, appid) {
 
 async function loginByCode(account) {
   $.log("🔐 正在获取code并登录...");
-  const code = await getWxCode(account);
+  const code = await getWxCode(account, MINI_APPID);
   const res = await request("post", `${WXCLIENT_URL}/user/members:login`, "", {
     data: { code },
     account,

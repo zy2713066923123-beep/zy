@@ -203,7 +203,7 @@ async function main() {
         // Step 1: 获取微信授权 code
         log(`${label} 🔑 获取微信授权code...`);
         let code;
-        try { code = await getWxCode(wxid); } catch (e) { log(`${label} ❌ ${e.message}`); continue; }
+        try { code = await getWxCode(wxid, WX_APPID); } catch (e) { log(`${label} ❌ ${e.message}`); continue; }
         if (!code) { log(`${label} ❌ 获取code失败`); continue; }
 
         // Step 2: code 登录获取 token

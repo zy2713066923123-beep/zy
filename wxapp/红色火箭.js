@@ -393,7 +393,7 @@ async function fillCachedMobileIfMissing(wxid, cache, cacheKey) {
 // 重新走一遍协议登录链路，避免签到/兑换时因为 7005 直接失败。
 async function refreshProtocolSession(wxid, cache, cacheKey, reason = '') {
     if (reason) log('  🔄 准备重新协议登录: ' + reason);
-    const code = await getWxCode(wxid);
+    const code = await getWxCode(wxid, APPID);
     const ids = await getOpenIdAndUnionId(code);
     const phoneInfo = await getPhoneCodeInfo(wxid);
     const phoneCode = phoneInfo.phoneCode;
@@ -1111,7 +1111,7 @@ async function runTask(accountInfo) {
             if (cached) log('  ⚠️ 缓存CK失效，重新协议登录');
 
             // 2. 获取微信code
-            const code = await getWxCode(wxid);
+            const code = await getWxCode(wxid, APPID);
             log('  ✅ wx.login code获取成功');
 
             // 3. 获取openId和unionId

@@ -228,7 +228,7 @@ async function jsonPost(url, headers, bodyObj) {
 // ==================== PDD 登录（单步登录）====================
 async function pddSingleLogin(wxid) {
     log(`  🔐 Code登录 wxid=${mask(wxid)} ...`);
-    const code = await getWxCode(wxid);
+    const code = await getWxCode(wxid, MINI_APP_ID);
     log(`  [1/2] 获取code: ${mask(code, 6, 6)}`);
     await randomSleep(300, 600);
 

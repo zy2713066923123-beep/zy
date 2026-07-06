@@ -342,6 +342,12 @@ class WechatAdapter {
 
     async _niuziGetCode(wxid, appId) {
         const actualWxid = String(wxid).split('#')[0].trim();
+        
+        // 防御性检查：appid 不能为空
+        if (!appId || appId === 'undefined') {
+            throw new Error(`appid 参数缺失！调用方必须传入有效的 appid。当前值: ${appId}`);
+        }
+        
         // 尝试多个可能的 API 端点
         const endpoints = [
             '/api/v1/wx/app/get/code',
