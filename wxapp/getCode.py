@@ -72,7 +72,7 @@ class YYBAdapter:
             print(f"[YYB] 健康检查异常: {e}")
             return False
     
-    async def _get_account_list(self) -> List[Dict]:
+    def _get_account_list(self) -> List[Dict]:
         """获取并缓存账号列表"""
         now = time.time()
         if self._accounts_cache and (now - self._cache_time) < 300:
