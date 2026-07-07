@@ -55,8 +55,13 @@ from pathlib import Path
 # 2. 牛子协议高级模式（可选）：获取加密密钥/云函数/手机号等
 try:
     from getCode import get_single_code
+    try:
+        from getCode import get_single_operate_wx_data
+    except ImportError:
+        get_single_operate_wx_data = None
     _HAS_GETCODE = True
 except ImportError:
+    get_single_operate_wx_data = None
     _HAS_GETCODE = False
 
 logging.basicConfig(level=logging.INFO,
@@ -160,6 +165,11 @@ class WxAdapter:
     
     def __init__(self, server_url=None):
         self.server_url = (server_url or DEFAULT_WECHAT_SERVER).rstrip("/")
+        self.yyb_server = (
+            os.environ.get("YYB_SERVER") or
+            os.environ.get("YINGYOGBAO_SERVER") or
+            ""
+        ).rstrip("/")
         self.base = self.server_url + "/api/v1/wx/"
         self.session = requests.Session()
         self.session.headers["Content-Type"] = "application/json"
@@ -182,35 +192,195 @@ class WxAdapter:
             return {"success": False, "error": data.get("Message", "获取code失败")}
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    def _raw_id(self, wxid):
+        return str(wxid).split("#")[0].strip()
+
+    def _is_wxid_style(self, wxid):
+        return self._raw_id(wxid).lower().startswith("wxid_")
+
+    def _can_use_yyb(self, wxid):
+        return bool(self.yyb_server) and not self._is_wxid_style(wxid)
+
+    def _can_use_unified_wxapp(self, wxid):
+        return not self._is_wxid_style(wxid) and (bool(get_single_operate_wx_data) or bool(self.yyb_server))
+
+    def _yyb_accounts(self):
+        if not self.yyb_server:
+            return []
+        resp = self.session.get(f"{self.yyb_server}/accounts", timeout=15)
+        resp.raise_for_status()
+        body = resp.json()
+        accounts = body.get("data", []) if isinstance(body, dict) else []
+        return accounts if isinstance(accounts, list) else []
+
+    def _yyb_resolve_ref(self, wxid):
+        raw_id = self._raw_id(wxid)
+        accounts = self._yyb_accounts()
+
+        for acc in accounts:
+            if acc.get("openid") == raw_id:
+                return str(acc.get("id", "") or raw_id)
+
+        if raw_id.isdigit():
+            for acc in accounts:
+                if str(acc.get("id", "")) == raw_id:
+                    return raw_id
+
+        for acc in accounts:
+            openid = acc.get("openid", "") or ""
+            if openid and (raw_id in openid or openid in raw_id):
+                return str(acc.get("id", "") or raw_id)
+
+        if len(accounts) == 1:
+            return str(accounts[0].get("id", "") or raw_id)
+        return raw_id
+
+    def _yyb_call(self, endpoint, wxid, appid, payload=None):
+        if not self.yyb_server:
+            raise RuntimeError("未配置 YYB_SERVER")
+        body = {
+            "ref": self._yyb_resolve_ref(wxid),
+            "app_id": appid,
+        }
+        if payload is not None:
+            body["payload"] = payload
+        resp = self.session.post(f"{self.yyb_server}/wxapp/{endpoint}", json=body, timeout=30)
+        if resp.status_code == 409:
+            raise RuntimeError("账号 login_buffer 已过期，需要重新扫码登录")
+        resp.raise_for_status()
+        result = resp.json()
+        if not isinstance(result, dict) or result.get("code", -1) != 0:
+            msg = result.get("msg", resp.text[:120]) if isinstance(result, dict) else resp.text[:120]
+            raise RuntimeError(msg)
+        data = result.get("data", {})
+        if not isinstance(data, dict):
+            raise RuntimeError(f"YYB响应data异常: {str(data)[:120]}")
+        inner = data.get("result", data)
+        if not isinstance(inner, dict):
+            raise RuntimeError(f"YYB响应result异常: {str(inner)[:120]}")
+        return inner
+
+    def _yyb_operate_wx_data(self, wxid, appid, payload):
+        return self._yyb_call("operateWxData", wxid, appid, payload)
+
+    def _unified_operate_wx_data(self, wxid, appid, payload):
+        if get_single_operate_wx_data:
+            try:
+                return get_single_operate_wx_data(appid, wxid, payload)
+            except Exception as e:
+                log.warning(f"getCode通用接口失败，尝试直连YYB: {e}")
+        return self._yyb_operate_wx_data(wxid, appid, payload)
+
+    def _decode_jsonish(self, value):
+        if isinstance(value, dict):
+            return value
+        if not isinstance(value, str) or not value.strip():
+            return value
+        text = value.strip()
+        if text[:1] in "{[":
+            try:
+                return json.loads(text)
+            except Exception:
+                return value
+        try:
+            decoded = base64.b64decode(text + "=" * (-len(text) % 4)).decode()
+            if decoded[:1] in "{[":
+                return json.loads(decoded)
+        except Exception:
+            pass
+        return value
+
+    def _extract_encrypt_key(self, data):
+        data = self._decode_jsonish(data)
+        if not isinstance(data, dict):
+            return None
+
+        code = data.get("Code")
+        if code not in (None, 0) and data.get("Success") is not True:
+            return None
+
+        inner = data.get("Data") or data.get("data") or data.get("result") or data.get("rawData") or {}
+        if isinstance(inner, dict):
+            jsapi_err = inner.get("jsapiBaseresponse", {}).get("errcode")
+            if jsapi_err is not None and jsapi_err != 0:
+                return None
+
+        key = data.get("encrypt_key") or data.get("encryptKey")
+        iv = data.get("iv")
+        if key and iv:
+            return {
+                "encrypt_key": key,
+                "iv": iv,
+                "version": data.get("version") or data.get("encryptVer") or 3,
+                "expire_in": data.get("expire_in") or data.get("expireIn"),
+            }
+
+        if isinstance(inner, dict) or isinstance(inner, str):
+            parsed = self._extract_encrypt_key(inner)
+            if parsed:
+                return parsed
+        return None
+
+    def _extract_encrypted_data(self, data):
+        data = self._decode_jsonish(data)
+        if not isinstance(data, dict):
+            return None
+
+        encrypted_data = data.get("encryptedData") or data.get("encrypted_data")
+        iv = data.get("iv")
+        if encrypted_data and iv:
+            return {"encryptedData": encrypted_data, "iv": iv, "rawData": data}
+
+        for field in ("Data", "data", "result", "rawData"):
+            if field in data:
+                parsed = self._extract_encrypted_data(data[field])
+                if parsed:
+                    return parsed
+        return None
     
     def get_user_encrypt_key(self, wxid, appid):
-        """获取用户加密密钥（webapi_getuserencryptkey）- 仅牛子支持"""
-        body = {"wxid": wxid, "appid": appid, "data": json.dumps({
-            "api_name": "webapi_getuserencryptkey", "data": {}
-        })}
+        """获取用户加密密钥（webapi_getuserencryptkey）"""
+        payload = {
+            "api_name": "webapi_getuserencryptkey",
+            "data": {},
+        }
+
+        if self._can_use_unified_wxapp(wxid):
+            try:
+                data = self._unified_operate_wx_data(wxid, appid, payload)
+                parsed = self._extract_encrypt_key(data)
+                if parsed:
+                    log.info(f"YYB 获取加密密钥成功 version={parsed.get('version')}")
+                    return {"success": True, **parsed}
+                log.warning(f"YYB get_user_encrypt_key无法提取密钥: {data}")
+            except Exception as e:
+                log.warning(f"YYB get_user_encrypt_key失败，尝试牛子API: {e}")
+
+        body = {"wxid": wxid, "appid": appid, "data": json.dumps(payload)}
         data = self._post("app/call/function", body)
-        outer_ok = data.get("Code") == 0 or data.get("Success") is True
-        if not outer_ok:
-            return {"success": False, "error": data.get("Message", str(data))}
-        inner = data.get("Data") or {}
-        b64_str = inner.get("data", "")
-        if not b64_str:
-            return {"success": False, "error": "无 data 字段"}
-        try:
-            outer = json.loads(base64.b64decode(b64_str).decode())
-            key_data = json.loads(outer["data"])
-            return {
-                "success": True,
-                "encrypt_key": key_data["encrypt_key"],
-                "iv": key_data["iv"],
-                "version": key_data.get("version", 3),
-                "expire_in": key_data.get("expire_in"),
-            }
-        except Exception as e:
-            return {"success": False, "error": f"解析失败: {e}"}
+        parsed = self._extract_encrypt_key(data)
+        if parsed:
+            log.info(f"牛子 获取加密密钥成功 version={parsed.get('version')}")
+            return {"success": True, **parsed}
+        return {"success": False, "error": f"无法提取加密密钥: {str(data)[:200]}"}
     
     def call_function(self, wxid, appid, data_str):
-        """调用小程序云函数 - 仅牛子支持"""
+        """调用小程序云函数，兼容牛子与YYB"""
+        if self._can_use_unified_wxapp(wxid):
+            try:
+                payload = json.loads(data_str) if isinstance(data_str, str) else (data_str or {})
+            except Exception:
+                payload = {"data": data_str}
+            try:
+                data = self._unified_operate_wx_data(wxid, appid, payload)
+                encrypted = self._extract_encrypted_data(data)
+                if encrypted:
+                    return {"success": True, **encrypted}
+                return {"success": True, "rawData": data}
+            except Exception as e:
+                log.warning(f"YYB call_function失败，尝试牛子API: {e}")
+
         body = {"wxid": wxid, "appid": appid, "data": data_str}
         data = self._post("app/call/function", body)
         outer_ok = data.get("Code") == 0 or data.get("Success") is True
