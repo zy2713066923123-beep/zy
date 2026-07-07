@@ -7,7 +7,7 @@
  * 环境变量：
  *     WECHAT_SERVER: 牛子协议服务地址（默认 http://192.168.6.222:8011）
  *     YYB_SERVER:    应用宝服务地址（默认 http://127.0.0.1:8000）
-
+ *
  *     ADMIN_KEY:     牛子管理密钥（仅WeChatPadPro/iwechat需要）
  *     WX_ID:         可选，指定要获取Code的微信账号ID
  */
@@ -234,6 +234,65 @@ class YYBAdapter {
             throw new Error(`[YYB] 请求code失败: ${e.message}`);
         }
     }
+
+    async getPhoneNumber(ref, appId) {
+        const url = `${this.serverUrl}/wxapp/getPhoneNumber`;
+        
+        // 先将 wxid/openid 转换为 YYB 数据库中的 ref（账号 ID）
+        const resolvedRef = await this._resolveRef(ref);
+        
+        try {
+            console.log(`[YYB] 请求手机号code: ref=${resolvedRef}, app_id=${appId}`);
+            const r = await axios.post(url, { ref: resolvedRef, app_id: appId }, { 
+                headers: { 'Content-Type': 'application/json' },
+                timeout: 30000,
+                validateStatus: () => true
+            });
+            
+            console.log(`[YYB] 响应状态: ${r.status}`);
+            
+            if (r.status === 404) {
+                const errMsg = r.data?.msg || r.data?.error || JSON.stringify(r.data).slice(0, 80);
+                throw new Error(`接口/账号不存在(404): ${errMsg}`);
+            }
+            
+            if (r.status === 400) {
+                throw new Error(`参数错误 - 可能账号不存在: ${JSON.stringify(r.data).slice(0, 100)}`);
+            }
+            
+            if (r.status === 409) {
+                throw new Error('账号login_buffer已过期，需要重新扫码登录');
+            }
+            
+            const result = r.data;
+            const codeVal = result?.code ?? -1;
+            if (codeVal !== 0) {
+                throw new Error(`[${codeVal}] ${result?.msg || `HTTP ${r.status}`}`);
+            }
+            
+            // 从 data.result.code 提取
+            const data = result?.data;
+            if (!data || typeof data !== 'object') {
+                if (data?.result?.code) return data.result.code;
+                throw new Error(`响应data异常: ${JSON.stringify(data).slice(0, 100)}`);
+            }
+            
+            const inner = data.result;
+            if (!inner || typeof inner !== 'object') {
+                throw new Error(`result异常: ${JSON.stringify(inner).slice(0, 100)}`);
+            }
+            
+            const code = inner.code;
+            if (!code || typeof code !== 'string' || code.length < 5) {
+                throw new Error(`未拿到有效手机号code: ${JSON.stringify(result).slice(0, 150)}`);
+            }
+            
+            return code;
+        } catch (e) {
+            if (e.message.includes('[YYB]') || e.message.includes('login_buffer')) throw e;
+            throw new Error(`[YYB] 请求手机号code失败: ${e.message}`);
+        }
+    }
 }
 
 
@@ -292,7 +351,7 @@ class WechatAdapter {
     }
 
     async _getNiuziAccounts() {
-        const url = `${this.serverUrl}/api/v1/wx/user/status`;
+        const url = `${this.serverUrl}/api/v1/wx/user.status`;
         try {
             const r = await axios.get(url, { timeout: 60000 });
             const result = r.data;
@@ -680,6 +739,58 @@ class WeChatCodeGetter {
         }
     }
 
+    /**
+     * 获取单个账号的手机号Code（智能路由）
+     * - wxid_* 格式 → 直接走牛子（暂不支持）
+     * - openid 格式 → 直接走应用宝
+     */
+    async getAppletPhoneNumber(appId, identifier) {
+        const targetProtocol = this._detectProtocolForIdentifier(identifier);
+        console.log(`[getCode] 手机号路由: ${identifier} → ${targetProtocol}`);
+
+        // 按需健康检查：只检查目标协议的服务是否可用（按协议分别缓存）
+        const cacheKey = `hc_${targetProtocol}`;
+        if (!this._healthCache || this._healthCache[cacheKey] === undefined) {
+            this._healthCache = this._healthCache || {};
+            if (targetProtocol === 'yyb') {
+                const ok = await new YYBAdapter(this.yybServer).healthCheck();
+                this._healthCache.hc_yyb = ok;
+            } else {
+                const ok = await new WechatAdapter(this.wechatServer, this.adminKey).healthCheck();
+                this._healthCache.hc_wechat = ok;
+            }
+        }
+        const isHealthy = this._healthCache[cacheKey];
+
+        let primary, primaryName;
+        
+        if (targetProtocol === 'yyb') {
+            primary = new YYBAdapter(this.yybServer);
+            primaryName = '应用宝';
+        } else {
+            primary = new WechatAdapter(this.wechatServer, this.adminKey);
+            primaryName = '牛子';
+        }
+
+        if (!isHealthy) {
+            throw new Error(`${primaryName}服务不可用 (${targetProtocol === 'yyb' ? this.yybServer : this.wechatServer})`);
+        }
+
+        try {
+            let code;
+            if (targetProtocol === 'yyb') {
+                code = await primary.getPhoneNumber(identifier, appId);
+            } else {
+                throw new Error(`${primaryName}(牛子协议暂不支持手机号code)`);
+            }
+            console.log(`[getCode] ✓ ${primaryName}获取手机号成功`);
+            return code;
+        } catch (primaryError) {
+            console.log(`[getCode] ⚠ ${primaryName}获取手机号失败: ${primaryError.message}`);
+            throw primaryError;
+        }
+    }
+
     async getCodesForAllOnlineAccounts(appId) {
         const online = await this.getOnlineAccounts();
         const codes = {};
@@ -755,11 +866,33 @@ async function getSingleCode(appId, identifier) {
     }
 }
 
+/**
+ * 为指定账号获取手机号Code（便捷函数）
+ * 
+ * Args:
+ *   appId: 小程序AppID
+ *   identifier: 应用宝 id/uin/openid（目前仅YYB支持）
+ *   
+ * Returns:
+ *   手机号code
+ */
+async function getSinglePhoneNumber(appId, identifier) {
+    const getter = new WeChatCodeGetter();
+    await getter.init();
+    try {
+        return await getter.getAppletPhoneNumber(appId, identifier);
+    } catch (e) {
+        console.log(`[getCode] 获取手机号失败（可能需重新登录或账号不存在）: ${e.message}`);
+        throw e;
+    }
+}
+
 module.exports = {
     WeChatCodeGetter,
     getWechatCodes,
     printOnlineStatus,
     getSingleCode,
+    getSinglePhoneNumber,
     YYBAdapter,
     WechatAdapter
 };

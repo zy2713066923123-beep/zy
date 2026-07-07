@@ -252,6 +252,75 @@ class YYBAdapter:
             raise Exception("[YYB] code响应格式错误")
 
 
+    def get_phone_number_code(self, ref: str, app_id: str) -> str:
+        """获取手机号Code
+        
+        Args:
+            ref: 账号标识 (id/uin/openid)
+            app_id: 小程序AppID
+            
+        Returns:
+            str: 手机号code
+        """
+        url = f"{self.server_url}/wxapp/getPhoneNumber"
+        
+        # 先将 wxid/openid 转换为 YYB 数据库中的 ref（账号 ID）
+        resolved_ref = self._resolve_ref(ref)
+        
+        payload = {
+            "ref": resolved_ref,
+            "app_id": app_id
+        }
+        
+        headers = {"Content-Type": "application/json"}
+        
+        try:
+            print(f"[YYB] 请求手机号code: ref={resolved_ref}, app_id={app_id}")
+            r = requests.post(url, json=payload, headers=headers, timeout=30)
+            print(f"[YYB] 响应状态: {r.status_code}")
+            
+            if r.status_code == 404:
+                err_msg = r.json().get("msg") or r.json().get("error", "") or r.text[:80]
+                raise Exception(f"接口/账号不存在(404): {err_msg}")
+            
+            if r.status_code == 400:
+                raise Exception(f"参数错误 - 可能账号不存在: {r.text[:100]}")
+            
+            if r.status_code == 409:
+                raise Exception("账号login_buffer已过期，需要重新扫码登录")
+            
+            result = r.json()
+            code_val = 0
+            if isinstance(result, dict):
+                code_val = result.get("code", -1)
+                
+            if code_val != 0:
+                msg = result.get("msg", f"HTTP {r.status_code}")
+                raise Exception(f"[{code_val}] {msg}")
+            
+            # 从 data.result.code 提取
+            data = result.get("data", {})
+            if not isinstance(data, dict):
+                if isinstance(data, dict) and data.get("result", {}).get("code"):
+                    return data["result"]["code"]
+                raise Exception(f"响应data异常: {str(data)[:100]}")
+                
+            inner = data.get("result", {})
+            if not isinstance(inner, dict):
+                raise Exception(f"result异常: {str(inner)[:100]}")
+                
+            code = inner.get("code")
+            if not code or not isinstance(code, str) or len(code) < 5:
+                raise Exception(f"未拿到有效手机号code: {json.dumps(result, ensure_ascii=False)[:150]}")
+            
+            return code
+            
+        except requests.RequestException as e:
+            raise Exception(f"[YYB] 请求手机号code失败: {e}")
+        except json.JSONDecodeError:
+            raise Exception("[YYB] 手机号code响应格式错误")
+
+
 # ============================================================
 #  Wechat (牛子协议) 适配器
 # ============================================================
@@ -701,6 +770,54 @@ class WeChatCodeGetter:
             print(f"[getCode] ⚠ {name}获取失败: {e}")
             raise
     
+    def get_applet_phone_number(self, app_id: str, identifier: str) -> str:
+        """获取单个账号的手机号Code（智能路由）
+        
+        - wxid_* 格式 → 直接走牛子（如果支持）
+        - openid 格式 → 直接走应用宝
+        - 只检查目标协议的健康状态，结果按协议缓存
+        """
+        target_protocol = self._detect_protocol_for_identifier(identifier)
+        print(f"[getCode] 手机号路由: {identifier} → {target_protocol}")
+        
+        # 按需健康检查：只检查目标协议的服务是否可用
+        cache_key = f"hc_{target_protocol}"
+        if cache_key not in self._health_cache:
+            if target_protocol == 'yyb':
+                ok = YYBAdapter(self.yyb_server).health_check()
+                self._health_cache["hc_yyb"] = ok
+            else:
+                ok = WechatAdapter(self.wechat_server, self.admin_key).health_check()
+                self._health_cache["hc_wechat"] = ok
+            self._health_cache[cache_key] = ok
+        
+        is_healthy = self._health_cache.get(cache_key, False)
+        
+        # 选择适配器
+        if target_protocol == 'yyb':
+            adapter = YYBAdapter(self.yyb_server)
+            name = '应用宝'
+            svc_url = self.yyb_server
+        else:
+            adapter = WechatAdapter(self.wechat_server, self.admin_key)
+            name = '牛子'
+            svc_url = self.wechat_server
+        
+        # 目标服务不可用
+        if not is_healthy:
+            raise Exception(f"{name}服务不可用 ({svc_url})")
+        
+        try:
+            if target_protocol == 'yyb':
+                code = adapter.get_phone_number_code(identifier, app_id)
+            else:
+                raise Exception(f"{name}(牛子协议暂不支持手机号code)")
+            print(f"[getCode] ✓ {name}获取手机号成功")
+            return code
+        except Exception as e:
+            print(f"[getCode] ⚠ {name}获取手机号失败: {e}")
+            raise
+
     def _filter_accounts(self, accounts: List[Dict]) -> List[Dict]:
         """根据WX_ID过滤账号"""
         if not self.target_wx_ids:
@@ -834,6 +951,27 @@ def get_single_code(app_id: str, identifier: str) -> str:
         return getter.get_applet_code(app_id, identifier)
     except Exception as e:
         print(f"[getCode] 获取失败（可能需重新登录）: {e}")
+        raise
+
+
+def get_single_phone_number(app_id: str, identifier: str) -> str:
+    """
+    为指定账号获取手机号Code（便捷函数）
+    
+    Args:
+        app_id: 小程序AppID
+        identifier: 
+          - 应用宝: id/uin/openid（目前仅YYB支持）
+          
+    Returns:
+        str: 手机号code
+    """
+    getter = WeChatCodeGetter()
+    getter.init()
+    try:
+        return getter.get_applet_phone_number(app_id, identifier)
+    except Exception as e:
+        print(f"[getCode] 获取手机号失败（可能需重新登录或账号不存在）: {e}")
         raise
 
 
