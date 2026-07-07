@@ -108,20 +108,28 @@ class YYBAdapter {
         if (accounts.length > 0) {
             console.log(`[YYB] ⚠ 无法精确匹配 "${wxidOrOpenid}"，可用账号: ${accounts.map(a => `${a.id}:${a.openid}`).join(', ')}`);
             
-            // 如果只有一个可用账号，直接使用它（常见于单账号场景）
+            // 尝试从原始输入中提取备注号 (#数字)，用于在多账号中选择
+            const noteMatch = String(wxidOrOpenid).match(/#(\d+)$/);
+            
+            if (noteMatch && accounts.length >= parseInt(noteMatch[1])) {
+                // 备注号在范围内，直接选择（1-based index）
+                const idx = parseInt(noteMatch[1]) - 1;
+                const selectedAcc = accounts[idx];
+                console.log(`[YYB] 通过备注#${noteMatch[1]}选择: id=${selectedAcc.id}, openid=${selectedAcc.openid}`);
+                return String(selectedAcc.id);
+            }
+            
             if (accounts.length === 1) {
+                // 只有一个可用账号，直接使用
                 console.log(`[YYB] 自动使用唯一可用账号: id=${accounts[0].id}, openid=${accounts[0].openid}`);
                 return String(accounts[0].id);
             }
             
-            // 多个账号时，让用户通过备注号(#数字)来选择
-            // 尝试从原始输入中提取备注号
-            const noteMatch = wxidOrOpenid.match(/#(\d+)$/);
-            if (noteMatch && accounts[noteMatch[1] - 1]) {
-                const selectedAcc = accounts[noteMatch[1] - 1];
-                console.log(`[YYB] 通过备注#${noteMatch[1]}选择: id=${selectedAcc.id}, openid=${selectedAcc.openid}`);
-                return String(selectedAcc.id);
-            }
+            // 多个账号且无法通过备注选择时，使用第一个账号并给出警告
+            // （适用于大多数单 YYB 账号使用的场景）
+            console.log(`[YYB] ⚠ 多个账号无法确定目标，默认使用第1个账号: id=${accounts[0].id}`);
+            console.log(`[YYB]   提示: 如需指定其他账号，请在 wxid 后添加 #序号 (如 #2)`);
+            return String(accounts[0].id);
         } else {
             console.log(`[YYB] ⚠ 无可用账号！请先在应用宝扫码登录`);
         }
