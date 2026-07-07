@@ -381,9 +381,9 @@ async function getHomePage(pdduid, cookieStr, tubetoken) {
         fun_pl: 2
     };
     const result = await manorPost(MANOR_BASE + '/manor-query/proxy/home/page', pdduid, cookieStr, body);
-    if (!result) return null, null;
-    if (result.error_code === 40001) { log(`  [首页] 验证失败, Cookie可能已过期`); return null, null; }
-    return result.tubetoken || tubetoken, result.water_amount || 0;
+    if (!result) return [null, null];
+    if (result.error_code === 40001) { log(`  [首页] 验证失败, Cookie可能已过期`); return [null, null]; }
+    return [result.tubetoken || tubetoken, result.water_amount || 0];
 }
 
 // 任务列表
@@ -435,7 +435,7 @@ async function getMissionList(pdduid, cookieStr, tubetoken) {
     const canClaim = tasks.filter(t => !t.is_draw && t.is_open && t.finished_count >= 1);
     const needAccept = tasks.filter(t => !t.is_draw && !t.is_open && t.finished_count >= 1);
     log(`  [任务] 共${tasks.length}个, 可领取: ${canClaim.length}, 需接受: ${needAccept.length}`);
-    return canClaim, needAccept;
+    return [canClaim, needAccept];
 }
 
 // 接受任务
@@ -498,7 +498,7 @@ async function getStealChances(pdduid, cookieStr, tubetoken) {
     const robots = stealInfo.robots || [];
     log(`  [偷水] 免费次数: ${freeChance}, 每日总次数: ${dailyFreeChance}, 剩余: ${restChance}`);
     const robotUids = robots.map(r => ({ uid: r.uid, nickname: r.nickname || '机器人', water: r.water || 0 }));
-    return restChance, robotUids;
+    return [restChance, robotUids];
 }
 
 // 从单个好友偷水
