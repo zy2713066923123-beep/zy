@@ -7,7 +7,7 @@
  * 环境变量：
  *     WECHAT_SERVER: 牛子协议服务地址（默认 http://192.168.6.222:8011）
  *     YYB_SERVER:    应用宝服务地址（默认 http://127.0.0.1:8000）
- *     SERVER_TYPE:   强制指定: yyb / wechat / auto（默认 auto = 双协议fallback）
+
  *     ADMIN_KEY:     牛子管理密钥（仅WeChatPadPro/iwechat需要）
  *     WX_ID:         可选，指定要获取Code的微信账号ID
  */
@@ -489,6 +489,16 @@ class WeChatCodeGetter {
             console.log(`[getCode] WX_ID筛选: ${this.targetWxIds.join(', ')}`);
         }
         
+        // 预解析每个ID的目标协议: wxid_ 开头 → 牛子, 其他 → 应用宝
+        this._idProtocolMap = new Map();
+        for (const id of this.targetWxIds) {
+            const rawId = String(id).split('#')[0].trim();
+            // wxid_ 格式 或 10位以上纯字母数字混合且含小写字母开头 → 判定为微信wxid
+            const isWxidStyle = /^wxid_[a-z0-9]{5,20}$/.test(rawId) || 
+                                (/^[a-z][a-z0-9]{10,25}$/.test(rawId) && !rawId.includes('-'));
+            this._idProtocolMap.set(id, isWxidStyle ? 'wechat' : 'yyb');
+        }
+        
         this._forceType = forceType;
     }
 
@@ -542,50 +552,23 @@ class WeChatCodeGetter {
     }
 
     /**
-     * 初始化双协议 Fallback 模式
-     * 策略：牛子优先获取code → 失败自动切换到应用宝重试
+     * 初始化 Auto 模式（智能路由）
+     * 健康检查延迟到 getAppletCode 首次调用时执行
      */
     async _initAutoMode() {
-        this.protocolType = 'Auto(Fallback)';
+        this.protocolType = 'Auto(智能路由)';
         
-        const wechatOk = await new WechatAdapter(this.wechatServer, this.adminKey).healthCheck();
-        const yybOk = await new YYBAdapter(this.yybServer).healthCheck();
-
-        let services = [];
-        if (wechatOk) services.push('Wechat');
-        if (yybOk) services.push('YYB');
-
-        if (services.length === 0) {
-            throw new Error(
-                '无法确定服务类型！请设置环境变量：\n' +
-                '  WECHAT_SERVER=http://你的牛子地址:端口\n' +
-                '  YYB_SERVER=http://你的应用宝地址:端口\n' +
-                '  或设置 SERVER_TYPE=wechat / SERVER_TYPE=yyb 强制指定'
-            );
-        }
-
-        // 牛子优先作为主适配器
-        if (wechatOk) {
-            this.primaryAdapter = new WechatAdapter(this.wechatServer, this.adminKey);
-            this.serverUrl = `${this.wechatServer}(主)`;
-        } else {
-            this.primaryAdapter = new YYBAdapter(this.yybServer);
-            this.serverUrl = `${this.yybServer}(主)`;
-        }
-
-        // 配置备用适配器
-        if (wechatOk && yybOk) {
-            this.fallbackAdapter = new YYBAdapter(this.yybServer);
-            this.serverUrl = `${this.wechatServer}→${this.yybServer}`;
-            console.log(`[getCode] 双协议Fallback模式: 牛子(主) + 应用宝(备)`);
-        } else if (!wechatOk && yybOk) {
-            this.fallbackAdapter = null;  // 只有YYB可用，不需要fallback
-            this.serverUrl = this.yybServer;
-            console.log(`[getCode] 仅应用宝可用 @ ${this.yybServer}`);
-        } else {
-            this.fallbackAdapter = null;  // 只有牛子可用
-            console.log(`[getCode] 仅牛子可用 @ ${this.wechatServer}`);
-        }
+        // 预创建适配器实例（不立即做健康检查）
+        this._wechatAdapterLazy = new WechatAdapter(this.wechatServer, this.adminKey);
+        this._yybAdapterLazy = new YYBAdapter(this.yybServer);
+        
+        // primaryAdapter 保留给 getOnlineAccounts 使用（默认用牛子查在线列表）
+        this.primaryAdapter = this._wechatAdapterLazy;
+        this.fallbackAdapter = null;
+        
+        const wechatIds = [...this._idProtocolMap.values()].filter(v => v === 'wechat').length;
+        const yybIds = [...this._idProtocolMap.values()].filter(v => v === 'yyb').length;
+        console.log(`[getCode] 智能路由: 牛子账号×${wechatIds} + 应用宝账号×${yybIds}, 延迟健康检查`);
     }
 
     _filterAccounts(accounts) {
@@ -627,60 +610,72 @@ class WeChatCodeGetter {
     }
 
     /**
-     * 获取单个账号的code（支持双协议fallback）
-     * 优先使用主适配器，失败后自动切换到备用适配器重试
-     * 如果没有预配置备用适配器，会尝试动态创建应用宝适配器
+     * 根据 identifier 判断应该使用哪个协议
+     * wxid_ 开头 / 微信wxid格式 → wechat
+     * openid 格式(含横杠/大写字母) → yyb
+     */
+    _detectProtocolForIdentifier(identifier) {
+        const rawId = String(identifier).split('#')[0].trim();
+        
+        // 先查预解析的映射表（来自 WX_ID 环境变量）
+        for (const [id, proto] of this._idProtocolMap.entries()) {
+            if (String(id).split('#')[0].trim() === rawId || id === identifier) {
+                return proto;
+            }
+        }
+        
+        // 兜底：根据格式推断
+        if (/^wxid_/i.test(rawId) || /^[a-z][a-z0-9]{10,25}$/.test(rawId)) {
+            return 'wechat';
+        }
+        return 'yyb';
+    }
+
+    /**
+     * 获取单个账号的code（智能路由，无需无谓重试）
+     * - wxid_* 格式 → 直接走牛子
+     * - openid 格式 → 直接走应用宝
+     * - 仅当目标适配器失败时才 fallback 到另一个
      */
     async getAppletCode(appId, identifier) {
-        // 先尝试主适配器（牛子）
+        const targetProtocol = this._detectProtocolForIdentifier(identifier);
+        console.log(`[getCode] 路由: ${identifier} → ${targetProtocol}`);
+
+        // 按需健康检查：只检查目标协议的服务是否可用（按协议分别缓存）
+        const cacheKey = `hc_${targetProtocol}`;
+        if (!this._healthCache || this._healthCache[cacheKey] === undefined) {
+            this._healthCache = this._healthCache || {};
+            if (targetProtocol === 'yyb') {
+                const ok = await new YYBAdapter(this.yybServer).healthCheck();
+                this._healthCache.hc_yyb = ok;
+            } else {
+                const ok = await new WechatAdapter(this.wechatServer, this.adminKey).healthCheck();
+                this._healthCache.hc_wechat = ok;
+            }
+        }
+        const isHealthy = this._healthCache[cacheKey];
+
+        let primary, primaryName;
+        
+        if (targetProtocol === 'yyb') {
+            primary = new YYBAdapter(this.yybServer);
+            primaryName = '应用宝';
+        } else {
+            primary = new WechatAdapter(this.wechatServer, this.adminKey);
+            primaryName = '牛子';
+        }
+
+        // 目标服务不可用，直接报错（不再跨协议fallback，因为格式不兼容）
+        if (!isHealthy) {
+            throw new Error(`${primaryName}服务不可用 (${targetProtocol === 'yyb' ? this.yybServer : this.wechatServer})`);
+        }
+
         try {
-            const code = await this.primaryAdapter.getCode(identifier, appId);
+            const code = await primary.getCode(identifier, appId);
+            console.log(`[getCode] ✓ ${primaryName}获取成功`);
             return code;
         } catch (primaryError) {
-            // 1. 优先使用已配置的备用适配器
-            if (this.fallbackAdapter) {
-                console.log(`[getCode] ⚠ 主服务获取失败，切换到备用服务重试...`);
-                try {
-                    const code = await this.fallbackAdapter.getCode(identifier, appId);
-                    console.log(`[getCode] ✓ 备用服务获取成功`);
-                    return code;
-                } catch (fallbackError) {
-                    throw new Error(
-                        `主服务和备用服务均失败:\n` +
-                        `  [主] ${primaryError.message}\n` +
-                        `  [备] ${fallbackError.message}`
-                    );
-                }
-            }
-
-            // 2. 动态 fallback：即使初始化时应用宝检测失败，运行时再尝试一次
-            const isPrimaryWechat = this.primaryAdapter instanceof WechatAdapter;
-            console.log(`[getCode] 🔄 动态fallback检查: isPrimaryWechat=${isPrimaryWechat}, yybServer=${this.yybServer}`);
-            if (isPrimaryWechat) {
-                console.log(`[getCode] ⚠ 牛子服务失败(${primaryError.message})，动态尝试应用宝服务...`);
-                try {
-                    const dynamicYyb = new YYBAdapter(this.yybServer);
-                    const yybHealthOk = await dynamicYyb.healthCheck();
-                    
-                    if (yybHealthOk) {
-                        console.log(`[getCode] ✓ 应用宝服务可用，切换获取code`);
-                        const code = await dynamicYyb.getCode(identifier, appId);
-                        console.log(`[getCode] ✓ 应用宝获取成功`);
-                        
-                        // 缓存成功的服务实例供后续使用
-                        if (!this.fallbackAdapter) {
-                            this.fallbackAdapter = dynamicYyb;
-                        }
-                        return code;
-                    } else {
-                        console.log(`[getCode] ✗ 应用宝服务不可用`);
-                    }
-                } catch (dynamicError) {
-                    console.log(`[getCode] ✗ 应用宝动态请求失败: ${dynamicError.message}`);
-                }
-            }
-
-            // 所有方式都失败
+            console.log(`[getCode] ⚠ ${primaryName}获取失败: ${primaryError.message}`);
             throw primaryError;
         }
     }
