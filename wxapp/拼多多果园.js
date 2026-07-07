@@ -293,13 +293,16 @@ async function pddSingleLogin(wxid) {
 
 // ==================== 果园通用请求头 ====================
 function makeManorHeaders(cookieStr) {
-    return {
-        'User-Agent': getRandomUA(),
-        'Accept': 'application/json, text/plain, */*',
-        'Content-Type': 'application/json;charset=UTF-8',
-        'Origin': ORCHARD_API_BASE,
-        'Referer': `${ORCHARD_API_BASE}/garden_index_lz_0.html`
-    }, cookieStrToDict(cookieStr);
+    return [
+        {
+            'User-Agent': getRandomUA(),
+            'Accept': 'application/json, text/plain, */*',
+            'Content-Type': 'application/json;charset=UTF-8',
+            'Origin': ORCHARD_API_BASE,
+            'Referer': `${ORCHARD_API_BASE}/garden_index_lz_0.html`
+        },
+        cookieStrToDict(cookieStr)
+    ];
 }
 
 async function manorPost(url, pdduid, cookieStr, body) {
