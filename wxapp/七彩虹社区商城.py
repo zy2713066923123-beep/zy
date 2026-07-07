@@ -18,7 +18,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import requests
-from getCode import get_single_code
+from getCode import get_single_code, get_single_phone_number
 
 # 通知模块
 try:
@@ -213,6 +213,15 @@ class 七彩虹商城客户端:
         return hashlib.md5(文本.encode("utf-8")).hexdigest()
 
     @staticmethod
+    def 是应用宝账号(标识):
+        原始标识 = str(标识 or "").split("#", 1)[0].strip()
+        if re.match(r"^wxid_", 原始标识, re.I):
+            return False
+        if re.match(r"^[a-z][a-z0-9]{10,25}$", 原始标识):
+            return False
+        return True
+
+    @staticmethod
     def 结果码(结果):
         if not isinstance(结果, dict):
             return None
@@ -397,6 +406,9 @@ class 七彩虹商城客户端:
         return bool(self.access_token and self.refresh_token)
 
     def 获取手机号信息(self):
+        if self.是应用宝账号(self.微信ID):
+            return self.通过应用宝获取手机号信息()
+
         payload = {
             "wxid": self.微信ID,
             "appid": self.小程序AppId,
@@ -436,6 +448,31 @@ class 七彩虹商城客户端:
             "code": code,
             "encrypted_data": encrypted_data,
             "iv": iv,
+        }
+
+    def 通过应用宝获取手机号信息(self):
+        self.打印("[1/4] 获取手机号信息...")
+        try:
+            code = get_single_phone_number(self.小程序AppId, self.微信ID)
+        except Exception as 异常:
+            self.打印(f"    YYB 获取手机号 code 异常: {异常}")
+            return None
+
+        if not code:
+            self.打印("    YYB 没有返回手机号 code")
+            return None
+
+        self.phone = ""
+        self.phone_code = code
+
+        self.打印("    手机号: YYB仅返回授权code，登录校验后读取")
+        self.打印(f"    手机号 code: {脱敏(code, 24, 6)}")
+
+        return {
+            "phone": "",
+            "code": code,
+            "encrypted_data": "",
+            "iv": "",
         }
 
     def 获取微信授权码(self):
