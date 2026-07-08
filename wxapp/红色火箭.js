@@ -1,11 +1,11 @@
-// cron: 49 9,14 * * * cron: 37 9,21 * * *
- * 红色火箭（华泰基金指慧家）
- *
- * 环境变量：
- *   WX_ID              必填，格式：wxid#备注，多账号换行或 & 分隔
- *   WECHAT_SERVER      微信协议服务地址
- *   HSJJ_AUTO_CLAIM_H5 设为 '0' 或 'false' 关闭自动提现（默认开启）
- */
+// cron: 49 9,14 * * * 
+//  红色火箭（华泰基金指慧家）
+ 
+//  环境变量：
+//    WX_ID              必填，格式：wxid#备注，多账号换行或 & 分隔
+//   WECHAT_SERVER      微信协议服务地址
+//    HSJJ_AUTO_CLAIM_H5 设为 '0' 或 'false' 关闭自动提现（默认开启）
+ 
 
 'use strict';
 
