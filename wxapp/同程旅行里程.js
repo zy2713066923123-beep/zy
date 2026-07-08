@@ -2,43 +2,29 @@
 // cron: 21 8 * * *
 
 const axios = require("axios");
-// ====================== WX_ID 账号（环境变量 WX_ID = identifier#alias，多行换行或&分隔） ======================
-const ACCOUNTS = (process.env.WX_ID || "")
-    .split(/\r?\n|&/)
-    .map(s => s.trim())
-    .filter(Boolean)
-    .map(s => {
-        const [identifier, alias] = s.split("#").map(item => item.trim());
-        return { identifier: identifier || s, alias: alias || "" };
-    });
-if (!ACCOUNTS.length) {
-    console.error("未配置环境变量 WX_ID，请设置后重试（格式：identifier#alias，多行换行或&分隔）");
-    process.exit(1);
+
+// ====== 标准Env模式 ======
+class Env {
+    constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; this.logs = []; const originalLog = console.log; console.log = (...args) => { this.logs.push(args.join(" ")); originalLog.apply(console, args); }; }
+    log(...args) { console.log(...args); this.logs.push(args.join(" ")); }
+    checkEnv(ckName) {
+        const val = process.env.WX_ID || process.env[ckName];
+        if (val) this.userList = val.split(/[\n&]+/).map(v => String(v).split('#')[0].trim()).filter(Boolean);
+        else console.log('未找到环境变量 WX_ID');
+    }
+    async done() { try { const notify = require('./sendNotify'); await notify.sendNotify(this.name, this.logs.join('\n')); } catch(e) { console.log('通知发送失败', e); } }
 }
 
-const WECHAT_SERVER = (process.env.WECHAT_SERVER || process.env.YYB_SERVER || "http://192.168.6.222:8011").replace(/\/+$/, "");
+// ====== 引入 getCode.js 模块（支持双协议：牛子+应用宝）======
+const { getSingleCode } = require('./getCode.js');
+const getWxCode = (wxid, appid) => getSingleCode(appid, String(wxid).split('#')[0].trim());
+
+const $ = new Env("同程旅行里程签到");
+$.checkEnv("WX_ID");
 
 const APPID = "wx336dcaf6a1ecf632";
 
-async function getWxCode(identifier) {
-    if (!identifier) return null;
-    const url = `${WECHAT_SERVER}/wxapp/getCode`;
-    try {
-        const { data } = await axios.post(url, { ref: identifier, app_id: APPID }, { timeout: 20000, proxy: false });
-        const code = data && data.data && data.data.result && data.data.result.code;
-        if (!data || data.code !== 0 || !code) {
-            console.log(WECHAT_SERVER + " 获取code失败: " + JSON.stringify(data));
-            return null;
-        }
-        console.log(WECHAT_SERVER + " 获取code成功");
-        return code;
-    } catch (e) {
-        console.log(WECHAT_SERVER + " 获取code异常: " + e.message);
-        return null;
-    }
-}
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-let userIdx = 1;
 
 const APP = { name: "同程旅行里程签到", appid: APPID };
 
@@ -81,11 +67,10 @@ async function request(options) {
 }
 
 class Tongcheng {
-    constructor({ identifier, alias }, index) {
-        this.identifier = identifier;
-        this.alias = alias;
-        this.index = index;
-        this.openid = identifier;
+    constructor(wxid) {
+        this.wxid = wxid;
+        this.index = $.userIdx++;
+        this.openid = wxid;
         this.loginInfo = {};
     }
 
@@ -105,7 +90,7 @@ class Tongcheng {
     }
 
     async login() {
-        const code = await getWxCode(this.identifier);
+        const code = await getWxCode(this.wxid, APPID);
         const res = await request({
             method: "POST",
             url: "https://wx.17u.cn/wechatappapi/wxUser/login",
@@ -123,6 +108,7 @@ class Tongcheng {
             memberId: content.memberId,
             sectoken: content.sectoken,
         };
+        $.log(`账号[${this.index}] 登录成功: openId=${content.openId} memberId=${content.memberId || ""}`);
         return `openId=${content.openId} memberId=${content.memberId || ""}`;
     }
 
@@ -145,7 +131,9 @@ class Tongcheng {
         });
         const remain = mileage.data?.data?.remainBalance ?? mileage.data?.data?.balance ?? mileage.data?.remainBalance;
         const content = member.data?.content || member.data?.data?.content || {};
-        return `会员=${short(content.memberBanner || content.memberRights || content, 100)} 里程=${remain ?? short(mileage.data, 100)}`;
+        const result = `会员=${short(content.memberBanner || content.memberRights || content, 100)} 里程=${remain ?? short(mileage.data, 100)}`;
+        $.log(`账号[${this.index}] ${result}`);
+        return result;
     }
 
     async sign() {
@@ -164,40 +152,42 @@ class Tongcheng {
         });
         const info = signInfo.data?.data || {};
         const cal = calendar.data?.data || {};
-        if (info.todaySigned || cal.todaySigned) return `今日已签到，连续=${info.periodContinuedSignDays ?? cal.periodContinuedSignDays ?? "未知"}天`;
+        if (info.todaySigned || cal.todaySigned) {
+            const result = `今日已签到，连续=${info.periodContinuedSignDays ?? cal.periodContinuedSignDays ?? "未知"}天`;
+            $.log(`账号[${this.index]} ${result}`);
+            return result;
+        }
         const sign = await request({
             method: "POST",
             url: "https://wx.17u.cn/wxmpsign/sign/saveSignInfo",
             headers: this.headers({ "content-type": "application/json" }),
             data: {},
         });
-        return `签到接口返回: ${short(sign.data)}`;
+        const result = `签到接口返回: ${short(sign.data)}`;
+        $.log(`账号[${this.index}] ${result}`);
+        return result;
     }
 }
 
-async function runAccount(account, index) {
-    const { identifier, alias } = account;
-    console.log(`\n========== ${APP.name} 账号[${index}]${alias ? `[${alias}]` : ""} ${identifier} ==========`);
-    const runner = new Tongcheng(account, index);
-    try {
-        console.log(`登录：${await runner.login()}`);
-        console.log(`查询：${await runner.query()}`);
-        console.log(`签到：${await runner.sign()}`);
-    } catch (e) {
-        console.log(`执行失败：${e.message || e}`);
-    }
-}
-
-(async () => {
-    if (!ACCOUNTS.length) {
-        console.log(`未配置 WX_ID`);
+!(async () => {
+    if (!$.userList.length) {
+        $.log(`未配置 WX_ID`);
         return;
     }
-    console.log(`共找到${ACCOUNTS.length}个账号`);
-    for (let i = 0; i < ACCOUNTS.length; i++) {
-        await runAccount(ACCOUNTS[i], i + 1);
-        await sleep(800);
+    $.log(`共找到${$.userList.length}个账号`);
+    for (let i = 0; i < $.userList.length; i++) {
+        const wxid = $.userList[i];
+        $.log(`\n========== ${APP.name} 账号[${i + 1}] ${wxid} ==========`);
+        const runner = new Tongcheng(wxid);
+        try {
+            await runner.login();
+            await runner.query();
+            await runner.sign();
+        } catch (e) {
+            $.log(`执行失败：${e.message || e}`);
+        }
+        if (i < $.userList.length - 1) await sleep(800);
     }
-})().catch((e) => {
-    console.log(`脚本异常：${e.stack || e.message || e}`);
-});
+})()
+    .catch((e) => $.log(`脚本异常：${e.stack || e.message || e}`))
+    .finally(() => $.done());

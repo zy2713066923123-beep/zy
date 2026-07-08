@@ -6,46 +6,43 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 
-// ====================== WX_ID 账号（环境变量 WX_ID = identifier#alias 或 identifier，多行或&分隔） ======================
-const ACCOUNTS = [];
-const wxIdRaw = process.env.WX_ID || "";
-if (wxIdRaw) {
-    wxIdRaw.replace(/&/g, "\n").split(/\r?\n/).forEach(line => {
-        line = line.trim();
-        if (!line) return;
-        if (line.includes("#")) {
-            const [id, alias] = line.split("#", 1);
-            ACCOUNTS.push({ identifier: id.trim(), alias: alias.trim() });
-        } else {
-            ACCOUNTS.push({ identifier: line, alias: line });
-        }
-    });
-}
-if (!ACCOUNTS.length) { console.error("❌ 未配置环境变量 WX_ID"); process.exit(1); }
-console.log(`✅ 成功读取 ${ACCOUNTS.length} 个账号`);
-
-// ====================== Server 配置 ======================
-const WECHAT_SERVER = (process.env.WECHAT_SERVER || process.env.YYB_SERVER || "http://192.168.6.222:8011").replace(/\/+$/, "");
-
-async function getWxCode(identifier) {
-    const url = `${WECHAT_SERVER}/wxapp/getCode`;
-    try {
-        const { data } = await axios.post(url, { ref: identifier, app_id: MINI_APP_ID }, { timeout: 20000, proxy: false });
-        const code = data && data.data && data.data.result && data.data.result.code;
-        if (!data || data.code !== 0 || !code) {
-            console.log(WECHAT_SERVER + " 获取code失败: " + JSON.stringify(data));
-            return null;
-        }
-        console.log(WECHAT_SERVER + " 获取code成功");
-        return code;
-    } catch (e) {
-        console.log(WECHAT_SERVER + " 获取code异常: " + e.message);
-        return null;
+// ====================== 标准环境模块 ======================
+class Env {
+    constructor(name) { 
+        this.name = name; 
+        this.userList = []; 
+        this.userIdx = 1; 
+        this.logs = []; 
+        const originalLog = console.log; 
+        console.log = (...args) => { 
+            this.logs.push(args.join(" ")); 
+            originalLog.apply(console, args); 
+        }; 
+    }
+    log(...args) { console.log(...args); this.logs.push(args.join(" ")); }
+    checkEnv(ckName) {
+        const val = process.env.WX_ID || process.env[ckName];
+        if (val) this.userList = val.split(/[\n&]+/).map(v => String(v).split('#')[0].trim()).filter(Boolean);
+        else console.log('未找到环境变量 WX_ID');
+    }
+    async done() { 
+        try { 
+            const notify = require('./sendNotify'); 
+            await notify.sendNotify(this.name, this.logs.join('\n')); 
+        } catch(e) { 
+            console.log('通知发送失败', e); 
+        } 
     }
 }
 
+// 引入 getCode.js 标准模块（支持双协议：牛子+应用宝）
+const { getSingleCode } = require('./getCode.js');
+const getWxCode = (wxid, appid) => getSingleCode(appid, String(wxid).split('#')[0].trim());
+
+const $ = new Env("唯品会签到");
+$.checkEnv("WX_ID");
+
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-let userIdx = 1;
 
 const MINI_APP_ID = "wxe9714e742209d35f";
 const PACKAGE_VERSION = "1371";
@@ -164,11 +161,9 @@ async function request(options) {
 
 
 class Vipshop {
-  constructor({ identifier, alias }, index) {
-    this.identifier = identifier;
-    this.alias = alias;
-    this.openid = identifier;
-    this.index = index;
+  constructor(wxid) {
+    this.wxid = wxid;
+    this.openid = wxid;
     this.account = {};
     this.openid = this.openid || "";
     this.token = this.account.token || "";
@@ -176,11 +171,11 @@ class Vipshop {
     this.vipOpenid = this.account.vipOpenid || "";
     this.unionid = this.account.unionid || "";
     this.marsCid = this.account.marsCid || DEFAULT_MARS_CID;
-    this.cacheKey = this.openid || (this.vipOpenid ? md5(this.vipOpenid).slice(0, 16) : `account_${index}`);
+    this.cacheKey = this.openid || (this.vipOpenid ? md5(this.vipOpenid).slice(0, 16) : `account_${$.userIdx}`);
   }
 
   log(message) {
-    console.log(`账号[${this.index}]${this.alias !== this.identifier ? `[${this.alias}]` : ""} ${message}`);
+    $.log(`账号[${$.userIdx}] ${message}`);
   }
 
   baseData() {
@@ -349,7 +344,7 @@ class Vipshop {
       this.log(`使用缓存登录态 userId=${this.userId} VIP_TANK=${mask(this.token)}`);
       return;
     }
-    const code = await getWxCode(this.identifier);
+    const code = await getWxCode(this.wxid, MINI_APP_ID);
     if (!this.vipOpenid) await this.getVipWechatInfo(code);
     if (!this.token || !this.userId) await this.autoLogin(code);
     this.saveCache();
@@ -413,7 +408,7 @@ class Vipshop {
 
   async run() {
     try {
-      this.log(`开始执行 ${mask(this.identifier || this.vipOpenid || this.token)}`);
+      this.log(`开始执行 ${mask(this.wxid || this.vipOpenid || this.token)}`);
       await this.ensureLogin();
       await this.sign();
       this.saveCache();
@@ -423,12 +418,13 @@ class Vipshop {
   }
 }
 
-async function main() {
-  for (let i = 0; i < ACCOUNTS.length; i++) {
-    await new Vipshop(ACCOUNTS[i], i + 1).run();
-    if (i < ACCOUNTS.length - 1) await sleep(1500);
+!(async () => {
+  if ($.userList.length === 0) { $.log('未找到有效账号'); return; }
+  for (let i = 0; i < $.userList.length; i++) {
+    $.userIdx = i + 1;
+    await new Vipshop($.userList[i]).run();
+    if (i < $.userList.length - 1) await sleep(1500);
   }
-}
-
-main()
-  .catch((e) => console.log(`脚本异常: ${e.message || e}`))
+  await $.done();
+})()
+  .catch((e) => $.log(`脚本异常: ${e.message || e}`))

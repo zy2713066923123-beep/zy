@@ -6,46 +6,43 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 
-// ====================== WX_ID 账号（环境变量 WX_ID = identifier#alias 或 identifier，多行或&分隔） ======================
-const ACCOUNTS = [];
-const wxIdRaw = process.env.WX_ID || "";
-if (wxIdRaw) {
-    wxIdRaw.replace(/&/g, "\n").split(/\r?\n/).forEach(line => {
-        line = line.trim();
-        if (!line) return;
-        if (line.includes("#")) {
-            const [id, alias] = line.split("#", 1);
-            ACCOUNTS.push({ identifier: id.trim(), alias: alias.trim() });
-        } else {
-            ACCOUNTS.push({ identifier: line, alias: line });
-        }
-    });
-}
-if (!ACCOUNTS.length) { console.error("❌ 未配置环境变量 WX_ID"); process.exit(1); }
-console.log(`✅ 成功读取 ${ACCOUNTS.length} 个账号`);
-
-// ====================== Server 配置 ======================
-const WECHAT_SERVER = (process.env.WECHAT_SERVER || process.env.YYB_SERVER || "http://192.168.6.222:8011").replace(/\/+$/, "");
-
-async function getWxCode(identifier) {
-    const url = `${WECHAT_SERVER}/wxapp/getCode`;
-    try {
-        const { data } = await axios.post(url, { ref: identifier, app_id: MINI_APP_ID }, { timeout: 20000, proxy: false });
-        const code = data && data.data && data.data.result && data.data.result.code;
-        if (!data || data.code !== 0 || !code) {
-            console.log(WECHAT_SERVER + " 获取code失败: " + JSON.stringify(data));
-            return null;
-        }
-        console.log(WECHAT_SERVER + " 获取code成功");
-        return code;
-    } catch (e) {
-        console.log(WECHAT_SERVER + " 获取code异常: " + e.message);
-        return null;
+// ====================== 标准环境模块 ======================
+class Env {
+    constructor(name) { 
+        this.name = name; 
+        this.userList = []; 
+        this.userIdx = 1; 
+        this.logs = []; 
+        const originalLog = console.log; 
+        console.log = (...args) => { 
+            this.logs.push(args.join(" ")); 
+            originalLog.apply(console, args); 
+        }; 
+    }
+    log(...args) { console.log(...args); this.logs.push(args.join(" ")); }
+    checkEnv(ckName) {
+        const val = process.env.WX_ID || process.env[ckName];
+        if (val) this.userList = val.split(/[\n&]+/).map(v => String(v).split('#')[0].trim()).filter(Boolean);
+        else console.log('未找到环境变量 WX_ID');
+    }
+    async done() { 
+        try { 
+            const notify = require('./sendNotify'); 
+            await notify.sendNotify(this.name, this.logs.join('\n')); 
+        } catch(e) { 
+            console.log('通知发送失败', e); 
+        } 
     }
 }
 
+// 引入 getCode.js 标准模块（支持双协议：牛子+应用宝）
+const { getSingleCode } = require('./getCode.js');
+const getWxCode = (wxid, appid) => getSingleCode(appid, String(wxid).split('#')[0].trim());
+
+const $ = new Env("携程会员签到");
+$.checkEnv("WX_ID");
+
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-let userIdx = 1;
 
 const MINI_APP_ID = "wx0e6ed4f51db9d078";
 const PACKAGE_VERSION = "1055";
@@ -206,11 +203,10 @@ async function h5Api(pathname, data, account) {
 }
 
 class Task {
-  constructor({ identifier, alias }) {
-    this.identifier = identifier;
-    this.alias = alias;
-    this.openid = identifier;
-    this.index = userIdx++;
+  constructor(wxid) {
+    this.wxid = wxid;
+    this.openid = wxid;
+    this.index = $.userIdx;
     const account = {};
     this.openid = account.openid || "";
     this.ticket = account.ticket || "";
@@ -248,7 +244,7 @@ class Task {
   }
 
   async getOperateData() {
-    const code = await getWxCode(this.identifier);
+    const code = await getWxCode(this.wxid, MINI_APP_ID);
     return { code, encryptedData: "", iv: "" };
   }
 
@@ -310,7 +306,7 @@ class Task {
     this.udl = login.udl || "";
     this.uid = login.uid || "";
     this.saveCache({ isNewUser: login.extendedProperties?.isNewUser || "" });
-    console.log(`账号[${this.index}] 登录成功: ${mask(this.uid || this.ticket)}`);
+    $.log(`账号[${this.index}] 登录成功: ${mask(this.uid || this.ticket)}`);
   }
 
   async ensureLogin() {
@@ -384,20 +380,20 @@ class Task {
   async querySignStatus() {
     const res = await this.ctripRequest("/restapi/soa2/13012/getSignTodayInfoProxy", {});
     if (res.status === 401 && res.data?.code === "11001") {
-      console.log(`账号[${this.index}] 签到状态接口被携程运行态校验拦截: ${res.data.message}`);
+      $.log(`账号[${this.index}] 签到状态接口被携程运行态校验拦截: ${res.data.message}`);
       return null;
     }
     if (res.status !== 200) {
-      console.log(`账号[${this.index}] 签到状态查询异常[${res.status}]: ${res.text.slice(0, 300)}`);
+      $.log(`账号[${this.index}] 签到状态查询异常[${res.status}]: ${res.text.slice(0, 300)}`);
       return null;
     }
     if (!okResponseStatus(res.data)) {
-      console.log(`账号[${this.index}] 签到状态查询失败: ${res.text.slice(0, 500)}`);
+      $.log(`账号[${this.index}] 签到状态查询失败: ${res.text.slice(0, 500)}`);
       return null;
     }
     const info = parseJsonMaybe(res.data.responseJson || "{}");
     const signed = !!(info && info.message === "成功" && info.sign === false);
-    console.log(`账号[${this.index}] 今日签到状态: ${signed ? "已签到" : "未签到/未知"}`);
+    $.log(`账号[${this.index}] 今日签到状态: ${signed ? "已签到" : "未签到/未知"}`);
     return { signed, raw: info };
   }
 
@@ -411,11 +407,11 @@ class Task {
       const res = await this.ctripRequest(pathname, payload);
       const body = res.text.slice(0, 600);
       if (res.status === 200 && (okResponseStatus(res.data) || /成功|已签到|sign/i.test(body))) {
-        console.log(`账号[${this.index}] 签到接口 ${pathname} 返回: ${body}`);
+        $.log(`账号[${this.index}] 签到接口 ${pathname} 返回: ${body}`);
         return true;
       }
       if (res.status !== 404 && res.status !== 403) {
-        console.log(`账号[${this.index}] 候选接口 ${pathname} [${res.status}]: ${body}`);
+        $.log(`账号[${this.index}] 候选接口 ${pathname} [${res.status}]: ${body}`);
       }
     }
     return false;
@@ -425,22 +421,22 @@ class Task {
     await this.querySignStatus();
     const res = await h5Api("/restapi/soa2/22769/signToday", { openId: this.openid || "" }, this);
     if (res.status !== 200) {
-      console.log(`账号[${this.index}] 签到请求异常[${res.status}]: ${res.text.slice(0, 500)}`);
+      $.log(`账号[${this.index}] 签到请求异常[${res.status}]: ${res.text.slice(0, 500)}`);
       return;
     }
     if (okResponseStatus(res.data)) {
       const message = res.data.message || "";
       const points = Number(res.data.baseIntegratedPoint || 0) + Number(res.data.extraIntegratedPoint || 0);
       if (Number(res.data.code) === 0 || /成功/.test(message)) {
-        console.log(`账号[${this.index}] 签到成功: ${message || "成功"}${points ? `，积分+${points}` : ""}`);
+        $.log(`账号[${this.index}] 签到成功: ${message || "成功"}${points ? `，积分+${points}` : ""}`);
       } else if (/已签到|无法补签/.test(message) || Number(res.data.code) === 400001) {
-        console.log(`账号[${this.index}] 今日已签到: ${message}`);
+        $.log(`账号[${this.index}] 今日已签到: ${message}`);
       } else {
-        console.log(`账号[${this.index}] 签到返回: ${res.text.slice(0, 800)}`);
+        $.log(`账号[${this.index}] 签到返回: ${res.text.slice(0, 800)}`);
       }
       return;
     }
-    console.log(`账号[${this.index}] 签到失败: ${res.text.slice(0, 800)}`);
+    $.log(`账号[${this.index}] 签到失败: ${res.text.slice(0, 800)}`);
   }
 
   async h5Model(code, name, data = {}) {
@@ -450,11 +446,11 @@ class Task {
   async taskModel(name, data = {}) {
     const res = await this.h5Model("22598", name, data);
     if (res.status !== 200) {
-      console.log(`账号[${this.index}] 任务接口 ${name} 异常[${res.status}]: ${res.text.slice(0, 500)}`);
+      $.log(`账号[${this.index}] 任务接口 ${name} 异常[${res.status}]: ${res.text.slice(0, 500)}`);
       return null;
     }
     if (!okBusiness(res.data)) {
-      console.log(`账号[${this.index}] 任务接口 ${name} 返回: ${res.text.slice(0, 800)}`);
+      $.log(`账号[${this.index}] 任务接口 ${name} 返回: ${res.text.slice(0, 800)}`);
       return res.data;
     }
     return res.data;
@@ -464,10 +460,10 @@ class Task {
     const data = await this.taskModel("userTaskList", { channelCode });
     if (!data) return [];
     const tasks = pickTasks(data);
-    console.log(
+    $.log(
       `账号[${this.index}] ${label}: ${data.projectName || channelCode}，待做${(data.todoTaskList || []).length}，已完成${(data.finishTaskList || []).length}，过滤${(data.filteredTaskList || []).length}`
     );
-    if (!tasks.length) console.log(`账号[${this.index}] ${label}: 暂无可处理任务`);
+    if (!tasks.length) $.log(`账号[${this.index}] ${label}: 暂无可处理任务`);
     return tasks;
   }
 
@@ -480,7 +476,7 @@ class Task {
       receiveTaskId: receivedTaskId,
     });
     if (okBusiness(data)) {
-      console.log(`账号[${this.index}] 领取任务发奖成功: ${taskTitle(task)} ${data.message || ""}`);
+      $.log(`账号[${this.index}] 领取任务发奖成功: ${taskTitle(task)} ${data.message || ""}`);
     }
   }
 
@@ -490,18 +486,18 @@ class Task {
     const status = Number(task.status ?? task.taskStatus ?? 0);
     const title = taskTitle(task);
     const base = { channelCode, taskId: id, status, done: 0 };
-    console.log(`账号[${this.index}] ${label} 执行任务: ${title}，status=${status}`);
+    $.log(`账号[${this.index}] ${label} 执行任务: ${title}，status=${status}`);
     const receive = await this.taskModel("todoTask", base);
     const receivedTaskId = receive?.infoMap?.receivedTaskId || receive?.receivedTaskId || "";
     if (okBusiness(receive)) {
-      console.log(`账号[${this.index}] ${label} 任务上报成功: ${title} ${receive.message || ""}`);
+      $.log(`账号[${this.index}] ${label} 任务上报成功: ${title} ${receive.message || ""}`);
       await this.receiveTaskAward(channelCode, task, receivedTaskId);
     }
 
     await sleep(1000);
     const done = await this.taskModel("todoTask", { ...base, status: 0, done: 1 });
     if (okBusiness(done)) {
-      console.log(`账号[${this.index}] ${label} 浏览完成上报成功: ${title} ${done.message || ""}`);
+      $.log(`账号[${this.index}] ${label} 浏览完成上报成功: ${title} ${done.message || ""}`);
     }
   }
 
@@ -511,9 +507,9 @@ class Task {
     const data = await this.taskModel("awardTask", { channelCode, taskId: id });
     if (okBusiness(data)) {
       const award = data.awardName || data.rewardName || data.message || "成功";
-      console.log(`账号[${this.index}] ${label} 领奖成功: ${taskTitle(task)}，${award}`);
+      $.log(`账号[${this.index}] ${label} 领奖成功: ${taskTitle(task)}，${award}`);
     } else if (data) {
-      console.log(`账号[${this.index}] ${label} 领奖返回: ${taskTitle(task)}，${JSON.stringify(data).slice(0, 500)}`);
+      $.log(`账号[${this.index}] ${label} 领奖返回: ${taskTitle(task)}，${JSON.stringify(data).slice(0, 500)}`);
     }
   }
 
@@ -534,7 +530,7 @@ class Task {
         await this.awardTask(channelCode, task, label);
         await sleep(800);
       } else if (status === 3) {
-        console.log(`账号[${this.index}] ${label} 已完成: ${taskTitle(task)}`);
+        $.log(`账号[${this.index}] ${label} 已完成: ${taskTitle(task)}`);
       }
     }
   }
@@ -542,9 +538,9 @@ class Task {
   async queryPointInfo() {
     const point = await this.h5Model("22769", "getSignInUserBasicInfo", {});
     if (point.status === 200 && okBusiness(point.data)) {
-      console.log(`账号[${this.index}] 当前会员积分: ${point.data.integratedPoint ?? "未知"}`);
+      $.log(`账号[${this.index}] 当前会员积分: ${point.data.integratedPoint ?? "未知"}`);
     } else {
-      console.log(`账号[${this.index}] 会员积分查询失败: ${point.text.slice(0, 500)}`);
+      $.log(`账号[${this.index}] 会员积分查询失败: ${point.text.slice(0, 500)}`);
     }
 
     const yoyo = await this.h5Model("22769", "travelGameUserAccountInfo", {});
@@ -552,11 +548,11 @@ class Task {
       const info = yoyo.data.travelGameUserInfoDto || {};
       const travel = yoyo.data.travelGameUserTravelDto || {};
       const levelText = info.levelName || (info.level ? `LV${info.level}` : "");
-      console.log(
+      $.log(
         `账号[${this.index}] YOYO信息: ${levelText}，${info.titleName || ""}，还差${info.needFishCount ?? "未知"}条小鱼升级，旅行状态${travel.travelStatus ?? yoyo.data.travelStatus ?? "未知"}`
       );
     } else {
-      console.log(`账号[${this.index}] YOYO信息查询失败: ${yoyo.text.slice(0, 500)}`);
+      $.log(`账号[${this.index}] YOYO信息查询失败: ${yoyo.text.slice(0, 500)}`);
     }
   }
 
@@ -569,21 +565,21 @@ class Task {
     for (const item of awards) {
       const data = await this.h5Model("22769", item.name, { platform: "H5" });
       if (data.status !== 200) {
-        console.log(`账号[${this.index}] ${item.label} 请求异常[${data.status}]: ${data.text.slice(0, 300)}`);
+        $.log(`账号[${this.index}] ${item.label} 请求异常[${data.status}]: ${data.text.slice(0, 300)}`);
         continue;
       }
       if (okBusiness(data.data)) {
         const exp = data.data.expChangeResultDto || {};
         const point = exp.levelUpIntegralNumber || data.data.travelIntegralNumber || 0;
-        console.log(
+        $.log(
           `账号[${this.index}] ${item.label} 领取成功: ${data.data.message || "成功"}${point ? `，积分+${point}` : ""}${exp.levelUp ? "，已升级" : ""}`
         );
       } else if (Number(data.data?.code) === 500027) {
-        console.log(`账号[${this.index}] ${item.label}: 需要滑块验证，跳过`);
+        $.log(`账号[${this.index}] ${item.label}: 需要滑块验证，跳过`);
       } else if (/已领取|已经领取|不能领取|暂无|失败|错误/.test(data.data?.message || "")) {
-        console.log(`账号[${this.index}] ${item.label}: ${data.data.message}`);
+        $.log(`账号[${this.index}] ${item.label}: ${data.data.message}`);
       } else {
-        console.log(`账号[${this.index}] ${item.label} 返回: ${data.text.slice(0, 600)}`);
+        $.log(`账号[${this.index}] ${item.label} 返回: ${data.text.slice(0, 600)}`);
       }
       await sleep(800);
     }
@@ -603,13 +599,16 @@ class Task {
 }
 
 !(async () => {
-  for (const account of ACCOUNTS) {
+  if ($.userList.length === 0) { $.log('未找到有效账号'); return; }
+  for (let i = 0; i < $.userList.length; i++) {
+    $.userIdx = i + 1;
     try {
-      await new Task(account).run();
+      await new Task($.userList[i]).run();
     } catch (e) {
-      console.log(`账号执行异常: ${e.message || e}`);
+      $.log(`账号执行异常: ${e.message || e}`);
     }
     await sleep(800);
   }
+  await $.done();
 })()
-  .catch((e) => console.log(e.message || e))
+  .catch((e) => $.log(e.message || e))

@@ -2,43 +2,29 @@
 // cron: 24 8 * * *
 
 const axios = require("axios");
-// ====================== WX_ID 账号（环境变量 WX_ID = identifier#alias，多行换行或&分隔） ======================
-const ACCOUNTS = (process.env.WX_ID || "")
-    .split(/\r?\n|&/)
-    .map(s => s.trim())
-    .filter(Boolean)
-    .map(s => {
-        const [identifier, alias] = s.split("#").map(item => item.trim());
-        return { identifier: identifier || s, alias: alias || "" };
-    });
-if (!ACCOUNTS.length) {
-    console.error("未配置环境变量 WX_ID，请设置后重试（格式：identifier#alias，多行换行或&分隔）");
-    process.exit(1);
+
+// ====== 标准Env模式 ======
+class Env {
+    constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; this.logs = []; const originalLog = console.log; console.log = (...args) => { this.logs.push(args.join(" ")); originalLog.apply(console, args); }; }
+    log(...args) { console.log(...args); this.logs.push(args.join(" ")); }
+    checkEnv(ckName) {
+        const val = process.env.WX_ID || process.env[ckName];
+        if (val) this.userList = val.split(/[\n&]+/).map(v => String(v).split('#')[0].trim()).filter(Boolean);
+        else console.log('未找到环境变量 WX_ID');
+    }
+    async done() { try { const notify = require('./sendNotify'); await notify.sendNotify(this.name, this.logs.join('\n')); } catch(e) { console.log('通知发送失败', e); } }
 }
 
-const WECHAT_SERVER = (process.env.WECHAT_SERVER || process.env.YYB_SERVER || "http://192.168.6.222:8011").replace(/\/+$/, "");
+// ====== 引入 getCode.js 模块（支持双协议：牛子+应用宝）======
+const { getSingleCode } = require('./getCode.js');
+const getWxCode = (wxid, appid) => getSingleCode(appid, String(wxid).split('#')[0].trim());
+
+const $ = new Env("优点云创");
+$.checkEnv("WX_ID");
 
 const APPID = "wx96eb3beaea480465";
 
-async function getWxCode(identifier) {
-    if (!identifier) return null;
-    const url = `${WECHAT_SERVER}/wxapp/getCode`;
-    try {
-        const { data } = await axios.post(url, { ref: identifier, app_id: APPID }, { timeout: 20000, proxy: false });
-        const code = data && data.data && data.data.result && data.data.result.code;
-        if (!data || data.code !== 0 || !code) {
-            console.log(WECHAT_SERVER + " 获取code失败: " + JSON.stringify(data));
-            return null;
-        }
-        console.log(WECHAT_SERVER + " 获取code成功");
-        return code;
-    } catch (e) {
-        console.log(WECHAT_SERVER + " 获取code异常: " + e.message);
-        return null;
-    }
-}
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-let userIdx = 1;
 
 const CK_NAME = "ydyc";
 const APP = { name: "优点云创", appid: APPID, version: 1 };
@@ -99,17 +85,15 @@ async function request(options) {
 }
 
 class YouDianYunChuang {
-    constructor({ identifier, alias }, index) {
-        this.identifier = identifier;
-        this.alias = alias;
-        this.index = index;
-        this.account = { openid: identifier, remark: alias };
+    constructor(wxid) {
+        this.wxid = wxid;
+        this.index = $.userIdx++;
         this.session = "";
         this.openid = "";
     }
 
     log(message) {
-        console.log(`账号[${this.index}]${this.alias ? `[${this.alias}]` : ""} ${message}`);
+        $.log(`账号[${this.index}] ${message}`);
     }
 
     async api(data = {}) {
@@ -130,7 +114,7 @@ class YouDianYunChuang {
     }
 
     async login() {
-        const code = await getWxCode(this.identifier);
+        const code = await getWxCode(this.wxid, APPID);
         const data = await this.call({ action: "WxLogin", code });
         this.session = data.r3dkey || "";
         this.openid = data.openid || "";
@@ -228,18 +212,16 @@ class YouDianYunChuang {
     }
 }
 
-async function main() {
-    
-    if (!ACCOUNTS.length) {
-        console.log(`未找到变量 ${CK_NAME}`);
+!(async () => {
+    if (!$.userList.length) {
+        $.log(`未找到变量 ${CK_NAME}`);
         return;
     }
-    for (let i = 0; i < ACCOUNTS.length; i++) {
-        const task = new YouDianYunChuang(ACCOUNTS[i], i + 1);
+    for (let i = 0; i < $.userList.length; i++) {
+        const task = new YouDianYunChuang($.userList[i]);
         await task.run();
-        if (i < ACCOUNTS.length - 1) await sleep(1500 + Math.random() * 1500);
+        if (i < $.userList.length - 1) await sleep(1500 + Math.random() * 1500);
     }
-}
-
-main()
-    .catch((e) => console.log(`脚本异常: ${e.message || e}`))
+})()
+    .catch((e) => $.log(`脚本异常: ${e.message || e}`))
+    .finally(() => $.done());

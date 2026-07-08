@@ -1,37 +1,51 @@
 // name: 飞蚂蚁旧衣回收
 // cron: 0 0 14 * * *
+
+class Env {
+    constructor(name) {
+        this.name = name;
+        this.userList = [];
+        this.userIdx = 1;
+        this.logs = [];
+        const originalLog = console.log;
+        console.log = (...args) => {
+            this.logs.push(args.join(" "));
+            originalLog.apply(console, args);
+        };
+    }
+    log(...args) { console.log(...args); this.logs.push(args.join(" ")); }
+    checkEnv(ckName) {
+        const val = process.env.WX_ID || process.env[ckName];
+        if (val) this.userList = val.split(/[\n&]+/).map(v => String(v).split('#')[0].trim()).filter(Boolean);
+        else console.log('未找到环境变量 WX_ID');
+    }
+    async done() {
+        try {
+            const notify = require('./sendNotify');
+            await notify.sendNotify(this.name, this.logs.join('\n'));
+        } catch (e) {
+            console.log('通知发送失败', e);
+        }
+    }
+}
+
 const axios = require("axios");
 const { SocksProxyAgent } = require('socks-proxy-agent');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 const { HttpProxyAgent } = require('http-proxy-agent');
 const qs = require('querystring');
 
+const { getSingleCode } = require('./getCode.js');
+const getWxCode = (wxid, appid) => getSingleCode(appid, String(wxid).split('#')[0].trim());
+
+const $ = new Env("飞蚂蚁旧衣回收");
+$.checkEnv("WX_ID");
+
 // 强制全局禁用系统代理环境变量，避免干扰
 delete process.env.HTTP_PROXY;
 delete process.env.HTTPS_PROXY;
 delete process.env.http_proxy;
 delete process.env.https_proxy;
-
-// ====================== WX_ID 账号配置（环境变量 WX_ID = identifier#alias，支持换行或&分隔） ======================
-const ACCOUNTS = [];
-const wxIdRaw = process.env.WX_ID || "";
-if (wxIdRaw) {
-    wxIdRaw.replace(/&/g, "\n").split(/\r?\n/).forEach(line => {
-        line = line.trim();
-        if (!line) return;
-        if (line.includes("#")) {
-            const [id, alias] = line.split("#", 1);
-            ACCOUNTS.push({ identifier: id.trim(), alias: alias.trim() });
-        } else {
-            ACCOUNTS.push({ identifier: line, alias: line });
-        }
-    });
-}
-if (!ACCOUNTS.length) { console.error("❌ 未配置环境变量 WX_ID"); process.exit(1); }
-console.log(`✅ 成功读取 ${ACCOUNTS.length} 个账号`);
-
-// ====================== Server 配置 ======================
-const WECHAT_SERVER = (process.env.WECHAT_SERVER || process.env.YYB_SERVER || "http://192.168.6.222:8011").replace(/\/+$/, "");
 
 // ===================== 配置项 =====================
 // PushPlus 通知Token（青龙环境变量）
@@ -77,8 +91,8 @@ function getUA() {
 // 调试日志函数
 function debugLog(title, data) {
     if (DEBUG_MODE) {
-        console.log(`\n🔍 [调试] ${title}:`);
-        console.log(JSON.stringify(data, null, 2));
+        $.log(`\n[调试] ${title}:`);
+        $.log(JSON.stringify(data, null, 2));
     }
 }
 
@@ -129,7 +143,7 @@ function buildProxyAgent(proxyInfo) {
     try {
         if (PROXY_TYPE === "socks5") {
             const proxyUrl = `socks5://${auth}${host}:${port}`;
-            console.log(`🔧 生成SOCKS5代理：socks5://${auth}${host}:${port}`);
+            $.log(`生成SOCKS5代理：socks5://${auth}${host}:${port}`);
             return {
                 httpAgent: new SocksProxyAgent(proxyUrl),
                 httpsAgent: new SocksProxyAgent(proxyUrl)
@@ -137,14 +151,14 @@ function buildProxyAgent(proxyInfo) {
         } else {
             const httpProxyUrl = `http://${auth}${host}:${port}`;
             const httpsProxyUrl = `http://${auth}${host}:${port}`;
-            console.log(`🔧 生成HTTP代理：${httpProxyUrl}`);
+            $.log(`生成HTTP代理：${httpProxyUrl}`);
             return {
                 httpAgent: new HttpProxyAgent(httpProxyUrl),
                 httpsAgent: new HttpsProxyAgent(httpsProxyUrl)
             };
         }
     } catch (e) {
-        console.log(`❌ 生成代理Agent失败：${e.message}`);
+        $.log(`生成代理Agent失败：${e.message}`);
         return null;
     }
 }
@@ -162,21 +176,21 @@ async function validateProxy(agent) {
         const response = await axios(axiosConfig);
         const isSuccess = response.status === 200;
         if (isSuccess) {
-            console.log(`✅ 代理验证通过，出口IP：${response.data?.origin || "未知"}`);
+            $.log(`代理验证通过，出口IP：${response.data?.origin || "未知"}`);
         }
         return isSuccess;
     } catch (e) {
-        console.log(`⚠️ 代理验证失败，原因：${e.message}`);
+        $.log(`代理验证失败，原因：${e.message}`);
         return false;
     }
 }
 
 async function getValidProxy(accountName) {
     if (!PROXY_API) {
-        console.log(`ℹ️ [${accountName}] 未配置代理API，使用直连`);
+        $.log(`[${accountName}] 未配置代理API，使用直连`);
         return null;
     }
-    console.log(`🔌 [${accountName}] 正在从品赞API获取专属代理 (${PROXY_TYPE})...`);
+    $.log(`[${accountName}] 正在从品赞API获取专属代理 (${PROXY_TYPE})...`);
     for (let i = 0; i < PROXY_RETRY_TIMES; i++) {
         try {
             const response = await axios.get(PROXY_API, {
@@ -185,25 +199,25 @@ async function getValidProxy(accountName) {
             });
             const proxyInfo = parseProxyResponse(response.data);
             if (!proxyInfo) {
-                console.log(`⚠️ [${accountName}] 第${i+1}次获取代理失败：响应格式无法解析`);
+                $.log(`[${accountName}] 第${i+1}次获取代理失败：响应格式无法解析`);
                 continue;
             }
-            console.log(`✅ [${accountName}] 提取到专属代理：${proxyInfo.host}:${proxyInfo.port}`);
+            $.log(`[${accountName}] 提取到专属代理：${proxyInfo.host}:${proxyInfo.port}`);
             const agent = buildProxyAgent(proxyInfo);
             const isValid = await validateProxy(agent);
             if (isValid) {
                 return agent;
             } else {
-                console.log(`⚠️ [${accountName}] 第${i+1}次获取的代理不可用，正在重试...`);
+                $.log(`[${accountName}] 第${i+1}次获取的代理不可用，正在重试...`);
             }
         } catch (e) {
-            console.log(`⚠️ [${accountName}] 第${i+1}次获取代理异常：${e.message}`);
+            $.log(`[${accountName}] 第${i+1}次获取代理异常：${e.message}`);
         }
         if (i < PROXY_RETRY_TIMES - 1) {
             await new Promise(r => setTimeout(r, 2000));
         }
     }
-    console.log(`❌ [${accountName}] 连续多次获取代理失败，使用直连`);
+    $.log(`[${accountName}] 连续多次获取代理失败，使用直连`);
     return null;
 }
 
@@ -226,38 +240,13 @@ async function sendPlusPlusNotification(title, content) {
             content: content,
             template: "txt"
         }, { timeout: 5000 });
-        console.log("✅ 通知推送成功");
+        $.log("通知推送成功");
     } catch (e) {
-        console.log("❌ 通知推送失败：", e.message);
+        $.log("通知推送失败：", e.message);
     }
 }
 
 // ===================== 业务逻辑函数 =====================
-// 获取code 【强制直连，不走代理】
-async function getWxCode(identifier) {
-    const url = `${WECHAT_SERVER}/wxapp/getCode`;
-    try {
-        const { data } = await axios.post(url, {
-            ref: identifier,
-            app_id: APPID
-        }, {
-            timeout: 20000,
-            proxy: false
-        });
-        const code = data?.data?.result?.code;
-        if (data?.code !== 0 || !code) {
-            console.log(`❌ ${WECHAT_SERVER} 获取code失败: ${JSON.stringify(data)}`);
-            return null;
-        }
-        console.log(`✅ ${WECHAT_SERVER} 获取code成功`);
-        return code;
-    } catch (e) {
-        console.log(`❌ ${WECHAT_SERVER} 获取code异常: ${e.message}`);
-        return null;
-    }
-}
-
-
 // 登录获取token 【已添加完整调试日志】
 async function wxLogin(jsCode, UA, proxyAgent, accountAlias) {
     const baseConfig = {
@@ -294,11 +283,11 @@ async function wxLogin(jsCode, UA, proxyAgent, accountAlias) {
     try {
         let response = null;
         if (proxyAgent) {
-            console.log(`🌐 [${accountAlias}] 正在使用专属代理发起登录请求...`);
+            $.log(`[${accountAlias}] 正在使用专属代理发起登录请求...`);
             try {
                 response = await axios(addProxyToAxiosConfig(baseConfig, proxyAgent));
             } catch (e) {
-                console.log(`⚠️ [${accountAlias}] 代理登录失败，切换直连重试...`);
+                $.log(`[${accountAlias}] 代理登录失败，切换直连重试...`);
                 response = await axios({ ...baseConfig, proxy: false });
             }
         } else {
@@ -308,7 +297,7 @@ async function wxLogin(jsCode, UA, proxyAgent, accountAlias) {
         debugLog("登录完整响应", response.data);
         return response.data;
     } catch (e) {
-        console.log(`❌ [${accountAlias}] 登录异常: ${e.message}`);
+        $.log(`[${accountAlias}] 登录异常: ${e.message}`);
         if (e.response) {
             debugLog("登录错误响应", e.response.data);
         }
@@ -350,7 +339,7 @@ async function commonPost(url, body, token, UA, proxyAgent, accountAlias) {
             try {
                 response = await axios(addProxyToAxiosConfig(baseConfig, proxyAgent));
             } catch (e) {
-                console.log(`⚠️ [${accountAlias}] 代理请求失败，切换直连重试...`);
+                $.log(`[${accountAlias}] 代理请求失败，切换直连重试...`);
                 response = await axios({ ...baseConfig, proxy: false });
             }
         } else {
@@ -360,7 +349,7 @@ async function commonPost(url, body, token, UA, proxyAgent, accountAlias) {
         debugLog(`业务请求${url}响应`, response.data);
         return response.data;
     } catch (e) {
-        console.log(`❌ [${accountAlias}] 请求异常: ${e.message}`);
+        $.log(`[${accountAlias}] 请求异常: ${e.message}`);
         if (e.response) {
             debugLog(`业务请求${url}错误响应`, e.response.data);
         }
@@ -368,8 +357,10 @@ async function commonPost(url, body, token, UA, proxyAgent, accountAlias) {
     }
 }
 
-// 单个账号执行逻辑 【已修复错误处理并添加多路径token提取】
-async function runAccount({ identifier, alias }, globalProxyAgent) {
+// 单个账号执行逻辑（参数改为纯wxid字符串，保留品赞代理和PushPlus逻辑）
+async function runAccount(wxid, globalProxyAgent) {
+    // 从 wxid 中提取别名（支持 wxid#alias 格式）
+    const alias = wxid.includes('#') ? wxid.split('#')[1]?.trim() || wxid : wxid;
     let result = {
         alias: alias,
         success: false,
@@ -378,7 +369,7 @@ async function runAccount({ identifier, alias }, globalProxyAgent) {
         error: "",
         proxyStatus: "未使用代理"
     };
-    console.log(`\n===== 飞蚂蚁旧衣回收 - ${alias} 账号 =====`);
+    $.log(`\n===== 飞蚂蚁旧衣回收 - ${alias} 账号 =====`);
     const UA = getUA();
     let proxyAgent = globalProxyAgent;
     if (ENABLE_PER_ACCOUNT_PROXY) {
@@ -388,27 +379,27 @@ async function runAccount({ identifier, alias }, globalProxyAgent) {
     }
     try {
         let startDelay = random(2000, 6000);
-        console.log(`⏳ [${alias}] 启动延迟 ${startDelay / 1000}s`);
+        $.log(`[${alias}] 启动延迟 ${startDelay / 1000}s`);
         await sleep(startDelay);
 
-        // 1️⃣ 获取code
-        let code = await getWxCode(identifier);
+        // 1. 获取code（使用标准 getCode.js 模块）
+        let code = await getWxCode(wxid, APPID);
         if (!code) {
             result.error = "获取code失败";
             return result;
         }
 
-        // 2️⃣ 登录获取token 【已添加多路径token提取和错误处理】
+        // 2. 登录获取token
         let login = await wxLogin(code, UA, proxyAgent, alias);
         if (!login) {
             result.error = "登录请求无响应";
-            console.log(`❌ [${alias}] 登录失败：无响应数据`);
+            $.log(`[${alias}] 登录失败：无响应数据`);
             return result;
         }
 
         if (login.code != 200) {
             result.error = `登录失败：${login.message || "未知错误"}`;
-            console.log(`❌ [${alias}] ${result.error}`);
+            $.log(`[${alias}] ${result.error}`);
             return result;
         }
 
@@ -426,15 +417,15 @@ async function runAccount({ identifier, alias }, globalProxyAgent) {
 
         if (!token) {
             result.error = "无法从登录响应中提取token，请查看调试日志";
-            console.log(`❌ [${alias}] ${result.error}`);
+            $.log(`[${alias}] ${result.error}`);
             return result;
         }
 
-        console.log(`✅ [${alias}] 登录成功，获取到有效token`);
+        $.log(`[${alias}] 登录成功，获取到有效token`);
         debugLog("提取到的token", token);
         await sleep(random(3000, 8000));
 
-        // 3️⃣ 签到
+        // 3. 签到
         let sign = await commonPost('/sign/new/do', {
             "version": APP_VERSION,
             "platformKey": PLATFORM_KEY,
@@ -443,16 +434,16 @@ async function runAccount({ identifier, alias }, globalProxyAgent) {
         }, token, UA, proxyAgent, alias);
         if (sign?.code == 200) {
             result.signMsg = `签到成功：${sign.message}`;
-            console.log(`✅ [${alias}] 签到成功：${sign.message}`);
+            $.log(`[${alias}] 签到成功：${sign.message}`);
         } else {
             result.signMsg = `签到失败：${sign?.message || "未知错误"}`;
-            console.log(`❌ [${alias}] 签到失败：${sign?.message || "未知错误"}`);
+            $.log(`[${alias}] 签到失败：${sign?.message || "未知错误"}`);
         }
         await sleep(random(2000, 5000));
 
-        // 4️⃣ 步数兑换（循环3次）
+        // 4. 步数兑换（循环3次）
         for (let i = 0; i < 3; i++) {
-            console.log(`🚶 [${alias}] 开始第${i+1}次步数兑换...`);
+            $.log(`[${alias}] 开始第${i+1}次步数兑换...`);
             let exchange = await commonPost('/step/exchange', {
                 "steps": random(5000, 8000),
                 "version": APP_VERSION,
@@ -463,11 +454,11 @@ async function runAccount({ identifier, alias }, globalProxyAgent) {
             if (exchange?.code == 200) {
                 let msg = `第${i+1}次步数兑换成功：${exchange.message}`;
                 result.exchangeMsgs.push(msg);
-                console.log(`✅ [${alias}] ${msg}`);
+                $.log(`[${alias}] ${msg}`);
             } else {
                 let msg = `第${i+1}次步数兑换失败：${exchange?.message || "未知错误"}`;
                 result.exchangeMsgs.push(msg);
-                console.log(`❌ [${alias}] ${msg}`);
+                $.log(`[${alias}] ${msg}`);
             }
             if (i < 2) {
                 await sleep(random(3000, 5000));
@@ -475,27 +466,27 @@ async function runAccount({ identifier, alias }, globalProxyAgent) {
         }
 
         result.success = true;
-        console.log(`✅ [${alias}] 账号执行完成`);
+        $.log(`[${alias}] 账号执行完成`);
     } catch (e) {
         result.error = `执行异常：${e.message}`;
-        console.log(`❌ [${alias}] 执行异常：`, e.message);
-        console.log(`❌ [${alias}] 异常堆栈：`, e.stack);
+        $.log(`[${alias}] 执行异常：`, e.message);
+        $.log(`[${alias}] 异常堆栈：`, e.stack);
     }
     return result;
 }
 
 // ===================== 主程序 =====================
 (async () => {
-    console.log('===== 飞蚂蚁旧衣回收动态code签到（调试版）=====\n');
-    console.log('ℹ️ 调试模式已开启，将打印完整请求和响应数据\n');
+    $.log('===== 飞蚂蚁旧衣回收动态code签到（调试版）=====\n');
+    $.log('调试模式已开启，将打印完整请求和响应数据\n');
 
     let globalProxyAgent = null;
     if (!ENABLE_PER_ACCOUNT_PROXY) {
         globalProxyAgent = await getValidProxy("全局共用");
     }
     const results = [];
-    for (const account of ACCOUNTS) {
-        const res = await runAccount(account, globalProxyAgent);
+    for (const wxid of $.userList) {
+        const res = await runAccount(wxid, globalProxyAgent);
         results.push(res);
         await sleep(2000);
     }
@@ -521,5 +512,7 @@ async function runAccount({ identifier, alias }, globalProxyAgent) {
         }
     });
     await sendPlusPlusNotification("飞蚂蚁旧衣回收任务完成", notifyContent);
-    console.log('\n===== 所有账号执行完成 =====');
+    $.log('\n===== 所有账号执行完成 =====');
+
+    await $.done();
 })();
