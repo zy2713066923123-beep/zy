@@ -1,5 +1,4 @@
-// cron: 58 10 * * *
-// cron: 0 21 * * *
+// cron: 15 10,14 * * * cron: 10 12,14 * * *
 const { getSingleCode } = require('./getCode.js');
 const getWxCode = (wxid, appid) => getSingleCode(appid, String(wxid).split('#')[0].trim());
 const https = require('https');

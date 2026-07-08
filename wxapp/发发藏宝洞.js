@@ -1,5 +1,4 @@
-// cron: 56 9 * * *
-// cron: 52 16 * * *
+// cron: 33 11,17 * * * cron: 11 11,20 * * *
 
 const { getSingleCode } = require('./getCode.js');
 class WeChatServer {
@@ -30,8 +29,7 @@ class Env {
 @Author: sm
 @Date: 2026.05.31
 @Description: 发发藏宝洞 小程序签到
-cron: 38 8 * * *
-------------------------------------------
+cron: 40 11,13 * * *
 变量名：fafa
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
 也支持直接填 token，格式：token=<access_token 或 bearer...>

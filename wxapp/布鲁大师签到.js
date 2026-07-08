@@ -1,5 +1,4 @@
-// cron: 8 10 * * *
-// cron: 40 17 * * *
+// cron: 28 10,16 * * * cron: 57 12,14 * * *
 
 const { getSingleCode } = require('./getCode.js');
 class WeChatServer {
@@ -30,8 +29,7 @@ class Env {
 @Author: sm
 @Date: 2026.05.31
 @Description: BLUE DASH 布鲁大师小程序签到
-cron: 30 8 * * *
-------------------------------------------
+cron: 14 11,22 * * *
 变量名：bluedash
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
 ------------------------------------------

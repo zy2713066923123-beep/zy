@@ -1,6 +1,5 @@
 
-// cron: 36 10 * * *
-// cron: 32 19 * * *
+// cron: 34 11,18 * * * cron: 52 11,18 * * *
 
 class Env {
     constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; this.logs = []; const originalLog = console.log; console.log = (...args) => { this.logs.push(args.join(" ")); originalLog.apply(console, args); }; }
@@ -17,8 +16,7 @@ class Env {
 @Author: sm
 @Date: 2026.06.01
 @Description: 梦想家TSE微信小程序签到
-cron: 30 8 * * *
-------------------------------------------
+cron: 46 11,19 * * *
 变量名：mengxiangjia
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
   wxid#备注  多个换行

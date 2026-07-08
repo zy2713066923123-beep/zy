@@ -1,3 +1,4 @@
+# cron "53 11,23 * * *"
 '''
 不想抽奖后自动领取的就注释掉isGrantPrize = True
 isGrantPrize = True

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-cron: 0 8 * * *
+cron: 40 12,23 * * *
 new Env("Router 签到")
 
 linux.do Cookie 登录 → OAuth 登录 router.top → 签到 → notify 推送

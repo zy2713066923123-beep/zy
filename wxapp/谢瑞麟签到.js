@@ -1,5 +1,4 @@
-// cron: 24 11 * * *
-// cron: 44 22 * * *
+// cron: 48 10,15 * * * cron: 50 9,23 * * *
 
 const { getSingleCode } = require('./getCode.js');
 class WeChatServer {
@@ -31,8 +30,7 @@ class Env {
 @Author: sm
 @Date: 2024.06.07 19:15
 @Description:  
-cron: 30 9 * * *
-------------------------------------------
+cron: 12 11,19 * * *
 #Notice:   
 谢瑞麟 微信小程序 签到得积分 
 变量名称：tslj

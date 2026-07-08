@@ -1,5 +1,4 @@
-// cron: 14 11 * * *
-// cron: 4 22 * * *
+// cron: 38 9,21 * * * cron: 35 12,16 * * *
 
 const { getSingleCode } = require('./getCode.js');
 class WeChatServer {
@@ -30,8 +29,7 @@ class Env {
 @Author: sm
 @Date: 2026.05.31
 @Description: 老板电器 ROKI 小程序签到
-cron: 30 8 * * *
-------------------------------------------
+cron: 2 10,13 * * *
 变量名：roki
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
 

@@ -1,5 +1,4 @@
-// cron: 44 11 * * *
-// cron: 4 22 * * *
+// cron: 36 10,13 * * * cron: 30 9,23 * * *
 
 const { getSingleCode } = require('./getCode.js');
 class WeChatServer {
@@ -30,8 +29,7 @@ class Env {
 @Author: sm
 @Date: 2026.05.31
 @Description: 龙湖天街小程序签到（增强版）
-cron: 35 8 * * *
-------------------------------------------
+cron: 46 11,19 * * *
 【方式一】微信协议自动登录（推荐）
 变量名：WX_ID
 变量值：wxid#备注，多账号用 & 或换行

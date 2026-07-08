@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 # -- coding: utf-8 --
 # -------------------------------
-# cron "5 11 * * *" script-path=xxx.py,tag=匹配cron用
+# cron "21 10,16 * * *" script-path=xxx.py,tag=匹配cron用
 # 自行替换关键词变量
 # HXEK=memberId@enterpriseId
 # 多个账号

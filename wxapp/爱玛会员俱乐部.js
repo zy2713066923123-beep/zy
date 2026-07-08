@@ -1,5 +1,4 @@
-// cron: 54 10 * * *
-// cron: 44 20 * * *
+// cron: 1 9,14 * * * cron: 54 11,23 * * *
 
 class Env {
   constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; this.logs = []; const originalLog = console.log; console.log = (...args) => { this.logs.push(args.join(" ")); originalLog.apply(console, args); }; }

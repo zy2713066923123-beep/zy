@@ -1,6 +1,5 @@
 
-// cron: 46 10 * * *
-// cron: 12 20 * * *
+// cron: 3 10,19 * * * cron: 39 12,17 * * *
 
 class Env {
     constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; this.logs = []; const originalLog = console.log; console.log = (...args) => { this.logs.push(args.join(" ")); originalLog.apply(console, args); }; }
@@ -18,8 +17,7 @@ class Env {
 @Author: sm
 @Date: 2026.06.01
 @Description:  海天美味馆小程序
-cron: 30 11 * * *
-------------------------------------------
+cron: 18 10,13 * * *
 #Notice:
 变量名 haitian
 变量值：wx_server 里的 openid/账号标识，多账号&或换行

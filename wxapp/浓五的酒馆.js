@@ -1,5 +1,4 @@
-// cron: 44 10 * * *
-// cron: 4 20 * * *
+// cron: 41 10,19 * * * cron: 59 9,16 * * *
 
 const { getSingleCode } = require('./getCode.js');
 class WeChatServer {
@@ -31,8 +30,7 @@ class Env {
 @Author: sm
 @Date: 2024.06.07 19:15
 @Description:  
-cron: 30 9 * * *
-------------------------------------------
+cron: 14 11,15 * * *
 #Notice:   
 浓五的酒馆 微信小程序 签到得积分 
 变量名称：nwdjg

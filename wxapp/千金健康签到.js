@@ -1,6 +1,5 @@
 
-// cron: 54 9 * * *
-// cron: 44 16 * * *
+// cron: 33 12,18 * * * cron: 50 10,13 * * *
 
 class Env {
     constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; this.logs = []; const originalLog = console.log; console.log = (...args) => { this.logs.push(args.join(" ")); originalLog.apply(console, args); }; }
@@ -18,8 +17,7 @@ class Env {
 @Author: sm
 @Date: 2026.06.01
 @Description:  千金健康生活微信小程序签到
-cron: 30 8 * * *
-------------------------------------------
+cron: 34 12,22 * * *
 #Notice:
 变量名 qianjinjiankang
 变量值：wx_server 里的 openid/账号标识，多账户&或换行

@@ -1,5 +1,5 @@
-# cron: 4 9 * * *
-# cron: 12 14 * * *
+# cron: 45 11,18 * * *
+# cron: 45 12,14 * * *
 #!/usr/bin/env python3
 """
 东风日产 人车生活 小程序签到脚本（code版）
@@ -10,7 +10,7 @@
   WECHAT_SERVER  微信协议服务地址，默认 http://127.0.0.1:8011
   NISSAN_SKIP_COMMUNITY =1 跳过社区任务，只做签到+查询
 
-cron: 30 8 * * *
+cron: 8 12,17 * * *
 """
 
 import base64

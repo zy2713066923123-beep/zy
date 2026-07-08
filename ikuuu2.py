@@ -4,7 +4,7 @@
 # @Author : github@wd210010 https://github.com/wd210010/just_for_happy
 # @Time : 2025/7/22 13:23
 # -------------------------------
-# cron "30 5 * * *" script-path=xxx.py,tag=匹配cron用
+# cron "4 11,14 * * *" script-path=xxx.py,tag=匹配cron用
 # const $ = new Env('IKuuu机场签到帐号版')
 # 进入青龙容器 
 # docker exec -it qinglong bash

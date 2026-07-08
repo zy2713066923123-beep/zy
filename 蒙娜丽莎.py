@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# cron "30 9,23 * * *"
 # @Time     : 2025-11-28
 # @Author   : chmodxxoo（整合版本）
 # @Version  ：4.1

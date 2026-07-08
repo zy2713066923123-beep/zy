@@ -1,5 +1,5 @@
 /*
-cron "30 8 * * *" yunduo.js, tag=云朵
+cron "19 9,16 * * *" yunduo.js, tag=云朵
 变量: YUNDUO_TOKEN
 值格式: 仅Token 或 Token&OpenID
 */

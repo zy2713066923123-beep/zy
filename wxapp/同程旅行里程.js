@@ -1,5 +1,5 @@
 // name: 同程旅行里程
-// cron: 21 8 * * *
+// cron: 11 10,19 * * *
 
 const axios = require("axios");
 

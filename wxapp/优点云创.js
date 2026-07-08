@@ -1,5 +1,5 @@
 // name: 优点云创
-// cron: 24 8 * * *
+// cron: 12 9,17 * * *
 
 const axios = require("axios");
 

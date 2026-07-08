@@ -1,5 +1,4 @@
-// cron: 30 11 * * *
-// cron: 8 23 * * *
+// cron: 36 9,19 * * * cron: 37 11,13 * * *
 
 const { getSingleCode } = require('./getCode.js');
 class WeChatServer {
@@ -30,8 +29,7 @@ class Env {
 @Author: sm
 @Date: 2026.06.01
 @Description: fsdlb 微信小程序逢三得利吧 签到积分
-cron: 30 9 * * *
-------------------------------------------
+cron: 58 11,16 * * *
 变量名：fsdlb
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
   wxid#备注  多个换行

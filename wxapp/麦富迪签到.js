@@ -1,5 +1,4 @@
-// cron: 42 11 * * *
-// cron: 56 23 * * *
+// cron: 7 11,21 * * * cron: 4 9,23 * * *
 
 const { getSingleCode } = require('./getCode.js');
 class WeChatServer {
@@ -30,8 +29,7 @@ class Env {
 @Author: sm
 @Date: 2026.05.31
 @Description: 麦富迪会员小程序签到
-cron: 35 8 * * *
-------------------------------------------
+cron: 41 11,23 * * *
 变量名：mfd
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
 

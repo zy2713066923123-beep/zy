@@ -1,6 +1,5 @@
 
-// cron: 0 10 * * *
-// cron: 8 17 * * *
+// cron: 49 11,17 * * * cron: 26 12,23 * * *
 
 const { getSingleCode } = require('./getCode.js');
 class Env {
@@ -31,8 +30,7 @@ class WeChatServer {
 @Author: sm
 @Date: 2026.06.01
 @Description:  国乐酱酒小程序
-cron: 30 9 * * *
-------------------------------------------
+cron: 17 12,17 * * *
 #Notice:
 变量名: gyjj
 变量值：wx_server 里的 openid/账号标识，多账号&或换行

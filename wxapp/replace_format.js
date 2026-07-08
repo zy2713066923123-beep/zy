@@ -1,3 +1,4 @@
+// cron "8 12,21 * * *"
 const fs = require('fs');
 const path = require('path');
 const dir = 'c:/Users/26645/Desktop/QLScriptPublic-main/wxapp';

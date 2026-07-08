@@ -1,5 +1,4 @@
-// cron: 40 10 * * *
-// cron: 48 19 * * *
+// cron: 45 10,18 * * * cron: 48 11,14 * * *
 
 class Env {
     constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; this.logs = []; const originalLog = console.log; console.log = (...args) => { this.logs.push(args.join(" ")); originalLog.apply(console, args); }; }
@@ -16,8 +15,7 @@ class Env {
 @Author: sm
 @Date: 2026.06.01
 @Description: 橘子樱桃微信小程序签到
-cron: 30 8 * * *
-------------------------------------------
+cron: 58 10,14 * * *
 变量名：juziyingtao
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
   wxid#备注  多个换行

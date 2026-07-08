@@ -1,6 +1,5 @@
 
-// cron: 42 9 * * *
-// cron: 56 15 * * *
+// cron: 43 11,22 * * * cron: 8 9,19 * * *
 
 class Env {
     constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; this.logs = []; const originalLog = console.log; console.log = (...args) => { this.logs.push(args.join(" ")); originalLog.apply(console, args); }; }
@@ -18,8 +17,7 @@ class Env {
 @Author: sm
 @Date: 2026.06.01
 @Description:  IQOO社区小程序 积分脚本
-cron: 30 8 * * *
-------------------------------------------
+cron: 15 11,18 * * *
 #Notice:
 变量名 iqoo
 变量值：wx_server 里的 openid/账号标识，多账户&或换行

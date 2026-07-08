@@ -1,5 +1,4 @@
-// cron: 20 11 * * *
-// cron: 28 22 * * *
+// cron: 17 11,21 * * * cron: 21 9,17 * * *
 
 class Env {
     constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; this.logs = []; const originalLog = console.log; console.log = (...args) => { this.logs.push(args.join(" ")); originalLog.apply(console, args); }; }
@@ -16,8 +15,7 @@ class Env {
 @Author: sm
 @Date: 2026.06.01
 @Description: 蜜蜂惊喜社微信小程序签到
-cron: 30 8 * * *
-------------------------------------------
+cron: 47 10,20 * * *
 变量名：mifengjingxishe
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
   wxid#备注  多个换行

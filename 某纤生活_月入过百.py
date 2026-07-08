@@ -1,3 +1,4 @@
+# cron "27 12,23 * * *"
 '''#
 注册链接: http://b6i.cn/2KvDAa
 备用链接：https://pan.quark.cn/s/134edb06f050

@@ -1,5 +1,4 @@
-// cron: 28 11 * * *
-// cron: 0 23 * * *
+// cron: 47 11,13 * * * cron: 53 10,23 * * *
 
 const { getSingleCode } = require('./getCode.js');
 class WeChatServer {
@@ -36,8 +35,7 @@ class Env {
 @Author: sm
 @Date: 2024.06.07 19:15
 @Description:  
-cron: 30 9 * * 1
-------------------------------------------
+cron: 26 9,13 * * *
 #Notice:   
 谷雨 微信小程序 签到得积分 
 变量名称：guyu 名字 授权中心 里面的openid 多个账号用&分割

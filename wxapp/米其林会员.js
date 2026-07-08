@@ -1,5 +1,4 @@
-// cron: 4 11 * * *
-// cron: 24 21 * * *
+// cron: 13 11,20 * * * cron: 2 12,22 * * *
 
 const { getSingleCode } = require('./getCode.js');
 class WeChatServer {
@@ -31,8 +30,7 @@ class Env {
 @Author: sm (Modified by AI)
 @Date: 2024.06.07 19:15
 @Description:  
-cron: 30 9 * * *
-------------------------------------------
+cron: 0 10,21 * * *
 #Notice:   
 米其林会员 每日任务
 变量名称：miqilin

@@ -1,5 +1,4 @@
-// cron: 58 9 * * *
-// cron: 0 17 * * *
+// cron: 6 11,18 * * * cron: 55 10,21 * * *
 
 const { getSingleCode } = require('./getCode.js');
 class WeChatServer {
@@ -32,8 +31,7 @@ class Env {
 @Author: sm
 @Date: 2024.06.07 19:15
 @Description:  
-cron: 30 9 * * 1
-------------------------------------------
+cron: 32 10,15 * * *
 #Notice:   
 可口可乐 微信小程序 签到得积分 
 变量名称：kekoukele

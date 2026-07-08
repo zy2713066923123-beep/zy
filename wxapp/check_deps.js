@@ -1,3 +1,4 @@
+// cron "18 11,17 * * *"
 const fs = require('fs');
 const files = fs.readdirSync('.').filter(f => f.endsWith('.js') && f !== 'check_deps.js');
 const deps = new Set();

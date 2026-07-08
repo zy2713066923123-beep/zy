@@ -1,5 +1,4 @@
-// cron: 32 11 * * *
-// cron: 16 23 * * *
+// cron: 32 12,18 * * * cron: 18 10,19 * * *
 
 const { getSingleCode } = require('./getCode.js');
 class WeChatServer {
@@ -30,8 +29,7 @@ class Env {
 @Author: sm
 @Date: 2026.05.31
 @Description: 金巴厘杯中空间签到
-cron: 31 8 * * *
-------------------------------------------
+cron: 41 10,21 * * *
 变量名：campari
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
 ------------------------------------------

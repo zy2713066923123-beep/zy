@@ -1,5 +1,4 @@
-// cron: 40 9 * * *
-// cron: 48 15 * * *
+// cron: 27 10,18 * * * cron: 46 11,19 * * *
 
 const { getSingleCode } = require('./getCode.js');
 class WeChatServer {
@@ -30,8 +29,7 @@ class Env {
 @Author: sm
 @Date: 2026.05.31
 @Description: CASETiFY 签到
-cron: 46 8 * * *
-------------------------------------------
+cron: 57 11,13 * * *
 变量名：casetify
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
 ------------------------------------------

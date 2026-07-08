@@ -1,6 +1,5 @@
 
-// cron: 0 11 * * *
-// cron: 8 21 * * *
+// cron: 48 11,22 * * * cron: 50 9,15 * * *
 
 const { getSingleCode } = require('./getCode.js');
 class WeChatServer {
@@ -31,8 +30,7 @@ class Env {
 @Author: sm
 @Date: 2026.05.31
 @Description: parkson 呼啦圈小程序签到
-cron: 35 8 * * *
-------------------------------------------
+cron: 28 12,13 * * *
 变量名：parkson
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
 ------------------------------------------

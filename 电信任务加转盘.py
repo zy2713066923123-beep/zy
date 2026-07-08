@@ -1,3 +1,4 @@
+# cron "44 10,17 * * *"
 import os, sys, json, time, random, string, base64, asyncio, certifi, requests
 from typing import Dict, Any, Union
 from datetime import datetime

@@ -1,6 +1,6 @@
 /**
  * new Env("吉利银河")
- * cron 08 15 * * *  jlyh.js
+ * cron 56 11,17 * * *  jlyh.js
  * Show:
  * 变量名:jlyh
  * 变量值:抓域名https://galaxy-user-api.geely.com/api/v1/login/refresh?refreshToken=后面的值&请求头headers中deviceSN的值

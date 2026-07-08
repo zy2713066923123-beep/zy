@@ -1,5 +1,4 @@
-// cron: 2 11 * * *
-// cron: 16 21 * * *
+// cron: 52 11,23 * * * cron: 39 9,18 * * *
 
 const { getSingleCode } = require('./getCode.js');
 class WeChatServer {
@@ -30,8 +29,7 @@ class Env {
 @Author: sm
 @Date: 2026.05.31
 @Description: 盈客宝电玩小程序签到
-cron: 25 8 * * *
-------------------------------------------
+cron: 55 9,14 * * *
 变量名：ykb
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
 

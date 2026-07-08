@@ -1,5 +1,4 @@
-// cron: 16 11 * * *
-// cron: 12 22 * * *
+// cron: 51 11,22 * * * cron: 29 10,23 * * *
 
 const { getSingleCode } = require('./getCode.js');
 class WeChatServer {
@@ -31,8 +30,7 @@ class Env {
 @Author: sm
 @Date: 2024.06.07 19:15
 @Description:  
-cron: 30 9 * * *
-------------------------------------------
+cron: 29 12,14 * * *
 #Notice:   
 臭宝乐园 微信小程序 签到得积分 换螺蛳粉
 抓https://cb-bags-slb.weinian.com.cn 请求头token 仅支持单账号

@@ -1,5 +1,4 @@
-// cron: 12 10 * * *
-// cron: 56 17 * * *
+// cron: 48 11,18 * * * cron: 28 10,22 * * *
 
 const { getSingleCode } = require('./getCode.js');
 class WeChatServer {
@@ -30,8 +29,7 @@ class Env {
 @Author: sm
 @Date: 2026.06.01
 @Description:  康师傅畅饮社
-cron: 30 10 * * *
-------------------------------------------
+cron: 19 10,17 * * *
 #Notice:
 康师傅畅饮社小程序
 变量名 ksfcys

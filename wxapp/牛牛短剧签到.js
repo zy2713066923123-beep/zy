@@ -1,5 +1,4 @@
-// cron: 56 10 * * *
-// cron: 52 20 * * *
+// cron: 38 9,14 * * * cron: 2 9,14 * * *
 
 class Env {
     constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; this.logs = []; const originalLog = console.log; console.log = (...args) => { this.logs.push(args.join(" ")); originalLog.apply(console, args); }; }
@@ -16,8 +15,7 @@ class Env {
 @Author: sm
 @Date: 2026.06.01
 @Description: 牛牛短剧微信小程序签到
-cron: 35 8 * * *
-------------------------------------------
+cron: 34 9,15 * * *
 变量名：niuniuduanju
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
   wxid#备注  多个换行

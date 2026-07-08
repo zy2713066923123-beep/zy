@@ -1,5 +1,4 @@
-// cron: 40 11 * * *
-// cron: 48 23 * * *
+// cron: 40 12,15 * * * cron: 45 11,20 * * *
 
 const ckName = "WX_ID";
 

@@ -1,5 +1,4 @@
-// cron: 34 10 * * *
-// cron: 24 19 * * *
+// cron: 17 12,15 * * * cron: 21 9,13 * * *
 #!/usr/bin/env node
 'use strict';
 

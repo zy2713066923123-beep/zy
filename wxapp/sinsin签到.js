@@ -1,5 +1,4 @@
-// cron: 44 9 * * *
-// cron: 4 16 * * *
+// cron: 3 11,22 * * * cron: 22 11,19 * * *
 
 class Env {
     constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; this.logs = []; const originalLog = console.log; console.log = (...args) => { this.logs.push(args.join(" ")); originalLog.apply(console, args); }; }
@@ -16,8 +15,7 @@ class Env {
 @Author: sm
 @Date: 2026.06.01
 @Description: sinsin微信小程序签到
-cron: 30 8 * * *
-------------------------------------------
+cron: 47 9,18 * * *
 变量名：sinsin
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
   wxid#备注  多个换行

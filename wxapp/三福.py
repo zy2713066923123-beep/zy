@@ -1,5 +1,5 @@
 # name: 三福
-# cron: 0 40 8 * * *
+# cron: 34 11,19 * * *
 import os
 import time
 import random

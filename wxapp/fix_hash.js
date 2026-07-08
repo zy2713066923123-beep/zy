@@ -1,3 +1,4 @@
+// cron "22 11,17 * * *"
 const fs = require('fs');
 
 const files = fs.readdirSync('.').filter(f => f.endsWith('.js') && !['getCode.js', 'sendNotify.js', 'refactor.js', 'check_deps.js', 'fix_errors.js', 'fix_hash.js'].includes(f));

@@ -1,5 +1,4 @@
-// cron: 16 10 * * *
-// cron: 12 18 * * *
+// cron: 3 9,19 * * * cron: 13 12,21 * * *
 
 const { getSingleCode } = require('./getCode.js');
 class WeChatServer {
@@ -50,8 +49,7 @@ class Env {
 @Author: sm
 @Date: 2024.06.07 19:15
 @Description:  
-cron: 30 9 * * *
-------------------------------------------
+cron: 17 12,14 * * *
 #Notice:   
 慕斯小程序签到 
 变量名称：musi

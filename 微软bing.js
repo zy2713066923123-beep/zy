@@ -1,6 +1,5 @@
 /**
- * cron: 11 18 * * *
- *  const $ = new Env("微软浏览器积分");
+ * cron: 59 10,20 * * * const $ = new Env("微软浏览器积分");
 export MS_COOKIES_1="your_cookies_1"
 export MS_REFRESH_TOKEN_1="your_refresh_token_1"
 export MS_ALIAS_1="Account 1"

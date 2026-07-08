@@ -1,5 +1,4 @@
-// cron: 46 9 * * *
-// cron: 12 16 * * *
+// cron: 45 11,20 * * * cron: 46 11,22 * * *
 
 const { getSingleCode } = require('./getCode.js');
 class WeChatServer {
@@ -31,8 +30,7 @@ class Env {
 @Author: sm
 @Date: 2024.06.07 19:15
 @Description:  
-cron: 30 9 * * 1
-------------------------------------------
+cron: 2 12,15 * * *
 #Notice:   
 stokke 微信小程序 每周签到得积分 
 变量名称：stokke

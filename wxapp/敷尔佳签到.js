@@ -1,5 +1,4 @@
-// cron: 26 10 * * *
-// cron: 52 18 * * *
+// cron: 48 9,19 * * * cron: 29 10,19 * * *
 
 const { getSingleCode } = require('./getCode.js');
 class WeChatServer {
@@ -30,8 +29,7 @@ class Env {
 @Author: sm
 @Date: 2026.05.31
 @Description:  敷尔佳小程序签到
-cron: 20 8 * * *
-------------------------------------------
+cron: 29 9,14 * * *
 变量名：fej
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
 ------------------------------------------
