@@ -81,7 +81,17 @@ async function wxPost(paths, body, timeout = 20000) {
   throw lastErr || new Error('微信协议请求失败');
 }
 
-// getWxCode 已经被合并到 main 函数中
+async function getWxCode(wxid) {
+  const { getSingleCode } = require('./getCode.js');
+  try {
+    const actualWxid = String(wxid).split('#')[0].trim();
+    const code = await getSingleCode(APPID, actualWxid);
+    if (!code) throw new Error(`获取 wx code 失败, getSingleCode返回空`);
+    return code;
+  } catch(e) {
+    throw new Error(`获取 wx code 失败: ${e.message}`);
+  }
+}
 
 async function getEidToken(wxid) {
   const payload = { api_name: 'webapi_getuserinfo', data: { lang: 'zh_CN' }, with_credentials: true };
@@ -206,63 +216,103 @@ async function checkLopCookie(ptKey, ptPin) {
   return { status: resp.status, data: resp.data };
 }
 
-async function main() {
-  const { WeChatCodeGetter } = require('./getCode.js');
-  const getter = new WeChatCodeGetter();
-  await getter.init();
-  
-  const onlineAccounts = await getter.getOnlineAccounts();
-  if (!onlineAccounts || onlineAccounts.length === 0) {
-    throw new Error('未找到任何在线账号（可检查青龙 WX_ID 配置或协议服务端是否在线）');
-  }
+async function refresh(account) {
+  log(`刷新：${account.remark}`);
+  const code = await getWxCode(account.wxid);
+  log(`  · wx code: ${code.slice(0, 10)}...`);
+  let eidToken = await getEidToken(account.wxid);
+  if (!eidToken) eidToken = await getFingerTk();
+  if (eidToken) log(`  · eid_token: ${eidToken.slice(0, 18)}...`);
+  const { data } = await silentAuthLogin({ code, eidToken });
+  const cred = {
+    remark: account.remark,
+    wxid: account.wxid,
+    pt_key: data.pt_key,
+    pt_pin: data.pt_pin,
+    pin: data.pt_pin,
+    guid: data.guid || '',
+    expire_time: data.expire_time || 0,
+    refresh_time: data.refresh_time || 0,
+    ck: `pt_key=${data.pt_key};pt_pin=${data.pt_pin};`,
+    lopCookie: `pt_key=${data.pt_key}; pin=${encodeURIComponent(data.pt_pin)};`,
+    updatedAt: Date.now()
+  };
+  log(`  · CK: ${cred.ck}`);
+  const check = await checkLopCookie(cred.pt_key, cred.pt_pin);
+  log(`  · lop-proxy 校验 status=${check.status} code=${check.data?.code ?? ''} msg=${check.data?.msg || check.data?.message || ''}`);
+  return cred;
+}
 
+async function saveToQinglongEnv(cks) {
+  try {
+    let qlDir = process.env.QL_DIR || '/ql';
+    const authFile = path.join(qlDir, 'data/config/auth.json');
+    if (!fs.existsSync(authFile)) {
+      log('未检测到青龙面板 auth.json，跳过自动写入环境变量。');
+      return;
+    }
+    const auth = JSON.parse(fs.readFileSync(authFile, 'utf8'));
+    const token = auth.token;
+    if (!token) return;
+
+    const headers = {
+      'Accept': 'application/json',
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    };
+    const host = 'http://127.0.0.1:5600';
+
+    const { data } = await axios.get(`${host}/api/envs?searchValue=JD_COOKIE`, { headers });
+    const existing = data.data || [];
+
+    for (const item of cks) {
+      const match = item.ck.match(/pt_pin=([^;]+)/);
+      const pin = match ? match[1] : '';
+      if (!pin) continue;
+
+      const found = existing.find(env => env.name === 'JD_COOKIE' && env.value.includes(`pt_pin=${pin}`));
+      if (found) {
+        await axios.put(`${host}/api/envs`, {
+          name: 'JD_COOKIE',
+          value: item.ck,
+          remarks: item.remark || found.remarks,
+          id: found.id,
+          _id: found._id
+        }, { headers });
+        log(`✅ 成功更新青龙环境变量 JD_COOKIE (pin=${pin})`);
+      } else {
+        await axios.post(`${host}/api/envs`, [{
+          name: 'JD_COOKIE',
+          value: item.ck,
+          remarks: item.remark
+        }], { headers });
+        log(`✅ 成功新增青龙环境变量 JD_COOKIE (pin=${pin})`);
+      }
+    }
+  } catch (e) {
+    log(`❌ 写入青龙环境变量失败: ${e.message}`);
+  }
+}
+
+async function main() {
+  if (!WXJD) throw new Error('未配置 wxjd 或 WX_ID（格式：wxid#备注，多号换行/@/&）');
+  const accounts = parseAccounts(WXJD);
   const cache = loadCache();
   const results = [];
   
-  for (let i = 0; i < onlineAccounts.length; i++) {
-    const acc = onlineAccounts[i].account;
-    const remark = acc.nickname || acc.alias || acc.wxid || `账号_${i + 1}`;
-    const ref = acc._ref || acc.wxid || acc.openid;
-    
+  for (let i = 0; i < accounts.length; i++) {
+    const a = accounts[i];
     try {
-      log(`刷新：${remark}`);
-      const code = await getter.getAppletCode(APPID, ref);
-      if (!code) throw new Error(`获取 wx code 失败, getAppletCode返回空`);
-      log(`  · wx code: ${code.slice(0, 10)}...`);
-
-      let eidToken = await getEidToken(acc.wxid || ref);
-      if (!eidToken) eidToken = await getFingerTk();
-      if (eidToken) log(`  · eid_token: ${eidToken.slice(0, 18)}...`);
-      
-      const { data } = await silentAuthLogin({ code, eidToken });
-      
-      const cred = {
-        remark: remark,
-        wxid: acc.wxid || ref,
-        pt_key: data.pt_key,
-        pt_pin: data.pt_pin,
-        pin: data.pt_pin,
-        guid: data.guid || '',
-        expire_time: data.expire_time || 0,
-        refresh_time: data.refresh_time || 0,
-        ck: `pt_key=${data.pt_key};pt_pin=${data.pt_pin};`,
-        lopCookie: `pt_key=${data.pt_key}; pin=${encodeURIComponent(data.pt_pin)};`,
-        updatedAt: Date.now()
-      };
-      
-      log(`  · CK: ${cred.ck}`);
-      const check = await checkLopCookie(cred.pt_key, cred.pt_pin);
-      log(`  · lop-proxy 校验 status=${check.status} code=${check.data?.code ?? ''} msg=${check.data?.msg || check.data?.message || ''}`);
-      
-      cache[cred.wxid] = cred;
+      const cred = await refresh(a);
+      cache[a.wxid] = cred;
       saveCache(cache);
-      results.push({ remark: remark, ok: true, lopCookie: cred.lopCookie, ck: cred.ck });
+      results.push({ remark: a.remark, ok: true, lopCookie: cred.lopCookie, ck: cred.ck });
     } catch (e) {
-      log(`❌ ${remark} 失败：${e.message}`);
-      results.push({ remark: remark, ok: false, msg: e.message });
+      log(`❌ ${a.remark} 失败：${e.message}`);
+      results.push({ remark: a.remark, ok: false, msg: e.message });
     }
     
-    if (i < onlineAccounts.length - 1) {
+    if (i < accounts.length - 1) {
       log(`等待 ${ACCOUNT_DELAY_MS / 1000}s 后处理下一个账号...`);
       await sleep(ACCOUNT_DELAY_MS);
     }
@@ -270,10 +320,12 @@ async function main() {
   
   log('\n========== lop-proxy Cookie ==========');
   let jdCookiesContent = '';
+  const validCks = [];
   for (const r of results) {
     if (r.ok) {
       console.log(r.lopCookie);
       jdCookiesContent += `JD_COOKIE="${r.ck}"\n`;
+      validCks.push({ ck: r.ck, remark: r.remark });
     } else {
       log(`❌ ${r.remark} ${r.msg}`);
     }
@@ -283,6 +335,9 @@ async function main() {
     const outPath = path.join(__dirname, 'JD_COOKIE.txt');
     fs.writeFileSync(outPath, jdCookiesContent.trim(), 'utf8');
     log(`\n✅ 已将提取的京东 CK 依次存入本地文件：${outPath}`);
+    
+    // 自动存入青龙环境变量
+    await saveToQinglongEnv(validCks);
   }
 }
 
