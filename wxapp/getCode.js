@@ -1,4 +1,5 @@
-// cron "1 11,23 * * *"
+// cron "7 9 * * *"
+// cron "2 21 * * *"
 /**
  * 微信小程序登录Code获取模块（双协议支持）
  * 
@@ -77,6 +78,10 @@ class YYBAdapter {
      * 如果精确匹配失败且有可用账号，会尝试模糊匹配或使用第一个可用账号
      */
     async _resolveRef(wxidOrOpenid) {
+        // 防御：identifier 为空（undefined/null/''）时直接给出清晰报错，避免后续 .includes 崩溃
+        if (wxidOrOpenid === undefined || wxidOrOpenid === null || wxidOrOpenid === '') {
+            throw new Error('identifier 未提供（WX_ID 解析为空），请检查 WX_ID 环境变量或调用参数');
+        }
         const accounts = await this._getAccountList();
         
         // 精确匹配 openid
@@ -231,8 +236,9 @@ class YYBAdapter {
             
             return code;
         } catch (e) {
-            if (e.message.includes('[YYB]') || e.message.includes('login_buffer')) throw e;
-            throw new Error(`[YYB] 请求code失败: ${e.message}`);
+            const msg = (e && e.message) ? e.message : String(e);
+            if (msg.includes('[YYB]') || msg.includes('login_buffer')) throw e;
+            throw new Error(`[YYB] 请求code失败: ${msg}`);
         }
     }
 
@@ -290,8 +296,9 @@ class YYBAdapter {
             
             return code;
         } catch (e) {
-            if (e.message.includes('[YYB]') || e.message.includes('login_buffer')) throw e;
-            throw new Error(`[YYB] 请求手机号code失败: ${e.message}`);
+            const msg = (e && e.message) ? e.message : String(e);
+            if (msg.includes('[YYB]') || msg.includes('login_buffer')) throw e;
+            throw new Error(`[YYB] 请求手机号code失败: ${msg}`);
         }
     }
 }
@@ -698,6 +705,10 @@ class WeChatCodeGetter {
      * - 仅当目标适配器失败时才 fallback 到另一个
      */
     async getAppletCode(appId, identifier) {
+        // 防御：identifier 为空时提前报错，避免路由到具体适配器后再崩溃
+        if (identifier === undefined || identifier === null || identifier === '') {
+            throw new Error('identifier 未提供，请检查 WX_ID 环境变量或调用参数');
+        }
         const targetProtocol = this._detectProtocolForIdentifier(identifier);
         console.log(`[getCode] 路由: ${identifier} → ${targetProtocol}`);
 

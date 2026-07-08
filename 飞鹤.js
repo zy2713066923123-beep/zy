@@ -10,22 +10,18 @@
 飞鹤|北纬47度好物小程序 每日签到、自动完成任务
 
 【使用方法】
-1. 青龙面板配置：
-   - 进入青龙面板 → 环境变量
-   - 添加变量名：xmtoken
-   - 变量值：每行一个token（支持多账号）
-   
-2. 环境变量格式（三种方式任选其一）：
-   方式1（推荐）：换行分隔
-   token1
-   token2
-   token3
-   
-   方式2：&符号分隔
-   token1&token2&token3
-   
-   方式3：@符号分隔
-   token1@token2@token3
+方式A（推荐，标准模式）：使用 WX_ID + getCode.js 自动获取 code
+   - 环境变量名：WX_ID
+   - 变量值：每行一个 identifier（应用宝 openid 或 牛子 wxid），可加 #别名
+     owNAX6uNaBK4eild3eAlrLrwn-CE#156
+     wxid_854qthkdugnb21#133
+   - 支持换行或 & 分隔；wxid_ 开头走牛子，openid 格式自动走应用宝
+
+方式B（兜底）：直接填 token
+   - 环境变量名：xmtoken
+   - 变量值：每行一个 token（支持多账号）
+
+环境变量格式（多账号分隔符任选）：换行 / & / @
 
 【获取Token】
 方法1：抓包获取
@@ -41,7 +37,8 @@ hostname = www.feihevip.com
 
 【定时任务】
 建议每天早上0点30分执行
-cron: 36 9,16 * * *
+cron: 40 9 * * *
+cron: 11 13 * * *
 
 【图标】
 https://raw.githubusercontent.com/leiyiyan/resource/main/icons/xmyx.png
@@ -95,6 +92,24 @@ if ($.isNode()) {
     console.log('⚠️ got 库初始化失败，部分功能可能受限');
   }
 }
+
+// ========== 引入 getCode.js 标准模块（牛子 + 应用宝 双协议） ==========
+// 自动适配脚本所在目录（根目录或 wxapp 子目录）
+function __loadGetCode() {
+  if (typeof require === 'undefined') return null; // 非 Node 环境（QuantumultX/Surge）无需加载
+  const candidates = ['./getCode.js', './wxapp/getCode.js'];
+  for (const p of candidates) {
+    try { return require(p); } catch (e) {}
+  }
+  try { return require(require('path').join(__dirname, 'getCode.js')); } catch (e) {}
+  return null;
+}
+const getCodeModule = __loadGetCode();
+const getSingleCode = getCodeModule ? getCodeModule.getSingleCode : null;
+if (!getCodeModule) {
+  console.log('⚠️ getCode.js 模块加载失败，WX_ID 模式将不可用（请确认 getCode.js 与本脚本同目录）');
+}
+
 let envSplitor = ["\n", "&", "@"]; //多账号分隔符，优先使用换行符
 // 从环境变量读取 token，支持多账号
 // 环境变量名: xmtoken
@@ -546,43 +561,69 @@ async function getWxToken(code) {
   }
 }
 
-//检查code服务器
+//检查code服务器（标准模式：WX_ID + getCode.js 双协议）
 async function checkCodeServer(appid) {
-  // 环境变量
-  $.codeServer = $.isNode() ? process.env["CODESERVER_ADDRESS"] : $.getdata('@codeServer.address');
-  // 需要获取的微信列表，用,分隔
-  $.wxId = ($.isNode() ? process.env["CODESERVER_WXID"] : $.getdata('@codeServer.wxId')).split(",");
-  // 获取codeList
-  let codeList = await Promise.all($.wxId.map(e => getCode(e)));
-  async function getCode(wxId) {
-    try {
-      const options = {
-        url: `${$.codeServer}/api/Common/JSLogin`,
-        headers: { "accept": "application/json", "content-type": "application/json" },
-        body: JSON.stringify({
-          'wxId': wxId,
-          'appId': appid
-        })
-      };
-      let res = await $.http.post(options);
-      res = $.toObj(res?.body);
-      return res?.Data?.code;
-    } catch (e) {
-      $.log(e);
-    }
+  if (!getSingleCode) {
+    $.log(`❌ getCode.js 模块加载失败，无法使用 WX_ID 模式`);
+    return [];
   }
-    debug(codeList);
-    !codeList.length
-      ? $.log(`❌获取code授权失败！请检查服务器运行是否正常 => 尝试读取数据持久化 `)
-      : $.log(`✅获取code授权成功！当前code数量为${codeList.length}`);
-    let userList = await Promise.all(codeList.map(async (code) => {
-      const token = await getWxToken(code);
-      const newToken = await refreshToken(token);
-      debug(newToken)
-      return { "token": newToken };
-    }));
-    userList = userList.filter(value => Object.keys(value).length !== 0)
-    return userList;
+  // 解析 WX_ID：支持换行 / & 分隔，每行格式 identifier#alias
+  const rawList = (process.env.WX_ID || '').split(/[\n&]+/).map(v => v.trim()).filter(Boolean);
+  if (!rawList.length) {
+    $.log(`❌未配置 WX_ID 环境变量`);
+    return [];
+  }
+  // 逐个获取 code（双协议：wxid_ 开头 → 牛子，openid 格式 → 应用宝）
+  const codeList = await Promise.all(rawList.map(async (entry) => {
+    const identifier = entry.split('#')[0].trim();
+    try {
+      return await getSingleCode(appid, identifier);
+    } catch (e) {
+      $.log(`❌获取code失败: ${identifier} => ${e.message || e}`);
+      return null;
+    }
+  }));
+  const validCodes = codeList.filter(Boolean);
+  !validCodes.length
+    ? $.log(`❌获取code授权失败！请检查 getCode 服务`)
+    : $.log(`✅获取code授权成功！当前code数量为${validCodes.length}`);
+  // code → getWxToken → refreshToken → { token }
+  const users = await Promise.all(validCodes.map(async (code) => {
+    const token = await getWxToken(code);
+    if (!token) return null;
+    const newToken = await refreshTokenStandalone(token);
+    if (!newToken) return null;
+    return { "token": newToken };
+  }));
+  return users.filter(value => value && Object.keys(value).length !== 0);
+}
+
+// 独立 refreshToken（供 checkCodeServer 调用，换取长期 token）
+async function refreshTokenStandalone(token) {
+  try {
+    const { fhNonceStr, fhTimestamp, fhSign } = getSignature2();
+    const options = {
+      url: `https://mom.feihe.com/program/token/refreshToken`,
+      type: "get",
+      headers: {
+        "Host": "mom.feihe.com",
+        "token": token,
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_8 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.48(0x1800302b) NetType/4G Language/zh_CN",
+        "Referer": "https://servicewechat.com/wx4205ec55b793245e/366/page-frame.html",
+        "fhAppid": 'xmh',
+        "source": 1,
+        fhNonceStr,
+        fhTimestamp,
+        fhSign
+      }
+    };
+    let result = await Request(options);
+    let refreshToken = result?.data;
+    return refreshToken || null;
+  } catch (e) {
+    $.log(`⛔️ 刷新 Token 失败: ${e}`)
+    return null;
+  }
 }
 //检查环境变量
 async function checkEnv() {
@@ -728,7 +769,12 @@ function getFhNonceStr(t) { var e, r, n = "", o = (t = function (t) { return t |
   if (typeof $request != "undefined") {
     await getCookie();
   } else {
-    if (!(await checkEnv())) throw new Error(`❌未检测到ck，请添加环境变量`);
+    // 标准模式：优先使用 WX_ID（getCode.js 双协议）获取 code → token
+    if (process.env.WX_ID && getSingleCode) {
+      userList = await checkCodeServer($.appid);
+    } else if (!(await checkEnv())) {
+      throw new Error(`❌未检测到 WX_ID / xmtoken 环境变量，请先配置`);
+    }
     if (userList.length > 0) await main();
   }
 })()
