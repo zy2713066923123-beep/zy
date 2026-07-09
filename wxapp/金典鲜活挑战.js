@@ -25,7 +25,11 @@ const fs   = require('fs');
 const path = require('path');
 const https = require('https');
 const http  = require('http');
+const zlib = require('zlib');
 const { URL } = require('url');
+
+// 统一微信协议（牛子 + 应用宝双协议智能路由），与飞鹤/蜜雪冰城等脚本一致
+const { getSingleCode } = require('./getCode.js');
 
 // ── 常量 ──────────────────────────────────────────────────────────────────
 
@@ -35,7 +39,6 @@ const APP_KEY       = String(process.env.JINDIAN_XH_APP_KEY || process.env.JINDI
 const TENANT_ID     = '1718857849685876737';
 const MS_BASE       = 'https://msmarket.msx.digitalyili.com';
 const API_BASE      = 'https://wx-camp-hc-api-01.mscampapi.digitalyili.com/wx-camp-jddyr/stage';
-const WECHAT_SERVER = String(process.env.WECHAT_SERVER || '').trim();
 const MAX_DRAW      = Math.max(1, Number(process.env.JINDIAN_XH_MAX_DRAW || 20));
 const CACHE_FILE    = path.join(__dirname, 'jindian_cache.json');  // 与鲜活挑战共用
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36 MicroMessenger/7.0.20.1781(0x6700143B) NetType/WIFI MiniProgramEnv/Windows WindowsWechat/WMPF WindowsWechat(0x63090a13) UnifiedPCWindowsWechat(0xf254186b) XWEB/19481';
@@ -92,7 +95,15 @@ function request({ url, method = 'POST', headers = {}, body = null, timeout = 25
         const c = [];
         res.on('data', x => c.push(x));
         res.on('end', () => {
-          const text = Buffer.concat(c).toString('utf8');
+          let buf = Buffer.concat(c);
+          // 自动解压 gzip / deflate / br 响应
+          const enc = String(res.headers['content-encoding'] || '').toLowerCase();
+          try {
+            if (enc.includes('gzip')) buf = zlib.gunzipSync(buf);
+            else if (enc.includes('deflate')) buf = zlib.inflateSync(buf);
+            else if (enc.includes('br')) buf = zlib.brotliDecompressSync(buf);
+          } catch {}
+          const text = buf.toString('utf8');
           let data = text;
           if (/json/i.test(res.headers['content-type'] || '')) { try { data = JSON.parse(text); } catch {} }
           resolve({ status: res.statusCode, data });
@@ -110,27 +121,27 @@ function request({ url, method = 'POST', headers = {}, body = null, timeout = 25
 
 function msH(token = '') {
   return {
-    Host: 'msmarket.msx.digitalyili.com', Connection: 'keep-alive',
+    Host: 'msmarket.msx.digitalyili.com',
+    Connection: 'keep-alive',
     'register-source': '', shareid: '', xweb_xhr: '1', scene: '1000',
     'access-token': token, 'User-Agent': UA, channel: 'copyUrl',
     'Content-Type': 'application/json',
-    // TAB 前缀绕过部分 WAF 字面规则，服务端会 trim 得到正确值
-    'tenant-id': '\t' + TENANT_ID,
-    Accept: '*/*', Referer: `https://servicewechat.com/${APPID}/815/page-frame.html`,
+    // 标准 tenant-id，不要加任何控制字符（Tab/空格前缀会触发 WAF）
+    'tenant-id': TENANT_ID,
+    Accept: 'application/json, text/plain, */*',
+    'Accept-Language': 'zh-CN,zh;q=0.9',
+    Origin: 'https://servicewechat.com',
+    'X-Requested-With': 'XMLHttpRequest',
+    Referer: `https://servicewechat.com/${APPID}/815/page-frame.html`,
   };
 }
 
+// 通过 getCode.js 统一接口获取微信 login code（牛子 + 应用宝双协议智能路由）
 async function wxCode(wxid) {
-  if (!WECHAT_SERVER) throw new Error('未配置 WECHAT_SERVER');
-  const base = WECHAT_SERVER.replace(/\/$/, '');
-  for (const p of ['/api/v1/wx/app/get/code', '/api/v1/wx/app/get/jscode']) {
-    try {
-      const { data } = await request({ url: base + p, headers: { 'Content-Type': 'application/json' }, body: { wxid, appid: APPID } });
-      const code = data?.Data?.code || data?.data?.code || data?.code;
-      if (code) return String(code);
-    } catch {}
-  }
-  throw new Error('协议接口未返回code');
+  const actualWxid = String(wxid).split('#')[0].trim();
+  const code = await getSingleCode(APPID, actualWxid);
+  if (!code) throw new Error('getCode 未返回 code');
+  return String(code);
 }
 
 async function msLogin(jsCode) {
@@ -315,7 +326,7 @@ class Client {
 // ── 主逻辑 ────────────────────────────────────────────────────────────────
 
 async function main() {
-  const accounts = parseAccounts(process.env.wxjindian || '');
+  const accounts = parseAccounts(process.env.WX_ID || process.env.wxjindian || '');
   if (!accounts.length) throw new Error('未配置 wxjindian');
   log(`${SCRIPT_NAME} 开始，共 ${accounts.length} 个账号，app_key=${APP_KEY}`);
 
