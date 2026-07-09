@@ -13,8 +13,8 @@
  *   所有账号分享完成后统一翻牌
  *
  * 变量:
- *   wxjindian               账号列表，wxid#备注，多账号换行或@分隔
- *   WECHAT_SERVER           协议服务地址
+ *   WX_ID                   账号列表，wxid#备注，多账号换行或@分隔（兼容旧名 wxjindian）
+ *   WECHAT_SERVER           协议服务地址（getCode 内部使用）
  *   JINDIAN_XH_APP_KEY      活动 app_key（默认 zd123a10187c995e97）
  *   JINDIAN_XH_MAX_DRAW     最大翻牌次数（默认 20）
  *
