@@ -154,7 +154,7 @@ class Tongcheng {
         const cal = calendar.data?.data || {};
         if (info.todaySigned || cal.todaySigned) {
             const result = `今日已签到，连续=${info.periodContinuedSignDays ?? cal.periodContinuedSignDays ?? "未知"}天`;
-            $.log(`账号[${this.index]} ${result}`);
+            $.log(`账号[${this.index} ${result}`);
             return result;
         }
         const sign = await request({
