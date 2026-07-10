@@ -771,12 +771,21 @@ function getFhNonceStr(t) { var e, r, n = "", o = (t = function (t) { return t |
   if (typeof $request != "undefined") {
     await getCookie();
   } else {
-    // 标准模式：优先使用 WX_ID（getCode.js 双协议）获取 code → token
+    // 同时支持 WX_ID 与 xmtoken，两套账号合并后一起跑
     if (process.env.WX_ID && getSingleCode) {
-      userList = await checkCodeServer($.appid);
-    } else if (!(await checkEnv())) {
+      const wxUsers = await checkCodeServer($.appid); // 已包装为 UserInfo 实例
+      userList.push(...wxUsers);
+    }
+    if (userCookie) {
+      // checkEnv 内部会把 xmtoken 账号 push 到全局 userList
+      await checkEnv();
+    }
+    if (userList.length === 0) {
       throw new Error(`❌未检测到 WX_ID / xmtoken 环境变量，请先配置`);
     }
+    // 兜底归一化：确保全部为 UserInfo 实例，避免个别来源漏包装导致 getTaskList is not a function
+    userList = userList.map(u => (u instanceof UserInfo ? u : new UserInfo(u)));
+    $.log(`✅ 合计待执行账号: ${userList.length} 个（WX_ID + xmtoken）\n`);
     if (userList.length > 0) await main();
   }
 })()
