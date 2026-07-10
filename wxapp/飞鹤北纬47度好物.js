@@ -30,7 +30,7 @@
 
 方法2：使用抓包工具（推荐使用 Quantumult X 或 Surge）
 [Script]
-http-response ^https?:\/\/www\.feihevip\.com\/api\/starMember\/getMemberInfo script-path=xmyx.js, requires-body=true, timeout=60, tag=星妈优选获取Cookie
+http-response ^https?:\/\/www\.feihevip\.com\/api\/starMember\/getMemberInfo script-path=xmyx.js, requires-body=true, timeout=60, tag=飞鹤北纬47度好物小程序获取Cookie
 
 [MITM]
 hostname = www.feihevip.com
@@ -63,7 +63,7 @@ https://raw.githubusercontent.com/leiyiyan/resource/main/icons/xmyx.png
 */
 
 
-const $ = new Env("星妈优选");
+const $ = new Env("飞鹤北纬47度好物小程序");
 const ckName = "xmtoken";
 
 //-------------------- 一般不动变量区域 -------------------------------------
@@ -595,7 +595,9 @@ async function checkCodeServer(appid) {
     if (!newToken) return null;
     return { "token": newToken };
   }));
-  return users.filter(value => value && Object.keys(value).length !== 0);
+  return users
+    .filter(value => value && Object.keys(value).length !== 0)
+    .map(u => new UserInfo(u));
 }
 
 // 独立 refreshToken（供 checkCodeServer 调用，换取长期 token）
