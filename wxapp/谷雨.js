@@ -38,7 +38,7 @@ class Env {
 cron: 26 9,13 * * *
 #Notice:   
 谷雨 微信小程序 签到得积分 
-变量名称：guyu 名字 授权中心 里面的openid 多个账号用&分割
+变量名称：WX_ID 微信账号，格式：wxid#备注，多账号用换行 / & 分隔
 ⚠️【免责声明】
 ------------------------------------------
 1、此脚本仅用于学习研究，不保证其合法性、准确性、有效性，请根据情况自行判断，本人对此不承担任何保证责任。
@@ -60,7 +60,7 @@ WX_ID 格式：
 
 const $ = new Env("谷雨小程序");
 
-let ckName = `guyu`;
+let ckName = "WX_ID";
 const strSplitor = "#";
 const axios = require("axios");
 const defaultUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.31(0x18001e31) NetType/WIFI Language/zh_CN miniProgram"
@@ -94,15 +94,7 @@ class Task {
             $.log(`账号[${this.index}] 获取用户Token失败❌`)
             return
         }
-        // 如果customerId为空，尝试获取或注册用户
-        if (!this.customerId) {
-            await this.ensureCustomerId()
-        }
-        if (!this.customerId) {
-            $.log(`账号[${this.index}] 无法获取用户ID(可能是未注册)，跳过签到❌`)
-            await this.getUserPoints()
-            return
-        }
+        // 登录后 customerId 可能为空，signIn 会以 openId 兜底完成签到
         await this.signIn()
         await this.getUserPoints()
     }
@@ -206,83 +198,6 @@ class Task {
 
         return axios.request(options)
     }
-    async ensureCustomerId() {
-        // 方法1：尝试获取用户详情（原逻辑）
-        await this.getCustomerInfo()
-        if (this.customerId) return
-
-        // 方法2：尝试通过 openId 查询/注册用户
-        if (this.openId) {
-            $.log(`🌸账号[${this.index}] 尝试通过openId查询用户信息...`)
-            try {
-                let options = {
-                    method: 'POST',
-                    url: `https://mall-mobile-v6.vecrp.com/mobile/customer/getByOpenId`,
-                    headers: {},
-                    data: { openId: this.openId, shopId: '100186753' }
-                }
-                let { data: result } = await this.request(options)
-                if (result?.success && result.result?.customerId) {
-                    this.customerId = result.result.customerId
-                    $.log(`🌸账号[${this.index}] 通过openId获取到用户ID:${this.customerId}`)
-                    return
-                }
-            } catch (e) {
-                $.log(`🌸账号[${this.index}] openId查询失败:${e.message || e}`)
-            }
-
-            // 方法3：尝试自动注册
-            $.log(`🌸账号[${this.index}] 尝试自动注册用户...`)
-            try {
-                let options = {
-                    method: 'POST',
-                    url: `https://mall-mobile-v6.vecrp.com/mobile/customer/registerOrGet`,
-                    headers: {},
-                    data: {
-                        openId: this.openId,
-                        shopId: '100186753',
-                        appid: 'wxda948f3be0afc375',
-                        customerName: `谷雨会员_${this.openId.slice(-6)}`
-                    }
-                }
-                let { data: result } = await this.request(options)
-                if (result?.success && result.result?.customerId) {
-                    this.customerId = result.result.customerId
-                    $.log(`🌸账号[${this.index}] 注册成功，获取到用户ID:${this.customerId}`)
-                    return
-                }
-                $.log(`🌸账号[${this.index}] 自动注册结果:${JSON.stringify(result?.result || result)}`)
-            } catch (e) {
-                $.log(`🌸账号[${this.index}] 自动注册失败:${e.message || e}`)
-            }
-        }
-    }
-
-    async getCustomerInfo() {
-        // 尝试获取用户详情接口，可能能刷新customerId
-        try {
-            let options = {
-                method: 'GET',
-                url: `https://mall-mobile-v6.vecrp.com/mobile/customer/detail`,
-                params: { shopId: '100186753' },
-                headers: {}
-            }
-            let { data: result } = await this.request(options)
-            if (result?.success && result.result) {
-                const info = result.result
-                if (info.customerId) {
-                    this.customerId = info.customerId
-                    $.log(`🌸账号[${this.index}] 获取到用户ID:${this.customerId}`)
-                }
-                if (info.openId && !this.openId) {
-                    this.openId = info.openId
-                }
-            }
-        } catch (e) {
-            $.log(`🌸账号[${this.index}] 获取用户详情失败:${e.message || e}`)
-        }
-    }
-
     async signIn() {
         let options = {
             method: 'POST',
@@ -341,8 +256,7 @@ class Task {
 
 }
 
-!(async () => {
-    await getNotice()
+!(async () => { 
     $.checkEnv(ckName);
     if (process.env['WX_ID'] || $.userList.length > 0) {
         for (let user of $.userList) {
@@ -357,20 +271,4 @@ class Task {
     .catch((e) => console.log(e))
     .finally(() => $.done());
 
-async function getNotice() {
-    try {
-        let options = {
-            url: `https://ghproxy.net/https://raw.githubusercontent.com/smallfawn/Note/refs/heads/main/Notice.json`,
-            headers: {
-                "User-Agent": defaultUserAgent,
-            },
-            timeout: 3000
-        }
-        let {
-            data: res
-        } = await axios.request(options);
-        $.log(res)
-        return res
-    } catch (e) { }
 
-}
