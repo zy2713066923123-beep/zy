@@ -11,6 +11,8 @@ WX_ID 格式：
   备注#wxid#appid#手机号
   wxid#备注#手机号
   wxid#备注
+  openid#备注          （openid 格式自动走应用宝 yyb，如 owNAX6...#156）
+
 
 可选：
   LJZF_DELAY_MS          任务间隔毫秒，默认 3000
@@ -544,6 +546,7 @@ function parseAccounts(raw) {
   const isPhone = (value) => /^1\d{10}$/.test(String(value || ''));
   const isAppid = (value) => /^wx[a-z0-9]+$/i.test(String(value || ''));
   const isWxid = (value) => /^wxid_/i.test(String(value || ''));
+  const isOpenid = (value) => /^o[wW][a-zA-Z0-9]/i.test(String(value || '')); // 应用宝 openid（如 owNAX...）
   const isUa = (value) => /MicroMessenger|Mozilla|MiniProgramEnv/i.test(String(value || ''));
   return String(raw || '')
     .split(/[\n&]+/)
@@ -551,13 +554,14 @@ function parseAccounts(raw) {
     .filter(Boolean)
     .map((item) => {
       const parts = item.split('#').map((value) => value.trim()).filter(Boolean);
-      const wxid = parts.find(isWxid) || '';
+      // 标识符：wxid_ 开头走牛子，openid 格式走应用宝（yyb）
+      const wxid = parts.find(isWxid) || parts.find(isOpenid) || '';
       if (!wxid) return null;
 
       const mobile = parts.find(isPhone) || '';
       const appid = parts.find(isAppid) || DEFAULT_APPID;
       const ua = parts.find(isUa) || '';
-      const remark = parts.find((value) => value && !isPhone(value) && !isWxid(value) && !isAppid(value) && !isUa(value)) || mobile || wxid;
+      const remark = parts.find((value) => value && !isPhone(value) && !isWxid(value) && !isOpenid(value) && !isAppid(value) && !isUa(value)) || mobile || wxid;
 
       return {
         mobile,
