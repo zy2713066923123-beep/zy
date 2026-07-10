@@ -30,10 +30,20 @@ class Env {
 }
 
 const axios = require("axios");
-const { SocksProxyAgent } = require('socks-proxy-agent');
-const { HttpsProxyAgent } = require('https-proxy-agent');
-const { HttpProxyAgent } = require('http-proxy-agent');
 const qs = require('querystring');
+
+// 代理模块(https/socks/http-proxy-agent v9+)是 ESM-only，CommonJS 下 require 会报 ERR_REQUIRE_ESM
+// 改用动态 import() 加载（保留完整代理功能）
+let SocksProxyAgent, HttpsProxyAgent, HttpProxyAgent;
+async function loadProxyAgents() {
+    if (SocksProxyAgent) return;
+    const sm = await import('socks-proxy-agent');
+    const hm = await import('https-proxy-agent');
+    const hpm = await import('http-proxy-agent');
+    SocksProxyAgent = sm.SocksProxyAgent || sm.default;
+    HttpsProxyAgent = hm.HttpsProxyAgent || hm.default;
+    HttpProxyAgent = hpm.HttpProxyAgent || hpm.default;
+}
 
 const { getSingleCode } = require('./getCode.js');
 const getWxCode = (wxid, appid) => getSingleCode(appid, String(wxid).split('#')[0].trim());
@@ -435,6 +445,10 @@ async function runAccount(wxid, globalProxyAgent) {
         if (sign?.code == 200) {
             result.signMsg = `签到成功：${sign.message}`;
             $.log(`[${alias}] 签到成功：${sign.message}`);
+        } else if (sign?.code == 400 && /已经签到|已签到|签到过|今日已/.test(sign?.message || "")) {
+            // 业务幂等：当天已签到过，视为已完成，不报错
+            result.signMsg = `今日已签到（${sign.message}），无需重复签到`;
+            $.log(`[${alias}] 今日已签到：${sign.message}`);
         } else {
             result.signMsg = `签到失败：${sign?.message || "未知错误"}`;
             $.log(`[${alias}] 签到失败：${sign?.message || "未知错误"}`);
@@ -455,6 +469,12 @@ async function runAccount(wxid, globalProxyAgent) {
                 let msg = `第${i+1}次步数兑换成功：${exchange.message}`;
                 result.exchangeMsgs.push(msg);
                 $.log(`[${alias}] ${msg}`);
+            } else if (exchange?.code == 400 && /每天最多兑换|兑换次数|已兑换|次数已用完|今日已兑换/.test(exchange?.message || "")) {
+                // 业务幂等：当天兑换额度已用完，视为已完成，跳出循环避免无谓请求
+                let msg = `今日步数兑换已达上限（${exchange.message}），无需重复执行`;
+                result.exchangeMsgs.push(msg);
+                $.log(`[${alias}] ${msg}`);
+                break;
             } else {
                 let msg = `第${i+1}次步数兑换失败：${exchange?.message || "未知错误"}`;
                 result.exchangeMsgs.push(msg);
@@ -479,6 +499,17 @@ async function runAccount(wxid, globalProxyAgent) {
 (async () => {
     $.log('===== 飞蚂蚁旧衣回收动态code签到（调试版）=====\n');
     $.log('调试模式已开启，将打印完整请求和响应数据\n');
+
+    // 预加载 ESM 代理模块（动态 import）——仅在真正需要代理时才加载
+    if (PROXY_API) {
+        try {
+            await loadProxyAgents();
+        } catch (e) {
+            $.log(`代理模块加载失败，将使用直连：${e.message}`);
+        }
+    } else {
+        $.log('未配置代理API（PROXY_API），跳过代理模块加载，全程使用直连');
+    }
 
     let globalProxyAgent = null;
     if (!ENABLE_PER_ACCOUNT_PROXY) {
