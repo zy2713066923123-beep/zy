@@ -1320,11 +1320,14 @@ if __name__ == "__main__":
             if min_harvest is not None: all_min_harvests.append((remark, min_harvest))
         except Exception as e:
             msg = str(e)
-            # 加密校验失败[5001]：缓存 token 与实时拉取的加密密钥不匹配所致。
+            # 缓存 token 失效的共性表现：[5001] 加密校验失败、[4012] 非法的用户 token 参数等。
             # 直接清空该账号缓存 token 并当场重新登录重试，无需手动执行清理脚本。
-            if ("5001" in msg or "加密校验失败" in msg) and cache.get(wxid):
+            TOKEN_INVALID = ("5001" in msg or "加密校验失败" in msg
+                             or "4012" in msg or "非法的用户 token" in msg
+                             or "token" in msg.lower() and ("失效" in msg or "非法" in msg or "无效" in msg or "过期" in msg))
+            if TOKEN_INVALID and cache.get(wxid):
                 cache.pop(wxid, None); save_cache(cache)
-                log.warning("   ⚠️  检测到加密校验失败，立即清除缓存 token 并重新登录重试...")
+                log.warning("   ⚠️  检测到 token 失效(%s)，立即清除缓存 token 并重新登录重试..." % msg.split("]")[0].strip("["))
                 try:
                     result = client.auto_login(wxid=wxid, server_url=WX_SERVER, ocr_server=OCR_SERVER or None)
                     if result.get("token"):
