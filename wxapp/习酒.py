@@ -1319,8 +1319,31 @@ if __name__ == "__main__":
             if do_daily: cache[wxid + "_daily"] = today; save_cache(cache)
             if min_harvest is not None: all_min_harvests.append((remark, min_harvest))
         except Exception as e:
-            log.error("   ❌ 执行异常: %s" % e, exc_info=True)
-            notify_lines.append("👤 %s\n❌ 执行异常: %s" % (mask, e))
+            msg = str(e)
+            # 加密校验失败[5001]：缓存 token 与实时拉取的加密密钥不匹配所致。
+            # 直接清空该账号缓存 token 并当场重新登录重试，无需手动执行清理脚本。
+            if ("5001" in msg or "加密校验失败" in msg) and cache.get(wxid):
+                cache.pop(wxid, None); save_cache(cache)
+                log.warning("   ⚠️  检测到加密校验失败，立即清除缓存 token 并重新登录重试...")
+                try:
+                    result = client.auto_login(wxid=wxid, server_url=WX_SERVER, ocr_server=OCR_SERVER or None)
+                    if result.get("token"):
+                        cache[wxid] = client.token; save_cache(cache)
+                        today = datetime.now().strftime("%Y-%m-%d"); do_daily = cache.get(wxid + "_daily") != today
+                        summary, min_harvest = run(client, do_daily=do_daily)
+                        notify_lines.append("👤 %s\n%s" % (mask, summary))
+                        if do_daily: cache[wxid + "_daily"] = today; save_cache(cache)
+                        if min_harvest is not None: all_min_harvests.append((remark, min_harvest))
+                        log.info("   ✅ 重新登录重试成功")
+                    else:
+                        log.error("   ❌ 重试登录仍未返回 token")
+                        notify_lines.append("👤 %s\n❌ 执行异常: %s" % (mask, e))
+                except Exception as e2:
+                    log.error("   ❌ 重试异常: %s" % e2, exc_info=True)
+                    notify_lines.append("👤 %s\n❌ 执行异常: %s" % (mask, e))
+            else:
+                log.error("   ❌ 执行异常: %s" % e, exc_info=True)
+                notify_lines.append("👤 %s\n❌ 执行异常: %s" % (mask, e))
         time.sleep(random.randint(2, 5))
 
     if notify_lines: send_notify("习酒花园", "作者：\n\n" + "\n\n".join(notify_lines))
