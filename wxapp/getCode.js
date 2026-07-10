@@ -556,14 +556,11 @@ class WeChatCodeGetter {
             console.log(`[getCode] WX_ID筛选: ${this.targetWxIds.join(', ')}`);
         }
         
-        // 预解析每个ID的目标协议: wxid_ 开头 → 牛子, 其他 → 应用宝
+        // 预解析每个ID的目标协议: 应用宝 openid → 应用宝, 其余(含不以 wxid_ 开头的真实微信 wxid) → 牛子
         this._idProtocolMap = new Map();
         for (const id of this.targetWxIds) {
-            const rawId = String(id).split('#')[0].trim();
-            // wxid_ 格式 或 10位以上纯字母数字混合且含小写字母开头 → 判定为微信wxid
-            const isWxidStyle = /^wxid_[a-z0-9]{5,20}$/.test(rawId) || 
-                                (/^[a-z][a-z0-9]{10,25}$/.test(rawId) && !rawId.includes('-'));
-            this._idProtocolMap.set(id, isWxidStyle ? 'wechat' : 'yyb');
+            const proto = this._isYybOpenid(id) ? 'yyb' : 'wechat';
+            this._idProtocolMap.set(id, proto);
         }
         
         this._forceType = forceType;
@@ -677,9 +674,24 @@ class WeChatCodeGetter {
     }
 
     /**
+     * 判断 identifier 是否为「应用宝 openid」格式。
+     * 并非所有微信 wxid 都以 wxid_ 开头（旧号自定义微信号等），
+     * 因此不能以“是否 wxid_ 开头”来判定微信账号。
+     * 这里改为正向识别应用宝 openid，其余一律视为真实微信 wxid → 走牛子协议。
+     * 应用宝 openid 特征：含连字符、含大写字母，或以 o 开头的微信 openid（≥21位）。
+     */
+    _isYybOpenid(identifier) {
+        const rawId = String(identifier).split('#')[0].trim();
+        if (!rawId) return false;
+        if (rawId.includes('-') || /[A-Z]/.test(rawId)) return true;
+        if (/^o[a-zA-Z0-9_-]{20,}$/.test(rawId)) return true;
+        return false;
+    }
+
+    /**
      * 根据 identifier 判断应该使用哪个协议
-     * wxid_ 开头 / 微信wxid格式 → wechat
-     * openid 格式(含横杠/大写字母) → yyb
+     * 应用宝 openid → yyb
+     * 其余（含不以 wxid_ 开头的真实微信 wxid）→ wechat
      */
     _detectProtocolForIdentifier(identifier) {
         const rawId = String(identifier).split('#')[0].trim();
@@ -692,10 +704,7 @@ class WeChatCodeGetter {
         }
         
         // 兜底：根据格式推断
-        if (/^wxid_/i.test(rawId) || /^[a-z][a-z0-9]{10,25}$/.test(rawId)) {
-            return 'wechat';
-        }
-        return 'yyb';
+        return this._isYybOpenid(rawId) ? 'yyb' : 'wechat';
     }
 
     /**

@@ -611,8 +611,8 @@ class WeChatCodeGetter:
     微信小程序Code获取模块（统一入口 - 智能路由版）
     
     根据账号ID格式自动路由：
-      - wxid_ 开头 → 牛子(Wechat) 服务
-      - openid 格式 → 应用宝(YYB) 服务
+      - 应用宝 openid（含连字符/大写字母/以o开头的微信openid）→ 应用宝(YYB) 服务
+      - 其余（含不以 wxid_ 开头的真实微信 wxid）→ 牛子(Wechat) 服务
     
     健康检查按需执行（仅检查目标协议），结果按协议分别缓存
     """
@@ -637,14 +637,11 @@ class WeChatCodeGetter:
             self.target_wx_ids = [x.strip() for x in self.wx_id_filter.split('&') if x.strip()]
             print(f"[getCode] WX_ID筛选: {', '.join(self.target_wx_ids)}")
         
-        # 预解析每个ID的目标协议: wxid_ 开头 → 牛子, 其他 → 应用宝
+        # 预解析每个ID的目标协议: 应用宝 openid → 应用宝, 其余(含不以 wxid_ 开头的真实微信 wxid) → 牛子
         self._id_protocol_map: Dict[str, str] = {}
         for id_entry in self.target_wx_ids:
-            raw_id = id_entry.split('#')[0].strip()
-            # wxid_ 格式 或 10位以上纯字母数字混合且含小写字母开头 → 判定为微信wxid
-            is_wxid_style = (bool(re.match(r'^wxid_[a-z0-9]{5,20}$', raw_id)) or
-                            (bool(re.match(r'^[a-z][a-z0-9]{10,25}$', raw_id)) and '-' not in raw_id))
-            self._id_protocol_map[id_entry] = 'wechat' if is_wxid_style else 'yyb'
+            proto = 'yyb' if self._is_yyb_openid(id_entry) else 'wechat'
+            self._id_protocol_map[id_entry] = proto
         
         # 健康检查缓存（按协议分别缓存）
         self._health_cache: Dict[str, Optional[bool]] = {}
@@ -707,11 +704,28 @@ class WeChatCodeGetter:
         yyb_count = sum(1 for v in self._id_protocol_map.values() if v == 'yyb')
         print(f"[getCode] 智能路由: 牛子账号×{wechat_count} + 应用宝账号×{yyb_count}, 延迟健康检查")
     
+    def _is_yyb_openid(self, identifier: str) -> bool:
+        """判断 identifier 是否为「应用宝 openid」格式。
+        
+        并非所有微信 wxid 都以 wxid_ 开头（旧号自定义微信号等），
+        因此不能以“是否 wxid_ 开头”来判定微信账号。
+        这里改为正向识别应用宝 openid，其余一律视为真实微信 wxid → 走牛子协议。
+        应用宝 openid 特征：含连字符、含大写字母，或以 o 开头的微信 openid（≥21位）。
+        """
+        raw_id = str(identifier).split('#')[0].strip()
+        if not raw_id:
+            return False
+        if '-' in raw_id or re.search(r'[A-Z]', raw_id):
+            return True
+        if re.match(r'^o[a-zA-Z0-9_-]{20,}$', raw_id):
+            return True
+        return False
+
     def _detect_protocol_for_identifier(self, identifier: str) -> str:
         """根据 identifier 判断应该使用哪个协议
         
-        wxid_ 开头 / 微信wxid格式 → wechat
-        openid 格式(含横杠/大写字母) → yyb
+        应用宝 openid → yyb
+        其余（含不以 wxid_ 开头的真实微信 wxid）→ wechat
         """
         raw_id = identifier.split('#')[0].strip()
         
@@ -721,10 +735,7 @@ class WeChatCodeGetter:
                 return proto
         
         # 兜底：根据格式推断
-        if re.match(r'^wxid_', raw_id, re.IGNORECASE) or \
-           (re.match(r'^[a-z][a-z0-9]{10,25}$', raw_id) and '-' not in raw_id):
-            return 'wechat'
-        return 'yyb'
+        return 'yyb' if self._is_yyb_openid(raw_id) else 'wechat'
     
     def get_applet_code(self, app_id: str, identifier: str) -> str:
         """获取单个账号的code（智能路由）
