@@ -1156,9 +1156,29 @@ def run(client, do_daily=True):
 # ============================================================
 def update_ql_cron_time(schedule):
     import http.client; import urllib.parse
-    host = "192.168.6.222"; port = 5700
-    username = ""; password = ""
-    client_id = "HV2Y3-RdWR_r"; client_secret = "PUYDh--ZUfkph2v7tO_xJvQn"
+    # 青龙面板连接信息全部走环境变量，避免把私人面板地址/密码写死在代码里。
+    # 未配置这些变量时自动跳过（不影响脚本主任务）。
+    #   QL_HOST        青龙面板地址，如 http://192.168.6.222 或 127.0.0.1
+    #   QL_PORT        端口，默认 5700
+    #   QL_CLIENT_ID / QL_CLIENT_SECRET  Application 的 client_id / client_secret（推荐）
+    #   QL_USERNAME / QL_PASSWORD        面板账号密码（老式登录兜底，二选一）
+    host = (os.environ.get("QL_HOST") or "").strip()
+    if host:
+        host = host.replace("http://", "").replace("https://", "").split("/")[0]
+        if ":" in host:
+            host, p = host.split(":", 1); port = int(p) if p.isdigit() else 5700
+        else:
+            port = int(os.environ.get("QL_PORT", "5700"))
+    else:
+        port = int(os.environ.get("QL_PORT", "5700"))
+    username = (os.environ.get("QL_USERNAME") or "").strip()
+    password = (os.environ.get("QL_PASSWORD") or "").strip()
+    client_id = (os.environ.get("QL_CLIENT_ID") or "").strip()
+    client_secret = (os.environ.get("QL_CLIENT_SECRET") or "").strip()
+
+    if not host or (not (client_id and client_secret) and not (username and password)):
+        log.info("ℹ️  未配置青龙面板环境变量(QL_HOST/QL_CLIENT_ID等)，跳过定时任务更新")
+        return False
 
     def _http_json(method, path, payload="", headers=None, timeout=10):
         conn = http.client.HTTPConnection(host, port, timeout=timeout)
