@@ -710,12 +710,11 @@ class WeChatCodeGetter:
         并非所有微信 wxid 都以 wxid_ 开头（旧号自定义微信号等），
         因此不能以“是否 wxid_ 开头”来判定微信账号。
         这里改为正向识别应用宝 openid，其余一律视为真实微信 wxid → 走牛子协议。
-        应用宝 openid 特征：含连字符、含大写字母，或以 o 开头的微信 openid（≥21位）。
         """
         raw_id = str(identifier).split('#')[0].strip()
         if not raw_id:
             return False
-        if '-' in raw_id or re.search(r'[A-Z]', raw_id):
+        if raw_id.isdigit():
             return True
         if re.match(r'^o[a-zA-Z0-9_-]{20,}$', raw_id):
             return True

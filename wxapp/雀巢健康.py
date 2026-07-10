@@ -454,10 +454,10 @@ def parse_accounts() -> List[Tuple[str, str]]:
         # 兼容两种格式：wxid#备注 或 备注#wxid
         parts = line.split("#", 1)
         part_a, part_b = parts[0].strip(), parts[1].strip()
-        if part_a.startswith("wxid_"):
-            alias, wxid = part_b, part_a
-        else:
+        if part_b.startswith("wxid_") and not part_a.startswith("wxid_"):
             alias, wxid = part_a, part_b
+        else:
+            alias, wxid = part_b, part_a
         if alias and wxid:
             accounts.append((alias, wxid))
     return accounts

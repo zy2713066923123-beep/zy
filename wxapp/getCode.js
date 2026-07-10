@@ -673,17 +673,10 @@ class WeChatCodeGetter {
         }
     }
 
-    /**
-     * 判断 identifier 是否为「应用宝 openid」格式。
-     * 并非所有微信 wxid 都以 wxid_ 开头（旧号自定义微信号等），
-     * 因此不能以“是否 wxid_ 开头”来判定微信账号。
-     * 这里改为正向识别应用宝 openid，其余一律视为真实微信 wxid → 走牛子协议。
-     * 应用宝 openid 特征：含连字符、含大写字母，或以 o 开头的微信 openid（≥21位）。
-     */
     _isYybOpenid(identifier) {
         const rawId = String(identifier).split('#')[0].trim();
         if (!rawId) return false;
-        if (rawId.includes('-') || /[A-Z]/.test(rawId)) return true;
+        if (/^\d+$/.test(rawId)) return true;
         if (/^o[a-zA-Z0-9_-]{20,}$/.test(rawId)) return true;
         return false;
     }
