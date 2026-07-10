@@ -291,16 +291,7 @@ async function withAuthRetry(account, auth, cache, action, label) {
   }
 }
 
-// 使用 getCode.js 统一接口);
-      const code = extractWxCode(data);
-      if (code) return code;
-      lastError = new Error(`无 code：${safeJson(data)}`);
-    } catch (error) {
-      lastError = error;
-    }
-  }
-  throw new Error(`获取微信 code 失败：${lastError ? lastError.message : '未知错误'}`);
-}
+// 微信 code 获取已统一走顶部的 getWxCode(getCode.js)，此处旧实现已废弃删除
 
 async function quickLogin(account, jsCode) {
   const body = { appId: account.appid, jsCode, tenantId: DEFAULT_TENANT_ID, skipRequest: true };
