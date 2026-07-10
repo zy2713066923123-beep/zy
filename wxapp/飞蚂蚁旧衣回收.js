@@ -73,7 +73,7 @@ const PROXY_FETCH_INTERVAL = 3000;
 // 兜底开关：代理请求失败后，自动切换直连重试
 const ENABLE_DIRECT_FALLBACK = true;
 // 调试开关：开启后打印完整请求和响应
-const DEBUG_MODE = true;
+const DEBUG_MODE = false;
 // 固定配置（已修正为最新正确值）
 const APPID = "wx501990400906c9ff"; // 飞蚂蚁最新APPID
 const PLATFORM_KEY = "F2EE24892FBF66F0AFF8C0EB532A9394"; // 固定平台密钥
