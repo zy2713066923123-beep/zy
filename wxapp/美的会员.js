@@ -1,4 +1,4 @@
-// cron: 24 11,23 * * * cron: 14 11,23 * * *
+/** cron: 24 11,23 * * * cron: 14 11,23 * * *
  * cron 9 11,19 * * *  wx_midea.js
  * Show:每天运行一次
  * @author:https://github.com/smallfawn/QLScriptPublic

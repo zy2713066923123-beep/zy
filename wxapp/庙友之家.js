@@ -1,4 +1,4 @@
-// cron: 9 9,14 * * * cron: 5 11,19 * * *
+/** cron: 9 9,14 * * * cron: 5 11,19 * * *
  * cron 47 11,21 * * *  miaoyouHome.js
  * Show:微信公众号 庙友之家 每日签到 积分可换首饰
  * 变量名:miaoyouHome
