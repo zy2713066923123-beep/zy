@@ -44,6 +44,7 @@ const CACHE_FILE = path.join(__dirname, 'ljzf_wx_cache.json');
 const CONFIG = {
   wechatServer: trimRightSlash(process.env.WECHAT_SERVER || DEFAULT_WECHAT_SERVER),
   rawAccounts: process.env.WX_ID || process.env.WX_ID || process.env.WX_ID || '',
+  ljzfData: process.env.ljzfData || '',
   delayMs: toInt(process.env.LJZF_DELAY_MS, 3000),
   runNonPoint: process.env.LJZF_RUN_NON_POINT !== '0',
   forceLogin: ['1', 'true', 'yes'].includes(String(process.env.LJZF_FORCE_LOGIN || '').toLowerCase()),
@@ -87,11 +88,17 @@ main().catch(async (error) => {
 });
 
 async function main() {
-  const accounts = parseAccounts(CONFIG.rawAccounts);
-  if (!accounts.length) throw new Error('未配置 WX_ID，请填写 wxid#备注 或 手机号#wxid#备注');
-  accounts
+  const wxAccounts = parseAccounts(CONFIG.rawAccounts);
+  const manualAccounts = parseManualAccounts(CONFIG.ljzfData);
+  const accounts = [...wxAccounts, ...manualAccounts];
+
+  if (!accounts.length) throw new Error('未配置 WX_ID 或 ljzfData，请至少填写一项配置');
+  wxAccounts
     .filter((account) => !account.mobile)
     .forEach((account) => log(`⚠️ 账号 ${account.remark} 未从变量解析到手机号，将尝试使用 quickLogin/缓存返回的手机号`));
+  if (manualAccounts.length) {
+    log(`✅ 成功从 ljzfData 读取到 ${manualAccounts.length} 个抓包配置`);
+  }
 
   const cache = loadCache();
   stats.accounts = accounts.length;
@@ -225,6 +232,19 @@ async function runAccount(account, auth, cache) {
 }
 
 async function getAuth(account, cache) {
+  if (account.isManual) {
+    log(`🔐 使用抓包配置凭证：token=${mask(account.token)}`);
+    return {
+      token: account.token,
+      accountId: account.accountId,
+      sessionKey: account.sessionKey,
+      openId: account.openId,
+      memberId: account.memberId,
+      mobile: account.mobile || '',
+      appid: account.appid,
+    };
+  }
+
   const cached = normalizeAuth(cache[account.wxid]);
   if (!CONFIG.forceLogin && cached.token && cached.accountId && cached.sessionKey && cached.openId && cached.memberId) {
     const cachedMobile = account.mobile || cached.mobile || '';
@@ -268,7 +288,11 @@ async function getAuth(account, cache) {
 }
 
 async function refreshAuth(account, auth, cache, reason) {
-  log(`🔄 ${reason || '登录态失效'}，清理缓存后重新 quickLogin`);
+  log(`🔄 ${reason || '登录态失效'}，清理缓存后重新尝试`);
+  if (account.isManual) {
+    log(`⚠️ 抓包账号凭证已失效，必须重新抓包更新 ljzfData 变量！`);
+    throw new Error('抓包凭证已失效');
+  }
   if (cache && account.wxid) {
     delete cache[account.wxid];
     saveCache(cache);
@@ -518,6 +542,7 @@ function baseHeaders(account = {}) {
     xweb_xhr: '1',
     'X-Client-Id': DEFAULT_CLIENT_ID,
     'X-Tenant-Id': DEFAULT_TENANT_ID,
+    'X-Client-Type': 'mini_program',
     Referer: `https://servicewechat.com/${account.appid || DEFAULT_APPID}/${DEFAULT_PAGE_FRAME}/page-frame.html`,
     Accept: '*/*',
     'Accept-Encoding': 'gzip, deflate, br',
@@ -573,6 +598,52 @@ function parseAccounts(raw) {
     })
     .filter(Boolean)
     .filter((item) => item.wxid);
+}
+
+function parseManualAccounts(rawData) {
+  if (!rawData) return [];
+  let parsedTokens = [];
+  try {
+    const parsed = JSON.parse(rawData);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      parsedTokens = parsed;
+    }
+  } catch (e) {
+    let accounts = String(rawData).split(/[\n&@]+/);
+    for (let acc of accounts) {
+      if (!acc.trim()) continue;
+      try {
+        let singleJson = JSON.parse(acc);
+        if (Array.isArray(singleJson)) parsedTokens.push(...singleJson);
+        else if (typeof singleJson === 'object' && singleJson !== null) parsedTokens.push(singleJson);
+      } catch (err) {
+        let parts = acc.split('#');
+        if (parts.length >= 7) {
+          parsedTokens.push({
+            remark: parts[0].trim(),
+            mobile: parts[1].trim(),
+            token: parts[2].trim(),
+            accountId: parts[3].trim(),
+            sessionKey: parts[4].trim(),
+            openId: parts[5].trim(),
+            memberId: parts[6].trim()
+          });
+        }
+      }
+    }
+  }
+  return parsedTokens.map((t, i) => ({
+    remark: t.remark || '手动账号' + (i + 1),
+    mobile: t.mobile || '',
+    token: t.token,
+    accountId: t.accountId,
+    sessionKey: t.sessionKey,
+    openId: t.openId,
+    memberId: t.memberId,
+    appid: t.appid || DEFAULT_APPID,
+    isManual: true,
+    wxid: `manual_${i}_${Date.now()}`
+  })).filter(t => t.token && t.accountId);
 }
 
 function printTaskList(tasks) {
