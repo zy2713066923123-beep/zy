@@ -63,16 +63,17 @@ function randomDelay(minSeconds, maxSeconds, message = "") {
 }
 
 function parseAccounts(raw) {
-  return raw
-    .split(/[@\n]/)
-    .map((x) => x.trim())
-    .filter(Boolean)
-    .map((x) => {
-      const i = x.indexOf("#");
-      if (i === -1) return { wxid: x, remark: x };
-      return { wxid: x.slice(0, i).trim(), remark: x.slice(i + 1).trim() || x.slice(0, i).trim() };
-    })
-    .filter((x) => x.wxid);
+  const accounts = [];
+  const lines = raw.split(/[&\n]/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const parts = trimmed.split('#');
+    const wxid = parts[0].trim();
+    const remark = parts[1] || wxid;
+    if (wxid) accounts.push({ wxid, remark });
+  }
+  return accounts;
 }
 
 function loadCache() {
