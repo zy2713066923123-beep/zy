@@ -132,6 +132,10 @@ class DdddOcr:
 # ============================================================
 #  AES 加密（AesCrypto.js 对应）
 # ============================================================
+class TokenInvalidError(BaseException):
+    """Token or encryption key invalid, needs re-login"""
+    pass
+
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 
@@ -621,16 +625,19 @@ class GardenClient:
 
     def _handle_response(self, body, retry_fn):
         code = body.get("code") or body.get("err")
+        msg = body.get("msg") or ""
         if code == 0:
             return body.get("data")
-        if code == 5001:
-            raise RuntimeError(f"[5001] {body.get('msg')} (加密校验失败)")
+        if code == 5001 or "加密校验失败" in msg or "用户信息异常" in msg:
+            raise TokenInvalidError(f"[5001] {msg} (加密校验失败)")
+        if code == 4012 or "非法的用户 token" in msg:
+            raise TokenInvalidError(f"[4012] {msg} (非法的用户 token)")
         if code == 5008:
             if self.ocr is None:
                 raise RuntimeError("触发滑块验证(5008)，请设置 OCR_SERVER")
             self._solve_slide_validate()
             return retry_fn()
-        raise RuntimeError(f"[{code}] {body.get('msg')}")
+        raise RuntimeError(f"[{code}] {msg}")
 
     def _solve_slide_validate(self):
         info = self._get_raw("/garden/slide_validate/getValidateInfo")
@@ -1338,13 +1345,14 @@ if __name__ == "__main__":
             notify_lines.append("👤 %s\n%s" % (mask, summary))
             if do_daily: cache[wxid + "_daily"] = today; save_cache(cache)
             if min_harvest is not None: all_min_harvests.append((remark, min_harvest))
-        except Exception as e:
+        except (Exception, TokenInvalidError) as e:
             msg = str(e)
             # 缓存 token 失效的共性表现：[5001] 加密校验失败、[4012] 非法的用户 token 参数等。
             # 直接清空该账号缓存 token 并当场重新登录重试，无需手动执行清理脚本。
             TOKEN_INVALID = ("5001" in msg or "加密校验失败" in msg
                              or "4012" in msg or "非法的用户 token" in msg
-                             or "token" in msg.lower() and ("失效" in msg or "非法" in msg or "无效" in msg or "过期" in msg))
+                             or "token" in msg.lower() and ("失效" in msg or "非法" in msg or "无效" in msg or "过期" in msg)
+                             or isinstance(e, TokenInvalidError))
             if TOKEN_INVALID and cache.get(wxid):
                 cache.pop(wxid, None); save_cache(cache)
                 log.warning("   ⚠️  检测到 token 失效(%s)，立即清除缓存 token 并重新登录重试..." % msg.split("]")[0].strip("["))
@@ -1361,7 +1369,7 @@ if __name__ == "__main__":
                     else:
                         log.error("   ❌ 重试登录仍未返回 token")
                         notify_lines.append("👤 %s\n❌ 执行异常: %s" % (mask, e))
-                except Exception as e2:
+                except (Exception, TokenInvalidError) as e2:
                     log.error("   ❌ 重试异常: %s" % e2, exc_info=True)
                     notify_lines.append("👤 %s\n❌ 执行异常: %s" % (mask, e))
             else:
