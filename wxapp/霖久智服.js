@@ -246,14 +246,29 @@ async function getAuth(account, cache) {
   }
 
   const cached = normalizeAuth(cache[account.wxid]);
+  let useCache = false;
   if (!CONFIG.forceLogin && cached.token && cached.accountId && cached.sessionKey && cached.openId && cached.memberId) {
-    const cachedMobile = account.mobile || cached.mobile || '';
-    if (cachedMobile) {
-      log(`🔐 使用缓存登录态：token=${mask(cached.token)} mobile=${maskPhone(cachedMobile)}`);
-      return { ...cached, appid: account.appid, mobile: cachedMobile };
+    const cachedMobile = cached.mobile || '';
+    if (account.mobile) {
+      // 如果配置了手机号，只有当缓存的手机号未脱敏且完全一致时，才使用缓存
+      if (cachedMobile && !cachedMobile.includes('*') && cachedMobile === account.mobile) {
+        useCache = true;
+      }
+    } else {
+      // 如果未配置手机号，只要缓存里有手机号（即便脱敏）也允许使用缓存
+      if (cachedMobile) {
+        useCache = true;
+      }
     }
-    log(`🔐 缓存登录态缺少手机号，本次重新 quickLogin 尝试解析`);
   }
+
+  if (useCache) {
+    const finalMobile = account.mobile || cached.mobile || '';
+    log(`🔐 使用缓存登录态：token=${mask(cached.token)} mobile=${maskPhone(finalMobile)}`);
+    return { ...cached, appid: account.appid, mobile: finalMobile };
+  }
+
+  log(`🔐 重新 quickLogin 登录，以获取/刷新指定手机号的正确凭证`);
 
   const code = await getWxCode(account.wxid, account.appid);
   log(`🔑 获取 jsCode 成功：${mask(code, 5, 4)}`);
