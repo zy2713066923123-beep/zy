@@ -54,8 +54,9 @@ APP_TYPE = "WX_APP"
 APP_ID = "75762944"
 APP_SECRET = "ZNsLuCwAnnrDuQuyvTQcGpthsmASHSeG"
 RAND_STR = "lv_mi_feng_uni_app"
-VERSION = "v1.0.0"
-REFERER = "https://servicewechat.com/wx6fcde446296d9588/289/page-frame.html"
+VERSION = "v1.1.0"  # 小程序版本
+API_VERSION = "v1.0.0"  # 接口请求版本，固定为 v1.0.0，修改会导致 "API版本不匹配"
+REFERER = "https://servicewechat.com/wx6fcde446296d9588/308/page-frame.html"
 SCRIPT_NAME = "绿蜜蜂小程序"
 
 ACCESS_TOKEN_URL = f"{BASE_URL}/5a60c77b79875?appType={APP_TYPE}"
@@ -232,7 +233,7 @@ def build_headers(access_token: str = "", user_token: str = "") -> dict[str, str
         ),
         "access-token": access_token,
         "user-token": user_token,
-        "version": VERSION,
+        "version": API_VERSION,
         "xweb_xhr": "1",
         "lat": "",
         "lng": "",
