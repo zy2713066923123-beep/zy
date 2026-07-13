@@ -56,7 +56,8 @@ APP_SECRET = "ZNsLuCwAnnrDuQuyvTQcGpthsmASHSeG"
 RAND_STR = "lv_mi_feng_uni_app"
 VERSION = "v1.1.0"  # 小程序版本
 API_VERSION = "v1.0.0"  # 接口请求版本，固定为 v1.0.0，修改会导致 "API版本不匹配"
-REFERER = "https://servicewechat.com/wx6fcde446296d9588/308/page-frame.html"
+REFERER_VERSION = "320"  # 小程序版本号，如果提现提示"小程序版本过低"，可尝试调大此值（如 320, 330）
+REFERER = f"https://servicewechat.com/wx6fcde446296d9588/{REFERER_VERSION}/page-frame.html"
 SCRIPT_NAME = "绿蜜蜂小程序"
 
 ACCESS_TOKEN_URL = f"{BASE_URL}/5a60c77b79875?appType={APP_TYPE}"
