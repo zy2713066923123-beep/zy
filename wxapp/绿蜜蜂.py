@@ -65,7 +65,7 @@ USER_TOKEN_URL = f"{BASE_URL}/5e05692405c63"
 USER_INFO_URL = f"{BASE_URL}/5dca57afa379e?m=getUserInfo"
 SIGN_URL = f"{BASE_URL}/5dca57afa379e?m=toSign"
 CASH_CHECK_URL = f"{BASE_URL}/62b2bafcd77cc?m=cashCheck"
-CASH_APPLY_URL = f"{BASE_URL}/5e12a7e1848ba?m=cashApply"
+CASH_APPLY_URL = f"{BASE_URL}/5e12a7e1848ba?m=cashApplyTwo"
 
 DEFAULT_WECHAT_SERVER = "http://127.0.0.1:8011"
 WX_APPID = "wx6fcde446296d9588"
@@ -415,7 +415,7 @@ def cash_apply(access_token: str, user_token: str, amount: float, timeout: float
         if result.get("code") == 1:
             return {
                 "success": True,
-                "msg": f"提现申请成功，提现金额：{amount}元",
+                "msg": f"提现成功，提现金额：{amount}元（微信提示：需要手动在微信中确认收款才能真正到账，请注意查收微信服务通知）",
             }
         return {
             "success": False,
