@@ -11,6 +11,7 @@
 
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# cron: 0 0 8,14,19 * * *
 """
 善M/YSKJ 每日签到脚本（微信协议版），适配青龙面板。
 
