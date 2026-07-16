@@ -201,6 +201,9 @@ class RUN:
         memberId = _pick(_collect(resp_json, 'memberId'))
         enterpriseId = _pick(_collect(resp_json, 'enterpriseId'))
         if not memberId or not enterpriseId:
+            has_openid = _pick(_collect(resp_json, 'openid'))
+            if has_openid:
+                raise Exception(f'该 wxid 对应的 openid({has_openid}) 在鸿星尔克未注册会员（memberId 为空）。请先在小程序内授权手机号完成注册，或对该账号改用 HXEK=memberId@enterpriseId')
             raise Exception(f'on_login 未取到 memberId/enterpriseId，响应: {json.dumps(resp_json, ensure_ascii=False)[:500]}')
         self.memberId = str(memberId)
         self.enterpriseId = str(enterpriseId)
@@ -370,7 +373,7 @@ class RUN:
             return True, integralCount, continuousCount
         elif response.get('errcode', -1) == 900001:
             Log(f'> 今天已签到?')
-            return False, 0, None
+            return True, 0, None
         else:
             print(f'{act_name}失败?：{response}')
             return False, 0, None
