@@ -377,89 +377,35 @@ class FeiheClient:
 
 def get_env_data():
     """读取环境变量"""
-    env_data = os.getenv("FEIHE_DATA")
+    import re
+    # 优先读取 WX_ID，支持 fallback 到 FEIHE_DATA 兼容旧版本，不再需要解析 Authorization 等复杂变量，直接读取微信 ID
+    wxid_raw = (os.getenv("WX_ID") or os.getenv("FEIHE_DATA") or "").strip()
     wechat_server = os.getenv("WECHAT_SERVER", "").strip()
-    if not env_data:
-        print("❌ 未找到环境变量 FEIHE_DATA")
-        print("格式示例:")
-        print("wxid_xxx#156")
-        print("Authorization值1#133")
-        print("Authorization值2&cuk值2#170")
-        print("Authorization值3&&wxid_zzz#171")
+    if not wxid_raw:
+        print("❌ 未找到环境变量 WX_ID 或 FEIHE_DATA")
         return []
     
     accounts = []
-    wxid_count = 0
-    auth_count = 0
-    for line in env_data.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-
-        # 备注解析：#后为备注（可选）
-        body = line
-        remark = ""
-        if "#" in line:
-            body, remark = line.split("#", 1)
-            body = body.strip()
-            remark = remark.strip()
-
-        parts = [x.strip() for x in body.split("&")]
-
-        account = {
-            "authorization": "",
-            "cuk": "",
-            "wxid": "",
-            "remark": remark
-        }
-
-        if len(parts) == 1:
-            p0 = parts[0]
-            if p0.lower().startswith("wxid"):
-                account["wxid"] = p0
-                account["remark"] = account["remark"] or p0
-                wxid_count += 1
-            elif p0:
-                account["authorization"] = p0
-                auth_count += 1
-            else:
-                print(f"⚠️ 跳过空配置: {line}")
-                continue
-        elif len(parts) == 2:
-            p0, p1 = parts
-            if p1.lower().startswith("wxid"):
-                account["authorization"] = p0
-                account["wxid"] = p1
-                account["remark"] = account["remark"] or p1
-                if p0:
-                    auth_count += 1
-                wxid_count += 1
-            else:
-                account["authorization"] = p0
-                account["cuk"] = p1
-                if p0:
-                    auth_count += 1
+    # 支持 @, &, 或换行分隔
+    items = [x.strip() for x in re.split(r"[@&\n]+", wxid_raw) if x.strip()]
+    for item in items:
+        if "#" in item:
+            wxid, remark = item.split("#", 1)
+            wxid = wxid.strip()
+            remark = remark.strip() or wxid
         else:
-            p0 = parts[0] if len(parts) > 0 else ""
-            p1 = parts[1] if len(parts) > 1 else ""
-            p2 = parts[2] if len(parts) > 2 else ""
-            account["authorization"] = p0
-            account["cuk"] = p1
-            account["wxid"] = p2
-            if p0:
-                auth_count += 1
-            if p2:
-                wxid_count += 1
-                account["remark"] = account["remark"] or p2
-
-        if not account["authorization"] and not account["wxid"]:
-            print(f"⚠️ 跳过无效配置: {line}")
-            continue
-
-        accounts.append(account)
-             
+            wxid = item.strip()
+            remark = wxid
+            
+        if wxid:
+            accounts.append({
+                "authorization": "",
+                "cuk": "",
+                "wxid": wxid,
+                "remark": remark
+            })
+              
     print(f"检测到 {len(accounts)} 个账号")
-    print(f"ℹ️ 含 Authorization 账号: {auth_count}，含 wxid 账号: {wxid_count}")
     if wechat_server:
         print(f"ℹ️ 已启用自动续期服务 WECHAT_SERVER={wechat_server}")
     else:

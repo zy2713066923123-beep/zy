@@ -8,7 +8,7 @@
 更新日期：2026-07-04
 
 环境变量：
-    WX_ID            - 账号列表，格式"别名#wxid"，多账号用换行或 @ 或 & 分隔
+    WX_ID            - 账号列表，格式"wxid#别名"，多账号用换行或 @ 或 & 分隔
     WECHAT_SERVER    - 自建微信服务地址（含一号协议、二号协议）
 
 缓存文件：
@@ -559,7 +559,7 @@ def main():
         if not line or "#" not in line:
             continue
         parts = line.split("#", 1)
-        alias, wxid = parts[0].strip(), parts[1].strip()
+        wxid, alias = parts[0].strip(), parts[1].strip()
         if alias and wxid:
             accounts.append((alias, wxid))
 

@@ -327,13 +327,38 @@ async function apiRequest(method, url, data, token, encryptVer, openId, userId, 
 
 // 获取手机号授权code
 async function getPhoneCodeInfo(wxid) {
-    const resp = await axios.post(WECHAT_SERVER + '/api/v1/wx/app/get/all/mobile', {
-        wxid,
-        appid: APPID,
-        data: JSON.stringify({ api_name: 'webapi_getuserwxphone', with_credentials: true }),
-        opt: 1
-    });
-    if (resp.data?.Code === 0 && resp.data?.Data) {
+    const cleanWxid = String(wxid).split('#')[0].trim();
+    const isYyb = /^\d+$/.test(cleanWxid) || /^o[a-zA-Z0-9_-]{20,}$/.test(cleanWxid);
+    
+    let respData;
+    if (isYyb) {
+        // 使用 YYB 协议获取手机号 code
+        const { WeChatCodeGetter, YYBAdapter } = require('./getCode.js');
+        const getter = new WeChatCodeGetter();
+        await getter.init();
+        
+        const yybAdapter = new YYBAdapter(getter.yybServer);
+        const resolvedRef = await yybAdapter._resolveRef(cleanWxid);
+        const url = getter.yybServer.replace(/\/+$/, '') + '/wxapp/getPhoneNumber';
+        
+        if (debug) log(`[YYB] 请求手机号code: ref=${resolvedRef}, app_id=${APPID}`);
+        const resp = await axios.post(url, { ref: resolvedRef, app_id: APPID }, {
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 30000,
+            validateStatus: () => true
+        });
+        respData = resp.data;
+    } else {
+        const resp = await axios.post(WECHAT_SERVER + '/api/v1/wx/app/get/all/mobile', {
+            wxid: cleanWxid,
+            appid: APPID,
+            data: JSON.stringify({ api_name: 'webapi_getuserwxphone', with_credentials: true }),
+            opt: 1
+        });
+        respData = resp.data;
+    }
+
+    if (respData && (respData.Code === 0 || respData.code === 0 || respData.Success === true || respData.Data)) {
         // 从返回中提取 hex 格式 phoneCode，同时尽量提取明文手机号用于日志展示。
         let mobile = '';
         const walk = (node, depth = 0) => {
@@ -359,10 +384,11 @@ async function getPhoneCodeInfo(wxid) {
             }
             return null;
         };
-        const phoneCode = walk(resp.data);
+        const phoneCode = walk(respData);
         if (phoneCode) return { phoneCode, mobile };
     }
-    throw new Error('获取手机号code失败: ' + JSON.stringify(resp.data).substring(0, 300));
+    log('  ⚠️ 获取手机号code失败: ' + (respData ? JSON.stringify(respData).substring(0, 300) : 'null'));
+    return { phoneCode: '', mobile: '' };
 }
 
 async function getPhoneCode(wxid) {
@@ -426,7 +452,7 @@ async function login(phoneCode, openId, unionId) {
         signAgreement: '阅读并同意用户协议、隐私政策，未注册的手机号认证后自动创建新账户',
         registerChannel: ''
     }, '');
-    if (resp?.code === '200' && resp?.data?.token) {
+    if ((resp?.code === '200' || resp?.code == 200 || resp?.code === '0' || resp?.code == 0 || resp?.data?.token) && resp?.data?.token) {
         return {
             token: resp.data.token,
             userId: resp.data.userId,
@@ -434,7 +460,8 @@ async function login(phoneCode, openId, unionId) {
             isRegister: resp.data.isRegister
         };
     }
-    log('  登录失败: ' + (resp?.message || JSON.stringify(resp)));
+    const respStr = typeof resp === 'string' ? resp : JSON.stringify(resp);
+    log('  登录失败: ' + (resp?.message ? resp.message + ' - ' : '') + respStr);
     return null;
 }
 
@@ -552,17 +579,45 @@ async function getEncryptKey(wxid) {
     }
 
     // 2) 兜底走小程序协议接口
-    const resp = await axios.post(WECHAT_SERVER + '/api/v1/wx/app/call/function', {
-        wxid,
-        appid: APPID,
-        data: JSON.stringify({ api_name: 'webapi_getuserencryptkey', with_credentials: true }),
-        opt: 1
-    });
-    if (debug) log('  getUserCryptoManager: ' + JSON.stringify(resp.data).substring(0, 500));
-    if (resp.data?.Code === 0 && resp.data?.Data) {
+    let respData;
+    const cleanWxid = String(wxid).split('#')[0].trim();
+    const isYyb = /^\d+$/.test(cleanWxid) || /^o[a-zA-Z0-9_-]{20,}$/.test(cleanWxid);
+
+    if (isYyb) {
+        const { WeChatCodeGetter, YYBAdapter } = require('./getCode.js');
+        const getter = new WeChatCodeGetter();
+        await getter.init();
+        
+        const yybAdapter = new YYBAdapter(getter.yybServer);
+        const resolvedRef = await yybAdapter._resolveRef(cleanWxid);
+        const url = getter.yybServer.replace(/\/+$/, '') + '/wxapp/call/function';
+        
+        if (debug) log(`[YYB] 请求EncryptKey: ref=${resolvedRef}, app_id=${APPID}`);
+        const resp = await axios.post(url, {
+            ref: resolvedRef,
+            app_id: APPID,
+            api_name: 'webapi_getuserencryptkey'
+        }, {
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 30000,
+            validateStatus: () => true
+        });
+        respData = resp.data;
+    } else {
+        const resp = await axios.post(WECHAT_SERVER + '/api/v1/wx/app/call/function', {
+            wxid: cleanWxid,
+            appid: APPID,
+            data: JSON.stringify({ api_name: 'webapi_getuserencryptkey', with_credentials: true }),
+            opt: 1
+        });
+        respData = resp.data;
+    }
+
+    if (debug) log('  getUserCryptoManager: ' + (respData ? JSON.stringify(respData).substring(0, 500) : 'null'));
+    if (respData && (respData.Code === 0 || respData.code === 0 || respData.Success === true || respData.Data)) {
         try {
             // Data.data 是 base64 编码的 JSON
-            const outer = resp.data.Data.Data || resp.data.Data.data || '';
+            const outer = respData.Data.Data || respData.Data.data || '';
             const decoded = JSON.parse(Buffer.from(outer, 'base64').toString('utf8'));
             // decoded.data 又是一个 JSON 字符串
             const inner = typeof decoded.data === 'string' ? JSON.parse(decoded.data) : decoded;
