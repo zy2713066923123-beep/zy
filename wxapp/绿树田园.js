@@ -16,32 +16,31 @@
  * ============================================================
  *
  *  脚本功能：
- *    1. 通过微信协议(getCode.js 统一接口，牛子/应用宝双协议)用 WX_ID 自动获取
- *       微信小程序 code，传给 /wechat/miniprogram/login 登录获取 token（无需手动抓包）
- *    2. 兼容旧方式：直接填 TreeCoin 授权码(TREE+28位) 走 /auth/login-by-auth-code
+ *    1. 优先使用 TreeCoin 授权码(TREE+28位)：从 TREECOIN_AUTH_CODE 读取，
+ *       多账号用 & 或换行分隔，走 /auth/login-by-auth-code 登录获取 token
+ *    2. 兼容微信协议：配置 WX_ID 时自动经 getCode.js 获取微信 code，
+ *       传给 /wechat/miniprogram/login 登录（需未配置 TREECOIN_AUTH_CODE）
  *    3. 模拟页面访问设置 page_visit 标记
- *    4. 执行每日签到
+ *    4. 执行每日签到（POST /app/signin，明文 body，token 走 Authorization）
  *    5. 输出签到结果(树苗/大树收益)
  *
- *  使用方法（微信协议版，推荐）：
+ *  使用方法（推荐：授权码）：
  *    1. 青龙面板 → 环境变量 → 添加：
- *         WX_ID  微信账号（多账号换行/&/| 分隔），格式 wxid#备注
+ *         TREECOIN_AUTH_CODE = 授权码（多账号用 & 或换行分隔）
  *       示例：
- *         WX_ID = wxid_abc123#李四&wxid_xyz789#王五
- *    2. （可选）WECHAT_SERVER / YYB_SERVER 指向你的微信协议服务
- *    3. 青龙面板 → 定时任务 → 命令：task 绿树田园.js
+ *         TREECOIN_AUTH_CODE = TREE8G5MXFQPF72&TREExxxxxxxxxxxxxxxx
+ *    2. 青龙面板 → 定时任务 → 命令：task 绿树田园.js
  *         cron：0 8 * * *  (每天早上8点)
  *
- *  兼容旧方式（可选）：
- *    TREECOIN_AUTH_CODE - 直接填授权码(多账号用 & 分隔)，与 WX_ID 二选一，
- *                         配置 WX_ID 时优先使用微信协议自动获取 code
+ *  微信协议方式（可选，需清空 TREECOIN_AUTH_CODE）：
+ *    WX_ID  微信账号（多账号换行/&/| 分隔），格式 wxid#备注
  *
  *  环境变量：
- *    WX_ID             微信账号（推荐，自动 getcode）
+ *    TREECOIN_AUTH_CODE  授权码（优先，默认已内置一个，多账号 &/换行 分隔）
+ *    WX_ID             微信账号（自动 getcode，仅在未配置 TREECOIN_AUTH_CODE 时生效）
  *    TREECOIN_APPID    绿树田园小程序 AppID（默认 wx1cc3b7be9bf56740，可覆盖）
  *    TREECOIN_API_BASE 后端地址（默认 https://treecoin.cn/api）
  *    TREECOIN_INVITE_CODE 邀请码（默认空）
- *    TREECOIN_AUTH_CODE  旧方式授权码（默认已内置一个，可覆盖）
  * ============================================================
  */
 
@@ -62,38 +61,20 @@ try {
 const API_BASE = process.env.TREECOIN_API_BASE || 'https://treecoin.cn/api'
 const WX_APP_ID = (process.env.TREECOIN_APPID || 'wx1cc3b7be9bf56740').trim()
 const WX_IDS_RAW = (process.env.WX_ID || '').trim()
-const AUTH_CODES_RAW = (process.env.TREECOIN_AUTH_CODE || 'TREE8G5MXFQPF72M7R65LABS5C8SV6K5').trim()
-const INVITE_CODE = (process.env.TREECOIN_INVITE_CODE || '').trim()
+const AUTH_CODES_RAW = (process.env.TREECOIN_AUTH_CODE||'' ).trim()
+const INVITE_CODE = (process.env.TREECOIN_INVITE_CODE || 'NGLNCW5W').trim()
 
 // 微信小程序 WebView UA（对齐抓包）
 const UA = 'Mozilla/5.0 (Linux; Android 15; M2012K11AC Build/AQ3A.250226.002; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/146.0.7680.178 Mobile Safari/537.36 XWEB/1460243 MMWEBSDK/20260502 MMWEBID/3433 MicroMessenger/8.0.72.3100(0x28004853) WeChat/arm64 Weixin NetType/WIFI Language/zh_CN ABI/arm64 MiniProgramEnv/android'
 const REFERER = `https://servicewechat.com/${WX_APP_ID}/2/page-frame.html`
 
-// AES-256-GCM 加密密钥
-const ENCRYPTION_KEY = 'asldhlfhkjsadhfkjsdhfjshjkhfhsadflh'.substring(0, 32)
-const ALGORITHM = 'aes-256-gcm'
-
 // ============ 工具函数 ============
 
 /**
- * 生成设备指纹（原脚本缺失此函数，此处补上）
+ * 生成设备指纹
  */
 function generateDeviceId() {
     return crypto.randomBytes(16).toString('hex')
-}
-
-/**
- * AES-GCM 加密
- */
-function aesEncrypt(text) {
-    const iv = crypto.randomBytes(12)
-    const cipher = crypto.createCipheriv(ALGORITHM, Buffer.from(ENCRYPTION_KEY), iv)
-    let encrypted = cipher.update(text, 'utf-8')
-    encrypted = Buffer.concat([encrypted, cipher.final()])
-    return {
-        data: encrypted.toString('hex'),
-        iv: iv.toString('hex')
-    }
 }
 
 /**
@@ -170,12 +151,17 @@ function sleep(ms) {
 
 /**
  * 解析账号配置：
- *   优先 WX_ID（微信协议，自动 getcode），其次 TREECOIN_AUTH_CODE（旧方式）
- * 返回 [{ wxid, remark }] 或 [{ authCode, remark }]
+ *   优先 TREECOIN_AUTH_CODE（授权码，多账号用 & 或换行分隔），
+ *   其次 WX_ID（微信协议，自动 getcode）
+ * 返回 [{ authCode, remark }] 或 [{ wxid, remark }]
  */
 function parseAccounts() {
     const accounts = []
-    if (WX_IDS_RAW) {
+    if (AUTH_CODES_RAW) {
+        for (const ac of AUTH_CODES_RAW.split(/[&\n|]/).map(s => s.trim()).filter(Boolean)) {
+            accounts.push({ authCode: ac, remark: ac.substring(0, 8) })
+        }
+    } else if (WX_IDS_RAW) {
         for (const line of WX_IDS_RAW.split(/[&\n|]/).map(s => s.trim()).filter(Boolean)) {
             if (line.includes('#')) {
                 const [wxid, remark] = line.split('#', 2)
@@ -183,10 +169,6 @@ function parseAccounts() {
             } else {
                 accounts.push({ wxid: line, remark: line })
             }
-        }
-    } else if (AUTH_CODES_RAW) {
-        for (const ac of AUTH_CODES_RAW.split(/[&\n|]/).map(s => s.trim()).filter(Boolean)) {
-            accounts.push({ authCode: ac, remark: ac.substring(0, 8) })
         }
     }
     return accounts
@@ -243,16 +225,11 @@ async function authCodeLogin(authCode) {
 }
 
 /**
- * 执行签到
+ * 执行签到（真实接口：/app/signin，明文 body，token 走 Authorization）
  */
 async function doSignin(token, deviceId) {
-    // 加密请求数据 { token, deviceId }
-    const payload = JSON.stringify({ token, deviceId })
-    const { data, iv } = aesEncrypt(payload)
-
     const result = await request('/app/signin', 'POST', {
-        encryptedData: data,
-        iv
+        deviceId: deviceId !== undefined ? deviceId : ''
     }, token)
 
     return result
@@ -291,9 +268,9 @@ async function signinForAccount(account, index) {
         log('设置签到前置标记...')
         await sleep(500)
 
-        // 3. 签到
+        // 3. 签到（deviceId 传空串，与抓包一致）
         log('执行签到...')
-        const signinResult = await doSignin(token, deviceFingerprint)
+        const signinResult = await doSignin(token, '')
 
         if (signinResult.c === 1) {
             const data = signinResult.data || {}
@@ -313,6 +290,8 @@ async function signinForAccount(account, index) {
             return { success: true, data }
         } else {
             log(`签到结果: ${signinResult.msg || '未知'}`)
+            // 调试：打印完整签到响应，便于定位「签到失败，请重试」
+            log(`签到响应(raw): ${JSON.stringify(signinResult)}`)
 
             // 今日已签到也算成功
             if (signinResult.msg && signinResult.msg.includes('已签到')) {
@@ -356,7 +335,8 @@ async function main() {
 
     log(`共 ${accounts.length} 个账号待签到`)
     log(`API地址: ${API_BASE}`)
-    log(`登录方式: ${WX_IDS_RAW ? '微信协议 (AppID=' + WX_APP_ID + ')' : '授权码 (TREECOIN_AUTH_CODE)'}`)
+    log(`登录方式: ${AUTH_CODES_RAW ? '授权码 (TREECOIN_AUTH_CODE)' : '微信协议 (AppID=' + WX_APP_ID + ')'}`)
+    log(`待签到账号数: ${accounts.length}`)
     console.log('')
 
     let successCount = 0
