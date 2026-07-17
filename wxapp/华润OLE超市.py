@@ -16,8 +16,9 @@
 
 说明：
   - 登录 code 通过共享模块 getCode 获取（自动路由 牛子/应用宝）。
-  - 会员登录所需的手机号加密数据包(encryptedData/iv)仅牛子协议支持，
-    故该步骤仍直接走 WECHAT_SERVER 的 /get/all/mobile 接口。
+  - 手机号授权数据同样按账号协议自动路由：
+      牛子账号 → WECHAT_SERVER 的 /get/all/mobile（返回 encryptedData/iv 或 code）
+      应用宝账号 → getCode.get_single_phone_number（返回手机号授权 code）
 
 """
 
@@ -250,7 +251,41 @@ class OleSign:
             print(f"微信: 获取 code 失败: {exc}")
             return None
 
-    def get_phone_encrypted(self, wxid: str) -> Optional[Dict[str, Any]]:
+    def _phone_proto(self, wxid: str) -> str:
+        """与 getCode 一致的协议判定：应用宝 openid / 纯数字 → yyb，其余 → wechat。"""
+        raw = str(wxid).split('#')[0].strip()
+        if not raw:
+            return 'wechat'
+        if raw.isdigit():
+            return 'yyb'
+        if re.match(r'^o[a-zA-Z0-9_-]{20,}$', raw):
+            return 'yyb'
+        return 'wechat'
+
+    def get_phone(self, wxid: str) -> Optional[Dict[str, Any]]:
+        """获取手机号授权数据（按账号协议自动路由，与登录 code 同协议）。
+
+        返回字典（统一为以下两种之一）：
+          - 牛子: {encryptedData, iv, show_mobile}  或  {code, show_mobile}
+          - 应用宝: {code}   （YYB getPhoneNumber 返回手机号授权 code）
+        返回 None 表示获取失败。
+        """
+        proto = self._phone_proto(wxid)
+        if proto == 'yyb':
+            try:
+                code = getCode.get_single_phone_number(WECHAT_MINI_APPID, wxid)
+            except Exception as exc:
+                print(f"微信: YYB 获取手机号失败: {exc}")
+                return None
+            if not code:
+                print("微信: YYB 获取手机号 code 为空")
+                return None
+            print(f"✅ phone code ok (len={len(code)})")
+            return {"code": code}
+        return self._get_phone_niuzi(wxid)
+
+    def _get_phone_niuzi(self, wxid: str) -> Optional[Dict[str, Any]]:
+        """牛子协议获取手机号（兼容 encryptedData/iv 与 code 两种返回结构）。"""
         url = self.wechat_code_url.replace("/get/code", "/get/all/mobile")
         if url == self.wechat_code_url and not url.endswith("/get/all/mobile"):
             # 完整 code URL 被错误配置时兜底
@@ -282,12 +317,15 @@ class OleSign:
             print(f"微信: 获取手机号失败: {result.get('Message', 'unknown')}")
             return None
 
-        raw = None
-        data = result.get("Data")
+        # 兼容多种返回结构：Data.Data / data.Data / Data / data
+        data: Any = result.get("Data")
+        if not isinstance(data, dict):
+            data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        raw = data
         if isinstance(data, dict):
             raw = data.get("Data", data.get("data", data))
-        elif isinstance(result.get("data"), dict):
-            raw = result["data"].get("Data", result["data"])
+            if data.get("wx_phone"):
+                raw = data
 
         info: Any = {}
         if isinstance(raw, str):
@@ -298,11 +336,36 @@ class OleSign:
         elif isinstance(raw, dict):
             info = raw
 
-        wx_phone = info.get("wx_phone") if isinstance(info, dict) else None
+        if not isinstance(info, dict):
+            info = {}
+
+        # 方式A：直接含 encryptedData/iv（老式加密包）
+        enc = info.get("encryptedData") or info.get("encrypted_data")
+        iv = info.get("iv")
+        if enc and iv:
+            show = str(info.get("show_mobile") or info.get("mobile") or "")
+            return {"encryptedData": enc, "iv": iv, "show_mobile": show}
+
+        # 方式B：含 wx_phone 子对象（可能含 encryptedData/iv 或 code）
+        wx_phone = info.get("wx_phone")
         if isinstance(wx_phone, dict):
-            return wx_phone
-        if isinstance(info, dict) and (info.get("encryptedData") or info.get("encrypted_data")):
-            return info
+            enc = wx_phone.get("encryptedData") or wx_phone.get("encrypted_data")
+            iv = wx_phone.get("iv")
+            if enc and iv:
+                show = str(wx_phone.get("show_mobile") or wx_phone.get("mobile") or "")
+                return {"encryptedData": enc, "iv": iv, "show_mobile": show}
+            if wx_phone.get("code"):
+                return {"code": str(wx_phone["code"])}
+
+        # 方式C：ALLMobile[0].code 或 Data.code（手机号授权 code）
+        all_mobile = info.get("ALLMobile") or (info.get("Data", {}) or {}).get("ALLMobile")
+        if isinstance(all_mobile, list) and all_mobile:
+            code = all_mobile[0].get("code")
+            if code:
+                return {"code": str(code)}
+        if info.get("code"):
+            return {"code": str(info["code"])}
+
         print(f"微信: 手机号数据包为空: {result}")
         return None
 
@@ -393,22 +456,7 @@ class OleSign:
             return None
         summary.log(f"✅ code ok (len={len(code)})")
 
-        summary.log("2️⃣ 获取手机号加密数据...")
-        phone = self.get_phone_encrypted(account.wxid)
-        if not phone:
-            summary.error_message = "获取手机号 encryptedData/iv 失败"
-            return None
-
-        encrypted = phone.get("encryptedData") or phone.get("encrypted_data") or ""
-        iv = phone.get("iv") or ""
-        show_mobile = str(phone.get("show_mobile") or phone.get("mobile") or "")
-        if not encrypted or not iv:
-            summary.error_message = "手机号 encryptedData/iv 为空"
-            summary.log(f"❌ phone keys: {list(phone.keys())}")
-            return None
-        summary.log(f"✅ phone ok (mobile={show_mobile or 'N/A'})")
-
-        summary.log("3️⃣ code 换 open_id/union_id...")
+        summary.log("2️⃣ code 换 open_id/union_id...")
         headers1 = self.build_headers(with_shop=False, device_name="ole-ql")
         data1, err1 = self.api_request(
             "POST",
@@ -433,6 +481,7 @@ class OleSign:
         summary.open_id = open_id
         summary.log(f"✅ open_id={open_id[:8]}... union_id={'Y' if union_id else 'N'}")
 
+        # 已注册账号：code 接口直接返回会话，跳过手机号绑定
         if user_session and member_id:
             summary.member_id = member_id
             summary.log("✅ code 接口已返回 user_session，跳过手机号绑定登录")
@@ -441,23 +490,53 @@ class OleSign:
                 "open_id": open_id,
                 "union_id": union_id,
                 "member_id": member_id,
-                "device_name": show_mobile or "ole-ql",
+                "device_name": "ole-ql",
             }
 
+        summary.log("3️⃣ 获取手机号授权数据（按账号协议自动路由）...")
+        phone = self.get_phone(account.wxid)
+        if not phone:
+            summary.error_message = "获取手机号失败（encryptedData/iv 或 code）"
+            return None
+
+        encrypted = phone.get("encryptedData") or phone.get("encrypted_data") or ""
+        iv = phone.get("iv") or ""
+        phone_code = str(phone.get("code") or "")
+        show_mobile = str(phone.get("show_mobile") or phone.get("mobile") or "")
+        if not ((encrypted and iv) or phone_code):
+            summary.error_message = "手机号数据为空"
+            summary.log(f"❌ phone keys: {list(phone.keys())}")
+            return None
+        kind = "加密包(encryptedData/iv)" if (encrypted and iv) else "授权code"
+        summary.log(f"✅ phone ok (mobile={show_mobile or 'N/A'}, 类型={kind})")
+
         summary.log("4️⃣ 手机号绑定登录换 sessionid...")
-        # 抓包：mobile 字段放的是 encrypted 串，不是明文手机号
-        body2 = {
-            "head_img_url": DEFAULT_HEAD_IMG,
-            "mobile": encrypted,
-            "nick_name": "",
-            "open_id": open_id,
-            "phone": {
-                "encrypted_data": encrypted,
-                "iv": iv,
-            },
-            "union_id": union_id,
-            "invitation_code": "",
-        }
+        # 牛子老接口返回 encryptedData/iv；应用宝/新接口返回手机号 code
+        if encrypted and iv:
+            body2 = {
+                "head_img_url": DEFAULT_HEAD_IMG,
+                "mobile": encrypted,
+                "nick_name": "",
+                "open_id": open_id,
+                "phone": {
+                    "encrypted_data": encrypted,
+                    "iv": iv,
+                },
+                "union_id": union_id,
+                "invitation_code": "",
+            }
+        else:
+            body2 = {
+                "head_img_url": DEFAULT_HEAD_IMG,
+                "mobile": phone_code,
+                "nick_name": "",
+                "open_id": open_id,
+                "phone": {
+                    "code": phone_code,
+                },
+                "union_id": union_id,
+                "invitation_code": "",
+            }
         headers2 = self.build_headers(
             open_id=open_id,
             device_name=show_mobile or "ole-ql",
@@ -680,8 +759,8 @@ def main() -> None:
         return
 
     print(f"📋 共 {len(accounts)} 个账号")
-    print(f"登录 code: 通过 getCode 模块获取（WX_ID 过滤 + 牛子/应用宝自动路由）")
-    print(f"手机号绑定: WECHAT_SERVER => {build_code_url(os.environ.get('WECHAT_SERVER', DEFAULT_WECHAT_SERVER))}")
+    print(f"登录 code / 手机号: 通过 getCode 模块按账号协议自动路由（牛子/应用宝）")
+    print(f"牛子手机号接口: WECHAT_SERVER => {build_code_url(os.environ.get('WECHAT_SERVER', DEFAULT_WECHAT_SERVER))}")
 
     signer = OleSign()
     results: List[AccountSummary] = []

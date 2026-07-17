@@ -279,7 +279,10 @@ class YYBAdapter:
             print(f"[YYB] 请求手机号code: ref={resolved_ref}, app_id={app_id}")
             r = requests.post(url, json=payload, headers=headers, timeout=30)
             print(f"[YYB] 响应状态: {r.status_code}")
-            
+
+            if r.status_code == 200:
+                print(f"[YYB] 手机号code原始响应: {r.text[:300]}")
+
             if r.status_code == 404:
                 err_msg = r.json().get("msg") or r.json().get("error", "") or r.text[:80]
                 raise Exception(f"接口/账号不存在(404): {err_msg}")
