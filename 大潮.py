@@ -2434,7 +2434,22 @@ class DachaoClient:
             nonlocal video_num, current_progress, reported_seconds, waited_seconds
             nonlocal verified_watched_seconds, verified_detail_res
             estimated_seconds = verified_watched_seconds
+            wait_start = time.time()
+            # 硬性超时保护：若服务端确认时长迟迟不增长，防止 while 死循环（表现为“一直卡住”）
+            hard_timeout = required_seconds + 900
+            last_log = 0.0
+            locked_print(
+                f"[视频] 开始等待观看时长：需 {required_seconds}s，已观看 {verified_watched_seconds}s，"
+                f"将真实等待；硬超时 {hard_timeout:.0f}s 后自动跳出"
+            )
             while verified_watched_seconds < required_seconds:
+                # 超时保护：已等待超过硬上限仍不达标则强制跳出，避免永久卡死
+                if time.time() - wait_start > hard_timeout:
+                    locked_print(
+                        f"[视频] 超时保护：已等待 {time.time() - wait_start:.0f}s 仍仅服务端确认 "
+                        f"{verified_watched_seconds}s/{required_seconds}s，强制跳出（后续档位可能未领取）"
+                    )
+                    return
                 while estimated_seconds < required_seconds:
                     if video_duration > 0 and current_progress >= video_duration:
                         video_num = video_num % video_count + 1 if video_count else video_num + 1
@@ -2461,6 +2476,14 @@ class DachaoClient:
                     reports.append(report_res)
                     if callable(progress) and len(reports) % log_every == 0:
                         progress(f"[视频] 已等待 {waited_seconds:.1f}s，上报 {reported_seconds}s/{remaining}s，共 {len(reports)} 次")
+                    # 非 DEBUG 也每 30 秒打印一次进度，避免“长时间无输出像卡死”
+                    now = time.time()
+                    if now - last_log >= 30:
+                        last_log = now
+                        locked_print(
+                            f"[视频] 等待中 {reported_seconds:.0f}/{required_seconds}s "
+                            f"(服务端确认 {verified_watched_seconds}s)，已耗时 {now - wait_start:.0f}s"
+                        )
                 time.sleep(1 + random.random() * 0.2)
                 verified_detail_res, verified_data = self.aged_video_detail(
                     login_result, detail_drama_id, headers=headers
@@ -3566,6 +3589,10 @@ def main() -> int:
 
         account_video_lottery_ids: list[tuple[int, str]] = []
         if video_enabled:
+            locked_print(
+                f"[账号{index}] 视频任务开始（预计真实等待约 {video_target_seconds}s，"
+                f"可用 DaChao_VIDEO_TARGET_SECONDS 调小）"
+            )
             try:
                 video_res = client.run_aged_video_task(
                     result,
