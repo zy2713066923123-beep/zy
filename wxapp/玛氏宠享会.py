@@ -1,7 +1,7 @@
 """
 作者: 临渊
 日期: 2025/7/29
-name: code版_玛氏宠享会
+name:  玛氏宠享会
 入口: 微信小程序 (https://a.c1ns.cn/9e0Lb) (进入后授权点击更新昵称)
 功能: 签到、分享、查询积分
 变量: WX_ID / soy_wxid_data (微信id) 多个账号用换行分割 
@@ -474,5 +474,5 @@ class AutoTask:
                 notify.send(title, content)
 
 if __name__ == "__main__":
-    auto_task = AutoTask("code版_玛氏宠享会")
+    auto_task = AutoTask(" 玛氏宠享会")
     auto_task.run() 

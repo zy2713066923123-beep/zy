@@ -1,7 +1,7 @@
 """
 作者: 临渊
 日期: 2025/6/30
-name: code版_一汽丰田丰享汇
+name:  一汽丰田丰享汇
 入口: 微信小程序 (https://s.c1ns.cn/IukuX)
 功能: 签到、查积分
 变量: WX_ID / soy_wxid_data (微信id) 多个账号用换行分割 

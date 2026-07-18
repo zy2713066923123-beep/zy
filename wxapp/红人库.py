@@ -1,7 +1,7 @@
 """
 作者: 临渊
 日期: 2025/7/1
-name: code版_红人库
+name:  红人库
 入口: 微信小程序 (https://s.c1ns.cn/EO1Zb)
 功能: 签到、查询积分
 变量: WX_ID / soy_wxid_data (微信id) 多个账号用换行分割 
