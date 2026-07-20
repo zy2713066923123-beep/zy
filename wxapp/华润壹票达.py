@@ -8,7 +8,9 @@
   WX_ID / ypd_wxid / YPD_WXID
       格式：wxid#备注，多账号换行或 @
       兼容：备注#wxid（备注不以 wxid_ 开头时）
-  WECHAT_SERVER   协议服务，默认 http://127.0.0.1:8011 (由 getCode.py 自动读取并智能路由)
+  WECHAT_SERVER   牛子协议服务，默认 http://127.0.0.1:8011
+                  （仅手机号加密包使用 /get/all/mobile；YYB 账号由 getCode 自动路由）
+  YYB_SERVER      应用宝(YYB) 服务地址（getCode 读取，auto 模式自动路由）
 
 """
 
@@ -438,7 +440,35 @@ class YiPiaoDaClient:
         except Exception as exc:
             raise RuntimeError(f"getCode 取 code 失败: {exc}")
 
+    def _phone_proto(self, wxid: str) -> str:
+        """与 getCode 一致的协议判定：应用宝 openid / 纯数字 → yyb，其余 → wechat。"""
+        raw = str(wxid).split("#")[0].strip()
+        if not raw:
+            return "wechat"
+        if raw.isdigit():
+            return "yyb"
+        if re.match(r"^o[a-zA-Z0-9_-]{20,}$", raw):
+            return "yyb"
+        return "wechat"
+
     def fetch_phone_encrypted(self, summary: AccountSummary) -> Dict[str, Any]:
+        """按账号协议自动路由获取手机号授权数据（与登录 code 同协议）：
+        - 应用宝(yyb): getCode.get_single_phone_number → {code}（手机号授权 code）
+        - 牛子(wechat): 协议服务 get/all/mobile → encryptedData/iv 或 code
+        """
+        proto = self._phone_proto(self.account.wxid)
+        if proto == "yyb":
+            summary.log("手机号协议: 应用宝(YYB)，通过 getCode 获取授权 code")
+            try:
+                code = getCode.get_single_phone_number(self.wechat_appid, self.account.wxid)
+            except Exception as exc:
+                raise RuntimeError(f"YYB 获取手机号失败: {exc}") from exc
+            if not code:
+                raise RuntimeError("YYB 获取手机号 code 为空，请确认该 openid 已在应用宝授权")
+            summary.log(f"✅ phone code ok (len={len(str(code))})")
+            return {"code": str(code)}
+
+        summary.log("手机号协议: 牛子，调用 get/all/mobile")
         """协议服务 get/all/mobile 返回结构（实测）：
         Data.ALLMobile[0] = {mobile, show_mobile, encryptedData, iv, cloud_id, code}
         其中 code 为 64 位 hex，对应业务 authorization.wxParam.authCode。
@@ -606,11 +636,17 @@ class YiPiaoDaClient:
         if not auth_code and encrypt_phone:
             summary.log("无 authCode/code 字段，sha256(encryptedData) 兜底")
             auth_code = hashlib.sha256(str(encrypt_phone).encode("utf-8")).hexdigest()
-        if not encrypt_phone or not init_vector:
-            raise RuntimeError(
-                "手机号 encryptedData/iv 为空，无法 authorization。"
-                " 请确认协议服务支持 get/all/mobile，或改用 ypd_token。"
-            )
+        if not encrypt_phone and not init_vector:
+            # 应用宝(YYB) 仅返回手机号授权 code，无加密包，走 code 授权路径
+            if auth_code:
+                summary.log("无加密包(encryptedData/iv)，使用手机号授权 code 完成 authorization")
+                encrypt_phone = ""
+                init_vector = ""
+            else:
+                raise RuntimeError(
+                    "手机号 encryptedData/iv 与 authCode 均为空，无法 authorization。"
+                    " 请确认协议服务支持 get/all/mobile，或改用 ypd_token。"
+                )
         mobile_hint = str(phone.get("show_mobile") or phone.get("mobile") or "")
         summary.log(f"手机号包 ok mobile={mobile_hint or 'N/A'} enc_len={len(str(encrypt_phone))}")
 
