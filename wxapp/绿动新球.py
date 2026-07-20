@@ -309,10 +309,31 @@ def common_headers() -> Dict[str, str]:
         "Sec-Fetch-Site": "cross-site",
         "Sec-Fetch-Mode": "cors",
         "Sec-Fetch-Dest": "empty",
-        "Accept-Encoding": "gzip, deflate, br",
+    "Accept-Encoding": "gzip, deflate, br",
     }
- 
- 
+
+
+def _parse_response(response):
+    """解析响应，兼容接口将 data 字段甚至整体以 JSON 字符串返回（双重编码）的情况"""
+    try:
+        data = response.json()
+    except Exception:
+        return {"code": -1, "msg": f"JSON解析失败: {response.text[:300]}"}
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except Exception:
+            return {"code": -1, "msg": f"JSON解析失败: {response.text[:300]}"}
+    if isinstance(data, dict):
+        inner = data.get("data")
+        if isinstance(inner, str):
+            try:
+                data["data"] = json.loads(inner)
+            except Exception:
+                pass
+    return data
+
+
 def login_by_code(alias: str, code: str, proxies: Dict[str, str] | None) -> Tuple[str | None, Dict[str, Any] | None]:
     try:
         print("🔐 [登录] 使用 code 换取 token")
@@ -331,11 +352,8 @@ def login_by_code(alias: str, code: str, proxies: Dict[str, str] | None) -> Tupl
             server=alias,
         )
  
-        try:
-            data = response.json()
-        except Exception:
-            data = {"raw": response.text[:800]}
- 
+        data = _parse_response(response)
+
         if data.get("code") == 1000 and data.get("data", {}).get("token"):
             token = data["data"]["token"]
             print(f"✅ [登录] token 获取成功: {mask(token)}")
@@ -357,13 +375,7 @@ def get_user_info(alias: str, token: str, proxies: Dict[str, str] | None) -> Dic
         proxies=proxies,
         server=alias,
     )
-    try:
-        return response.json()
-    except Exception:
-        return {
-            "code": -1,
-            "msg": f"JSON解析失败: {response.text[:300]}",
-        }
+    return _parse_response(response)
  
  
 def daily_sign(alias: str, token: str, proxies: Dict[str, str] | None) -> Tuple[bool, str]:

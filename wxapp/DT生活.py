@@ -407,9 +407,16 @@ def run_account(identifier, alias, index, global_proxy_config):
                 "error": "签到请求异常"
             }
 
-        sign_msg = data.get("msg", "完成")
-        get_points = data.get("data", {}).get("points", 0)
-        sign_num = data.get("data", {}).get("sign_num", 0)
+        sign_msg = data.get("msg", "完成") if isinstance(data, dict) else "完成"
+        # 兼容接口将 data 字段以 JSON 字符串返回（双重编码）的情况
+        raw = data.get("data", {}) if isinstance(data, dict) else {}
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except Exception:
+                raw = {}
+        get_points = raw.get("points", 0) if isinstance(raw, dict) else 0
+        sign_num = raw.get("sign_num", 0) if isinstance(raw, dict) else 0
 
         # 获取用户信息
         nickname, uid, total_points = get_user_info(token, headers, proxy_config, account_name)

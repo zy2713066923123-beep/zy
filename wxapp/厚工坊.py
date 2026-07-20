@@ -182,7 +182,7 @@ class AutoTask:
             headers = {
                 "User-Agent": self.user_agent,
                 "Content-Type": "application/json",
-                "Referer": f"https://servicewechat.com/{self.wechat_code_adapter.wx_appid}/286/page-frame.html"
+                "Referer": f"https://servicewechat.com/{self.wx_appid}/286/page-frame.html"
             }
             session.headers.update(headers)
             response = session.get(url)

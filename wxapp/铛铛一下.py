@@ -193,11 +193,14 @@ def update_lottery_result(session):
         params = {"id": 3438615}
         response = session.get(url, params=params, timeout=15)
         response_json = response.json()
-        if response_json['code'] == 0:
-            good_name = response_json.get('data', {}).get('goodName', '未知')
+        if not isinstance(response_json, dict):
+            return False, f"[抽奖]: 响应格式异常: {response_json}"
+        if response_json.get('code') == 0:
+            data = response_json.get('data') or {}
+            good_name = data.get('goodName', '未知') if isinstance(data, dict) else '未知'
             return True, f"[抽奖]: 获得{good_name}"
         else:
-            return False, f"[抽奖]: {response_json.get('msg', '')}"
+            return False, f"[抽奖]: {response_json.get('msg', '未知错误')}"
     except Exception as e:
         return False, f"[抽奖]异常: {e}"
 
@@ -212,9 +215,12 @@ def get_withdrawal_trade_list(session):
         url = f"https://{HOST}/api/h/get_withdrawal_trade_list"
         response = session.get(url, timeout=15)
         response_json = response.json()
-        if response_json['code'] == 0:
-            balance = response_json['data'][0]['money']
-            return balance, response_json['data']
+        if isinstance(response_json, dict) and response_json.get('code') == 0:
+            data = response_json.get('data') or []
+            if isinstance(data, list) and data:
+                balance = data[0].get('money')
+                return balance, data
+            return None, None
         else:
             return None, None
     except Exception as e:

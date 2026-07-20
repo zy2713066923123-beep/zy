@@ -128,8 +128,8 @@ class AutoTask:
         try:
             # 从环境变量获取cookie
             soy_wxid_data = os.getenv("WX_ID") or os.getenv("soy_wxid_data")
-        if not soy_wxid_data:
-            self.log("[检查环境变量] 没有找到环境变量 WX_ID / soy_wxid_data，请检查环境变量", level="error")
+            if not soy_wxid_data:
+                self.log("[检查环境变量] 没有找到环境变量 WX_ID / soy_wxid_data，请检查环境变量", level="error")
                 return None
 
             # 自动检测分隔符

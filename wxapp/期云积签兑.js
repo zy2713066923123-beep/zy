@@ -1,5 +1,5 @@
-// cron: 17 12,15 * * * cron: 21 9,13 * * *
 #!/usr/bin/env node
+// cron: 17 12,15 * * * cron: 21 9,13 * * *
 'use strict';
 
 /**
@@ -22,7 +22,6 @@
  */
 
 const { getSingleCode } = require('./getCode.js');
-const getWxCode = (wxid, appid) => getSingleCode(appid, String(wxid).split('#')[0].trim());
 const http = require('http');
 const https = require('https');
 const { URL } = require('url');

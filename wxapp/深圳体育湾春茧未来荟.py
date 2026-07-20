@@ -197,7 +197,7 @@ class AutoTask:
             payload = {
                 "Code": code,
                 "TenancyName": "szbay",
-                "AppId": self.wechat_code_adapter.wx_appid
+                "AppId": self.wx_appid
             }
             response = session.post(url, json=payload, timeout=5)
             response_json = response.json()
