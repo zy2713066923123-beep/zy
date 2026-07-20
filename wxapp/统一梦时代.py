@@ -195,7 +195,7 @@ class AutoTask:
         """
         try:
             url = f"https://{self.host}/fe/mapi/user/loginX"
-            payload = {"appid":self.wechat_code_adapter.wx_appid,"basicInfo":{"bosId":"4020112618957","cid":"176205957","tcode":"weimob","vid":"6013753979957"},"env":"production","extendInfo":{"source":1},"is_pre_fetch_open":"true","parentVid":0,"pid":"4020112618957","storeId":"0","code":code,"queryAuthConfig":"true"}
+            payload = {"appid":self.wx_appid,"basicInfo":{"bosId":"4020112618957","cid":"176205957","tcode":"weimob","vid":"6013753979957"},"env":"production","extendInfo":{"source":1},"is_pre_fetch_open":"true","parentVid":0,"pid":"4020112618957","storeId":"0","code":code,"queryAuthConfig":"true"}
             response = session.post(url, json=payload, timeout=5)
             response_json = response.json()
             if int(response_json['errcode']) == 0:

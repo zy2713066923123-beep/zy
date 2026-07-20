@@ -305,11 +305,28 @@ class AutoTask:
             }
             response = session.get(url, params=params, timeout=5)
             response_json = response.json()
-            if int(response_json['c']) == 0:
-                self.log(f"[{self.nickname}] 看广告: 获得{response_json['d']['money']}积分")
+            # 兼容两种返回结构：c/d/m 或 code/msg/data
+            if 'c' in response_json:
+                code = response_json['c']
+                msg = response_json.get('m', '')
+                data = response_json.get('d', {})
+                ok = int(code) == 0
+            elif 'code' in response_json:
+                code = response_json['code']
+                msg = response_json.get('msg', '')
+                data = response_json.get('data', {})
+                ok = int(code) == 1
+            else:
+                self.log(f"[{self.nickname}] 看广告: 未知响应 {response_json}")
+                return False
+            if ok:
+                money = ''
+                if isinstance(data, dict):
+                    money = data.get('money', data.get('integral', ''))
+                self.log(f"[{self.nickname}] 看广告: 获得{money}积分")
                 return True
             else:
-                self.log(f"[{self.nickname}] 看广告: {response_json['m']}")
+                self.log(f"[{self.nickname}] 看广告: {msg}")
                 return False
         except Exception as e:
             self.log(f"[{self.nickname}] 看广告: 发生错误: {str(e)}\n{traceback.format_exc()}", level="error")
