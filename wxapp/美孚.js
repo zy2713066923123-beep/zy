@@ -2,8 +2,8 @@
 小程序：美孚臻享俱乐部（微信协议版）
 
 必填变量：
-  WECHAT_SERVER  微信协议服务地址，例如：http://127.0.0.1:8011
-  mfwx           微信账号，多账号支持换行、&、@ 分隔
+  WECHAT_SERVER  微信协议服务地址（getCode.js 读取，例如：http://127.0.0.1:8011）
+  WX_ID          微信账号，多账号支持换行、&、@ 分隔
                  格式：wxid#备注（备注可选）
 
 兼容变量：
@@ -25,6 +25,7 @@ const http = require('http');
 const https = require('https');
 const zlib = require('zlib');
 const { URL } = require('url');
+const { getSingleCode } = require('./getCode.js'); // 共享微信小程序 code 获取模块（自动路由牛子/应用宝，读取 WX_ID）
 
 const APP_NAME = '美孚臻享俱乐部';
 const WX_APPID = 'wx46f9572cac706c22';
@@ -35,7 +36,7 @@ const CACHE_FILE = path.join(__dirname, 'mfwx.json');
 
 const CONFIG = {
   wechatServer: trimRightSlash(process.env.WECHAT_SERVER || process.env.MF_WECHAT_SERVER || ''),
-  wxAccountsRaw: process.env.mfwx || process.env.MFWX || '',
+  wxAccountsRaw: process.env.WX_ID || '',
   tokenRaw: process.env.mftoken || process.env.MFTOKEN || '',
   timeout: toPositiveInt(process.env.MF_TIMEOUT, 20000),
   signDelayMin: toNonNegativeInt(process.env.MF_SIGN_DELAY_MIN, 1500),
@@ -114,7 +115,7 @@ async function main() {
     return;
   }
 
-  throw new Error('请配置 mfwx（微信协议版）或 mftoken（旧版 token）环境变量');
+  throw new Error('请配置 WX_ID（微信协议版）或 mftoken（旧版 token）环境变量');
 }
 
 async function runProtocolAccount(account, cache) {
@@ -223,28 +224,11 @@ async function validateToken(account) {
 }
 
 async function getWxCode(wxid) {
-  const url = `${CONFIG.wechatServer}/api/v1/wx/app/get/code`;
-  const result = await requestJson(url, {
-    method: 'POST',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      'User-Agent': 'Mozilla/5.0 MicroMessenger MiniProgramEnv',
-    },
-    body: JSON.stringify({ wxid, appid: WX_APPID }),
-  });
-
-  const code =
-    getByPath(result, ['Data', 'code']) ||
-    getByPath(result, ['data', 'code']) ||
-    getByPath(result, ['Data', 'Code']) ||
-    getByPath(result, ['code']);
-
-  if (!code || typeof code !== 'string') {
-    throw new Error(`获取微信 code 失败：${JSON.stringify(result)}`);
+  try {
+    return await getSingleCode(WX_APPID, wxid);
+  } catch (e) {
+    throw new Error(`获取微信 code 失败：${e.message}`);
   }
-
-  return code;
 }
 
 async function signIn(account) {

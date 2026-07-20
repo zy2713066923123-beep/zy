@@ -1,19 +1,19 @@
 /**
  * 广汽丰田新能源 - 微信协议版（无babel依赖）
  * 变量：
- *   wxgqft=wxid#备注#deviceId#UA  (多号用换行或&，除了wxid其它皆选填，会自动生成一号一UA设备ID)
- *   WECHAT_SERVER=http://127.0.0.1:8011
+ *   WX_ID=wxid#备注#deviceId#UA  (多号用换行或&，除了wxid其它皆选填，会自动生成一号一UA设备ID)
+ *   WECHAT_SERVER/YYB_SERVER/SERVER_TYPE 在 getCode.js 中配置（微信协议地址）
  * 缓存：gqft.json
  */
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { getSingleCode } = require('./getCode.js'); // 共享微信小程序 code 获取模块（自动路由牛子/应用宝，读取 WX_ID）
 
 const NAME = '广汽丰田新能源-微信协议版';
 const APPID = 'wxd8a42d1c0c59c15d';
 const API_VERSION = '1.4.0';
-const WX_SERVER = (process.env.WECHAT_SERVER || '').trim().replace(/\/$/, '');
-const WXGQFT = (process.env.wxgqft || process.env.WXGQFT || '').trim();
+const WXGQFT = (process.env.WX_ID || '').trim();
 
 const GW_BASE = 'https://gw.nevapp.gtmc.com.cn';
 const XCX_BASE = 'https://xcx.nevapp.gtmc.com.cn/wxapp/nev-prod/bff-nev-wxapp';
@@ -133,13 +133,11 @@ function aesDecrypt(encData, encKey) {
 }
 
 async function getWxCode(wxid) {
-  const { data } = await jreq('POST', `${WX_SERVER}/api/v1/wx/app/get/code`, {
-    data: { wxid, appid: APPID },
-    headers: { 'content-type': 'application/json' },
-    timeout: 15000
-  });
-  if (data?.Code === 0 && data?.Data?.code) return data.Data.code;
-  throw new Error(`微信协议取code失败: ${JSON.stringify(data)}`);
+  try {
+    return await getSingleCode(APPID, wxid);
+  } catch (e) {
+    throw new Error(`微信协议取code失败: ${e.message}`);
+  }
 }
 async function xcxLoginByCode(acc, code) {
   const url = `${XCX_BASE}/auth/login?code=${encodeURIComponent(code)}&clickUrl=${encodeURIComponent('/pages/index/index')}&clickId=`;
@@ -354,10 +352,9 @@ async function ensureCred(acc, cache) {
 }
 
 async function main() {
-  if (!WXGQFT) throw new Error('未设置变量 wxgqft');
-  if (!WX_SERVER) throw new Error('未设置 WECHAT_SERVER');
+  if (!WXGQFT) throw new Error('未设置变量 WX_ID');
   const accounts = parseAccounts(WXGQFT);
-  if (!accounts.length) throw new Error('wxgqft无账号');
+  if (!accounts.length) throw new Error('WX_ID 无账号');
 
   const cache = loadCache();
   log(`${NAME} 启动，共${accounts.length}个账号，缓存名:gqft`);

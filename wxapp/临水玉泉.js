@@ -1,12 +1,14 @@
 /**
-微信协议-临水玉泉
-微信协议服务地址固定变量 export WECHAT_SERVER='http://172.17.0.7:8011'
-变量：wxlsyq  wxid#备注 多号换行
+微信协议-临水玉泉（getCode.js 统一版）
+变量：WX_ID  wxid#备注 多号换行
+  WX_ID 由共享 getCode.js 读取并智能路由 牛子/应用宝
+  WECHAT_SERVER / YYB_SERVER / SERVER_TYPE 在 getCode.js 中配置
  */
 
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const { getSingleCode } = require('./getCode.js'); // 共享微信小程序 code 获取模块（自动路由牛子/应用宝，读取 WX_ID）
 
 const APPID = 'wx21293beab739d5c3';
 const KDT_ID = '44353481';
@@ -16,8 +18,7 @@ const CACHE_NAME = 'lsyq';
 const CACHE_FILE = path.join(__dirname, `${CACHE_NAME}.json`);
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36 MicroMessenger/7.0.20.1781(0x6700143B) NetType/WIFI MiniProgramEnv/Windows WindowsWechat/WMPF WindowsWechat(0x63090a13) UnifiedPCWindowsWechat(0xf254181d) XWEB/19201';
 
-const WX_SERVER = (process.env.WECHAT_SERVER || '').trim();
-const WXLSYQ = (process.env.wxlsyq || '').trim(); // wxid#备注
+const WXLSYQ = (process.env.WX_ID || '').trim(); // wxid#备注（由 getCode.js 读取并智能路由牛子/应用宝）
 
 let notifyMsg = '';
 
@@ -80,10 +81,11 @@ function commonHeaders(cred = {}) {
 }
 
 async function getWxCode(wxid) {
-  const url = `${WX_SERVER.replace(/\/$/, '')}/api/v1/wx/app/get/code`;
-  const { data } = await axios.post(url, { wxid, appid: APPID }, { timeout: 15000 });
-  if (data?.Code === 0 && data?.Data?.code) return data.Data.code;
-  throw new Error(`微信协议获取code失败: ${JSON.stringify(data)}`);
+  try {
+    return await getSingleCode(APPID, wxid);
+  } catch (e) {
+    throw new Error(`微信协议获取code失败: ${e.message}`);
+  }
 }
 
 async function authByCode(wxCode, oldCred = {}) {
@@ -191,14 +193,11 @@ async function sendNotify(title, content) {
 
 async function main() {
   if (!WXLSYQ) {
-    throw new Error('未配置变量 wxlsyq（格式：wxid#备注，多账号换行或@分隔）');
-  }
-  if (!WX_SERVER) {
-    throw new Error('未配置 WECHAT_SERVER');
+    throw new Error('未配置变量 WX_ID（格式：wxid#备注，多账号换行或@分隔）');
   }
 
   const accounts = parseAccounts(WXLSYQ);
-  if (!accounts.length) throw new Error('wxlsyq 解析后无账号');
+  if (!accounts.length) throw new Error('WX_ID 解析后无账号');
 
   const cache = loadCache();
   log(`共 ${accounts.length} 个账号，缓存名: ${CACHE_NAME}`);
