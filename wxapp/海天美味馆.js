@@ -89,6 +89,14 @@ function randomUuid(len = 20) {
     return value;
 }
 
+// 清理 HTTP 头值中的非法字符（控制字符/多余空白），避免 "Invalid character in header content" 报错
+function sanitizeHeader(value = "") {
+    return String(value || "")
+        .replace(/[\x00-\x1F\x7F]/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
 function isTokenError(message) {
     return /401|403|token|登录|授权|失效|过期|no-show-toast/i.test(String(message || ""));
 }
@@ -204,8 +212,8 @@ class Task {
             ...extra,
         };
         if (auth) {
-            headers.Authorization = this.token;
-            if (this.communityToken) headers["X-Haday-Token"] = this.communityToken;
+            headers.Authorization = sanitizeHeader(this.token);
+            if (this.communityToken) headers["X-Haday-Token"] = sanitizeHeader(this.communityToken);
         }
         return headers;
     }
@@ -236,7 +244,7 @@ class Task {
             appid: MINI_APP_ID,
             openid: this.accountId,
         }, {
-            headers: { auth: process.env.WX_ID },
+            headers: { auth: sanitizeHeader(process.env.WX_ID) },
             timeout: 45000,
             validateStatus: () => true,
         });

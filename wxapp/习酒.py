@@ -1271,6 +1271,44 @@ def update_ql_cron_time(schedule):
 
 
 # ============================================================
+#  带自动重试的登录封装
+# ============================================================
+def auto_login_with_retry(client, wxid, wx_server, ocr_server=None,
+                          max_retry=None, base_delay=5):
+    """
+    自动重试登录：对所有错误（含 login_buffer 已过期 / 数据不存在 / 需要重新扫码等）
+    一律硬重试 max_retry 次，采用指数退避 + 随机抖动。即使明知是需重新扫码的永久错误，
+    也会按设定次数重试后再放弃。
+    重试次数可通过环境变量 LOGIN_MAX_RETRY 设置（默认 3）。
+    """
+    if max_retry is None:
+        try:
+            max_retry = int(os.environ.get("LOGIN_MAX_RETRY", "3"))
+        except Exception:
+            max_retry = 3
+    max_retry = max(1, max_retry)
+
+    last_err = None
+    for attempt in range(1, max_retry + 1):
+        try:
+            result = client.auto_login(wxid=wxid, server_url=wx_server, ocr_server=ocr_server or None)
+            if result and result.get("token"):
+                if attempt > 1:
+                    log.info("   ✅ 第 %d 次重试登录成功" % attempt)
+                return result
+            # 没抛异常但也没拿到 token，视为异常进行重试
+            last_err = RuntimeError("登录未返回 token，请稍后重试")
+            log.warning("   ⚠️  登录未返回 token（%d/%d），%ds 后重试..." % (attempt, max_retry, base_delay * attempt))
+        except Exception as e:
+            last_err = e
+            log.warning("   ⚠️  登录失败（%d/%d）: %s，%ds 后重试..." % (attempt, max_retry, e, base_delay * attempt))
+        if attempt < max_retry:
+            time.sleep(base_delay * attempt + random.randint(0, 3))
+    log.error("   ❌ 登录重试 %d 次仍失败" % max_retry)
+    raise last_err if last_err else RuntimeError("登录失败")
+
+
+# ============================================================
 #  主函数
 # ============================================================
 if __name__ == "__main__":
@@ -1326,7 +1364,7 @@ if __name__ == "__main__":
         if not cached_token or not token_valid(cached_token):
             log.info("   🔄 token 无效或已过期，重新登录...")
             try:
-                result = client.auto_login(wxid=wxid, server_url=WX_SERVER, ocr_server=OCR_SERVER or None)
+                result = auto_login_with_retry(client, wxid, WX_SERVER, OCR_SERVER, base_delay=5)
             except Exception as e:
                 log.error("   ❌ 登录异常: %s，跳过" % e); notify_lines.append("👤 %s\n❌ 登录失败: %s" % (mask, e)); continue
 
@@ -1357,7 +1395,7 @@ if __name__ == "__main__":
                 cache.pop(wxid, None); save_cache(cache)
                 log.warning("   ⚠️  检测到 token 失效(%s)，立即清除缓存 token 并重新登录重试..." % msg.split("]")[0].strip("["))
                 try:
-                    result = client.auto_login(wxid=wxid, server_url=WX_SERVER, ocr_server=OCR_SERVER or None)
+                    result = auto_login_with_retry(client, wxid, WX_SERVER, OCR_SERVER, base_delay=5)
                     if result.get("token"):
                         cache[wxid] = client.token; save_cache(cache)
                         today = datetime.now().strftime("%Y-%m-%d"); do_daily = cache.get(wxid + "_daily") != today
