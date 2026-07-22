@@ -1,486 +1,575 @@
+# -*- coding: utf-8 -*-
 """
-作者: 临渊
-日期: 2025/6/27
-name:  统一梦时代
-入口: 微信小程序
-功能: 签到、抽奖、查询积分
-变量: WX_ID / soy_wxid_data (微信id) 多个账号用换行分割 
-    PROXY_API_URL (代理api，返回一条txt文本，内容为代理ip:端口)
-定时: 一天两次
-cron: 35 10,17 * * *
-------------更新日志------------
-2025/6/27  V1.0    初始化脚本
-2025/7/7   V1.1    适配更多协议
-2025/7/21  V1.2    适配更多协议
-2025/7/22  V1.3    修改协议适配器导入方式
-2025/7/28  V1.4    修改头部注释，以便拉库
+统一梦时代（微盟小程序 wx532ecb3bdaaf92f9）自动任务
+
+功能：
+  1. 微信登录（loginUserInfoX）+ token 缓存 + 失效自动重登
+  2. 积分签到（非会员自动走会员激活兜底）
+  3. 会员激活（协议取手机号 → 绑卡入会）
+  4. 抽奖（保留原逻辑）
+  5. 茄皇农场（登录 / 首页 / 任务 / 好友偷能量 / 消耗能量，RSA-OAEP(SHA256)+AES-256-GCM 加密）
+
+依赖：requests、pycryptodome（Crypto），以及本目录的 getCode.py
+环境变量：WX_ID（多账号支持换行、& 分隔）
 """
 
-import json
-import random
-import time
-import requests
 import os
 import sys
-import logging
-import traceback
-import ssl
-from datetime import datetime
+import json
+import time
+import random
+import re
+import base64
+import hashlib
+import hmac
+import uuid
 
-MULTI_ACCOUNT_SPLIT = ["\n", "@"] # 分隔符列表
-MULTI_ACCOUNT_PROXY = False # 是否使用多账号代理，默认不使用，True则使用多账号代理
-NOTIFY = os.getenv("LY_NOTIFY") or False # 是否推送日志，默认不推送，True则推送
+import requests
+from Crypto.Cipher import AES, PKCS1_OAEP, PKCS1_v1_5
+from Crypto.Hash import SHA256
+from Crypto.PublicKey import RSA
+from Crypto.Random import get_random_bytes
+from Crypto.Util.Padding import unpad
 
-import getCode
+from getCode import get_single_code, get_single_phone_number
 
-class TLSAdapter(requests.adapters.HTTPAdapter):
-    """
-    自定义TLS
-    解决unsafe legacy renegotiation disabled
-    貌似python太高版本依然会报错
-    """
-    def init_poolmanager(self, *args, **kwargs):
-        ctx = ssl.create_default_context()
-        ctx.set_ciphers("DEFAULT@SECLEVEL=1")
-        ctx.options |= 0x4   # <-- the key part here, OP_LEGACY_SERVER_CONNECT
-        kwargs["ssl_context"] = ctx
-        return super(TLSAdapter, self).init_poolmanager(*args, **kwargs)
 
+# ============================================================
+#  配置
+# ============================================================
+WX_APPID = "wx532ecb3bdaaf92f9"
+HOST = "https://xapi.weimob.com"
+SIGN_KEY = "b53ca184bcd458ef"
+V = "1.0.0"
+SRC = "web"
+VER = "4.5.13"
+PRODUCT_ID = "dingjin"
+TID_KEY = "w" + SIGN_KEY  # 与 JS 保持一致：'w' + SIGN_KEY
+
+# 茄皇农场相关（以下两项为「替换为实际值」占位符，需从你的小程序实际配置填入，农场才能真正跑通）
+WM_TENANT_ID = "1948@..."    # TODO: 替换为实际租户ID（wmessage-tenant-id）
+WM_TEMPLATE_ID = "1948@..."  # TODO: 替换为实际模板ID
+
+# 农场请求用的 RSA 公钥（RSA-OAEP / SHA-256 + AES-256-GCM），来自前端实现，无需改动
+FARM_PUBLIC_KEY = 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA70sK419vy3MabW3lEGlk7Zh1u78OdnVlioVazp5Y46eBh+/TDqo/wZ9VrQ/4MmAtoP0vJ2vmwP5gqO3WPojb07WddXfF1eU+5M+Rj3s0eSRrvZvBcGZ3qK0dOgZJScK66IDQazt/c4xqhDcsItIyNRahUqB/IKc6E80GZJvMvFtZVSCseAXC0mAJXhi1AdUOlP+3Pv0fiUVejTJp1j7LBNWJ7Z5/8mRcclQH0vmxsdYsaV3qZiJ2d/CfNoKcwmI2IWmeZy8NP5U8Hn0AsxPEwjdHoEqG/iy/SoA46TZL+RLtWqUSHXpaKR/VFN0rbl25SE91X8FTfLqyD8LfGMCwRQIDAQAB'
+
+# 会员激活用 RSA 私钥（PKCS#1 v1.5）。仅当 getUserPhoneGrant 返回加密手机号(encryptedData+iv)时才需要。
+# 若你的协议服务直接返回 phone 字段，则无需此密钥。留空即可，脚本会自动跳过解密步骤。
+PRIVATE_KEY = ""  # TODO(可选): 填入小程序 RSA 私钥(PEM) 以解密加密手机号
+
+UA = ("Mozilla/5.0 (Linux; Android 14; Pixel 7 Build/UP1A.231005.007) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36 MicroMessenger/8.0.50(0x28003237)")
+REFERER = f"https://servicewechat.com/{WX_APPID}/port/"
+
+AUTH_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "梦时代auth.json")
+LOGIN_MAX_RETRY = 3
+
+
+# ============================================================
+#  日志
+# ============================================================
+def log(msg):
+    ts = time.strftime("%H:%M:%S", time.localtime())
+    line = f"{ts} | {msg}"
+    print(line, flush=True)
+    return line
+
+
+# ============================================================
+#  工具函数
+# ============================================================
+def rand_hex(n):
+    return ''.join(random.choice('0123456789abcdef') for _ in range(n))
+
+
+def tid():
+    # w<32hex>-<13位时间戳>
+    return 'w' + rand_hex(32) + '-' + str(int(time.time() * 1000))
+
+
+def hmac_sign(msg, key):
+    return hmac.new(key.encode('utf-8'), msg.encode('utf-8'), hashlib.md5).hexdigest()
+
+
+def now_ms():
+    return int(time.time() * 1000)
+
+
+def load_auth_cache():
+    try:
+        with open(AUTH_CACHE_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_auth_cache(d):
+    try:
+        with open(AUTH_CACHE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(d, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def pem_from_b64(b64):
+    s = b64.strip()
+    chunks = [s[i:i + 64] for i in range(0, len(s), 64)]
+    return "-----BEGIN PUBLIC KEY-----\n" + "\n".join(chunks) + "\n-----END PUBLIC KEY-----"
+
+
+# ============================================================
+#  加密：农场请求体（RSA-OAEP / SHA-256 + AES-256-GCM）
+# ============================================================
+def encrypt_farm_data(plain: str) -> str:
+    aes_key = get_random_bytes(32)
+    iv = get_random_bytes(12)
+    cipher = AES.new(aes_key, AES.MODE_GCM, nonce=iv)
+    ct = cipher.encrypt(plain.encode('utf-8'))
+    tag = cipher.digest()
+    enc = ct + tag
+    pub = RSA.import_key(pem_from_b64(FARM_PUBLIC_KEY))
+    rsa = PKCS1_OAEP.new(pub, hashAlgo=SHA256)  # OAEP + MGF1 均使用 SHA-256，对应 Node oaepHash:'sha256'
+    enc_key = rsa.encrypt(aes_key)
+    out = {
+        'data': base64.b64encode(enc).decode('ascii'),
+        'key': base64.b64encode(enc_key).decode('ascii'),
+        'iv': base64.b64encode(iv).decode('ascii'),
+    }
+    return json.dumps(out, ensure_ascii=False, separators=(',', ':'))
+
+
+def decrypt_phone(encrypted_data_b64, iv_b64, private_key_pem):
+    """RSA 私钥(PKCS#1 v1.5) + AES-128-CBC 解密微信标准加密手机号。"""
+    if not private_key_pem:
+        raise ValueError("未配置 PRIVATE_KEY，无法解密加密手机号")
+    em = base64.b64decode(encrypted_data_b64)
+    key = RSA.import_key(private_key_pem)
+    cipher = PKCS1_v1_5.new(key)
+    sentinel = b'DECRYPT_FAIL'
+    result = cipher.decrypt(em, sentinel)
+    if result == sentinel:
+        raise ValueError("RSA 解密失败")
+    key16 = (result + b'\x00' * 16)[:16]
+    iv = base64.b64decode(iv_b64)
+    cipher2 = AES.new(key16, AES.MODE_CBC, iv)
+    dec = cipher2.decrypt(base64.b64decode(encrypted_data_b64))
+    dec = unpad(dec, 16)
+    info = json.loads(dec.decode('utf-8'))
+    return info.get('phoneNumber')
+
+
+# ============================================================
+#  PCA 代理（保持原样）
+# ============================================================
+def set_pca_proxy(session, pca):
+    if not pca:
+        return
+    if pca.get('enable') is True and pca.get('proxy'):
+        session.proxies.update({'http': pca['proxy'], 'https': pca['proxy']})
+        log(f"🌐 已启用 PCA 代理: {pca['proxy']}")
+    elif pca.get('enable') is True and pca.get('client') and pca.get('secret') and pca.get('gw'):
+        log(f"🌐 已启用 PCA 网关代理: {pca['gw']}")
+        session.proxies.update({'http': pca['gw'], 'https': pca['gw']})
+
+
+def get_pca_config():
+    pca_enable = os.environ.get('PCA_ENABLE', 'false').lower() == 'true'
+    pca_proxy = os.environ.get('PCA_PROXY', '')
+    pca_client = os.environ.get('PCA_CLIENT', '')
+    pca_secret = os.environ.get('PCA_SECRET', '')
+    pca_gw = os.environ.get('PCA_GW', '')
+    pca = {}
+    if pca_enable:
+        if pca_proxy:
+            pca = {'enable': True, 'proxy': pca_proxy}
+        elif pca_client and pca_secret and pca_gw:
+            pca = {'enable': True, 'client': pca_client, 'secret': pca_secret, 'gw': pca_gw}
+    return pca
+
+
+# ============================================================
+#  主任务类
+# ============================================================
 class AutoTask:
-    def __init__(self, script_name):
-        """
-        初始化自动任务类
-        :param script_name: 脚本名称，用于日志显示
-        """
-        self.script_name = script_name
-        self.proxy_url = os.getenv("PROXY_API_URL") # 代理api，返回一条txt文本，内容为代理ip:端口
-        self.wx_appid = "wx532ecb3bdaaf92f9" # 微信小程序id
-        self.log_msgs = []
-        self.host = "xapi.weimob.com"
-        self.user_agent = "Mozilla/5.0 (Linux; Android 12; M2012K11AC Build/SKQ1.220303.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/134.0.6998.136 Mobile Safari/537.36 XWEB/1340129 MMWEBSDK/20240301 MMWEBID/9871 MicroMessenger/8.0.48.2580(0x28003036) WeChat/arm64 Weixin NetType/WIFI Language/zh_CN ABI/arm64 MiniProgramEnv/android"
-        
-    def log(self, msg, level="info"):
-        formatted = f"[{level.upper()}] {msg}"
-        print(formatted)
-        self.log_msgs.append(formatted)
+    def __init__(self):
+        self.session = requests.Session()
+        self.session.verify = False
+        set_pca_proxy(self.session, get_pca_config())
+        self.wx_appid = WX_APPID
+        self.client_id = str(uuid.uuid4())
+        self.token = ''
+        self.wid = ''
+        self.openid = ''
+        self.wx_id = ''
+        self.is_member_flag = None
 
+    # ---------- 请求封装 ----------
+    def wheaders(self, farm=False, is_login=False):
+        t = now_ms()
+        sign = hmac_sign(f"{self.client_id}{TID_KEY}{t}", SIGN_KEY)
+        h = {
+            't': str(t),
+            'sign': sign,
+            'clientId': self.client_id,
+            'traceparent': rand_hex(32),
+            'traceid': f"{t}{random.randint(0, 999999)}",
+            'apmConversationId': str(uuid.uuid4()),
+            'vid': str(uuid.uuid4()),
+            'v_device': str(uuid.uuid4()),
+            'x-requested-with': 'XMLHttpRequest',
+            'User-Agent': UA,
+            'Referer': REFERER,
+            'Accept': 'application/json, text/plain, */*',
+            'Cookie': f"wmessage-token-{self.client_id}={self.token}; wmessage-wid-{self.client_id}={self.wid}",
+        }
+        if farm:
+            h['Content-Type'] = 'application/json;charset=UTF-8'
+            h['wm-tid'] = tid()
+            h['wm-tenant-id'] = WM_TENANT_ID
+        else:
+            h['Content-Type'] = 'application/x-www-form-urlencoded'
+            if is_login:
+                h['wm-tid'] = tid()
+                h['wm-tenant-id'] = WM_TENANT_ID
+        return h
+
+    def wpost(self, path, body, use_farm=False, return_full=False, retries=3):
+        url = HOST + path
+        is_login = path.startswith('/common/user/login')
+        # /common/user/login 虽然是表单体，但需带 wm-tid / wm-tenant-id 头
+        farm_headers = use_farm and not is_login
+
+        common = {
+            "v": V, "src": SRC, "ver": VER,
+            "productId": PRODUCT_ID, "cache": False, "clientId": self.client_id,
+        }
+        if farm_headers:
+            post_data = body if isinstance(body, str) else json.dumps(body, ensure_ascii=False, separators=(',', ':'))
+            headers = self.wheaders(farm=True)
+        else:
+            req = body if isinstance(body, str) else json.dumps(body, ensure_ascii=False, separators=(',', ':'))
+            post_data = {**common, "gw": "0", "t": str(now_ms()), "isEncode": "1", "request": req}
+            headers = self.wheaders(farm=False, is_login=is_login)
+
+        last_err = None
+        for attempt in range(1, retries + 1):
+            try:
+                resp = self.session.post(url, data=post_data, headers=headers, timeout=30)
+                try:
+                    return resp.json()
+                except Exception:
+                    return {}
+            except requests.RequestException as e:
+                last_err = e
+                self.log(f"  ⚠️ 请求失败（{attempt}/{retries}）: {e}")
+                if attempt < retries:
+                    time.sleep(2 + random.randint(0, 2))
+        raise last_err or Exception("请求失败")
+
+    # ---------- 微信 code ----------
     def get_wx_code(self, wx_id):
         try:
-            return getCode.get_single_code(self.wx_appid, wx_id)
+            return get_single_code(self.wx_appid, wx_id)
         except Exception as e:
-            self.log(f"获取 code 失败: {e}", level="error")
-            return None
+            raise Exception(f"获取微信code失败: {e}")
 
-    def get_proxy(self):
-        """
-        获取代理
-        :return: 代理
-        """
-        if not self.proxy_url:
-            self.log("[获取代理] 没有找到环境变量PROXY_API_URL，不使用代理", level="warning")
-            return None
-        url = self.proxy_url
-        response = requests.get(url)
-        proxy = response.text
-        self.log(f"[获取代理] {proxy}")
-        return proxy
-    
-    def check_proxy(self, proxy, session):
-        """
-        检查代理
-        :param proxy: 代理
-        :param session: session
-        :return: 是否可用
-        """
+    # ---------- 登录 ----------
+    def wxlogin(self, code):
         try:
-            url = f"http://{self.host}/api3/onecrm/mactivity/santa/core/showCActivityPop"
-            payload = {"appid":"wx532ecb3bdaaf92f9","basicInfo":{"vid":6013753979957,"vidType":2,"bosId":4020112618957,"productId":1,"productInstanceId":3171023957,"productVersionId":"30044","merchantId":2000020692957,"tcode":"weimob","cid":176205957},"extendInfo":{"wxTemplateId":7916,"analysis":[],"bosTemplateId":1000001984,"childTemplateIds":[{"customId":90004,"version":"crm@0.1.63"},{"customId":90002,"version":"ec@68.1"},{"customId":90006,"version":"hudong@0.0.229"},{"customId":90008,"version":"cms@0.0.504"}],"quickdeliver":{"enable":"false"},"youshu":{"enable":"false"},"source":1,"channelsource":5,"refer":"cms-index","mpScene":1145},"queryParameter":"null","i18n":{"language":"zh","timezone":"8"},"pid":"4020112618957","storeId":"0","targetBasicInfo":{"productInstanceId":3168798957}}
-            response = session.post(url, json=payload, timeout=5)
-            if response.status_code == 200:
-                self.log(f"[检查代理] {proxy} 应该可用")
+            r = self.wpost('/fe/mapi/user/loginUserInfoX', {"code": code, "getUserProfile": True}, return_full=True)
+            if r and r.get('code') in ('200', 200) and r.get('data'):
+                d = r['data']
+                return {'token': d.get('token'), 'wid': d.get('wid', ''), 'openid': d.get('openid', '')}
+        except Exception as e:
+            self.log(f"  ⚠️ loginUserInfoX 失败: {e}")
+        return None
+
+    def get_user_info(self):
+        try:
+            r = self.wpost('/fe/mapi/user/loginUserInfo', {}, return_full=True)
+            if r and r.get('code') in ('200', 200) and r.get('data'):
+                return r['data'].get('userInfo', {}) or {}
+        except Exception:
+            pass
+        return None
+
+    def ensure_login(self):
+        cache = load_auth_cache()
+        cached = cache.get(self.wx_id)
+        self.token = ''
+        self.wid = ''
+        self.openid = ''
+        self.is_member_flag = None
+
+        if cached and cached.get('token'):
+            self.token = cached['token']
+            self.wid = cached.get('wid', '')
+            info = self.get_user_info()
+            if info is not None:
+                self.is_member_flag = bool(info.get('isMember'))
+                self.openid = info.get('openid', '')
+                self.log("✅ 使用缓存 token 登录成功")
                 return True
-            else:
-                self.log(f"[检查代理] {response.text}")
-                return False
-        except Exception as e:
-            return False
-        
 
-    def check_env(self):
-        """
-        检查环境变量
-        :return: 环境变量字符串
-        """
-        try:
-            # 从环境变量获取cookie
-            soy_wxid_data = os.getenv("WX_ID") or os.getenv("soy_wxid_data")
-            if not soy_wxid_data:
-                self.log("[检查环境变量] 没有找到环境变量 WX_ID / soy_wxid_data，请检查环境变量", level="error")
-                return None
+        last_err = None
+        for attempt in range(1, LOGIN_MAX_RETRY + 1):
+            try:
+                code = self.get_wx_code(self.wx_id)
+                res = self.wxlogin(code)
+                if res and res.get('token'):
+                    self.token = res['token']
+                    self.wid = res.get('wid', '')
+                    self.openid = res.get('openid', '')
+                    cache[self.wx_id] = {'token': self.token, 'wid': self.wid, 'openid': self.openid}
+                    save_auth_cache(cache)
+                    info = self.get_user_info()
+                    if info is not None:
+                        self.is_member_flag = bool(info.get('isMember'))
+                        self.openid = info.get('openid', self.openid)
+                    self.log("✅ 登录成功" + (f"（第{attempt}次重试）" if attempt > 1 else ""))
+                    return True
+                last_err = Exception("登录未返回 token")
+            except Exception as e:
+                last_err = e
+                self.log(f"  ⚠️ 登录失败（{attempt}/{LOGIN_MAX_RETRY}）: {e}")
+            if attempt < LOGIN_MAX_RETRY:
+                time.sleep(3 + random.randint(0, 3))
+        self.log(f"❌ 登录重试 {LOGIN_MAX_RETRY} 次仍失败: {last_err}")
+        raise last_err or Exception("登录失败")
 
-            # 自动检测分隔符
-            split_char = None
-            for sep in MULTI_ACCOUNT_SPLIT:
-                if sep in soy_wxid_data:
-                    split_char = sep
-                    break
-            if not split_char:
-                # 如果都没有分隔符，默认当作单账号
-                soy_wxid_datas = [soy_wxid_data]
-            else:
-                soy_wxid_datas = soy_wxid_data.split(split_char)
+    def is_member(self):
+        if self.is_member_flag is None:
+            info = self.get_user_info()
+            self.is_member_flag = bool(info.get('isMember')) if info else False
+        return self.is_member_flag
 
-            for soy_wxid_data in soy_wxid_datas:
-                if "=" in soy_wxid_data:
-                    soy_wxid_data = soy_wxid_data.split("=")[1]
-                    yield soy_wxid_data
-                else:
-                    yield soy_wxid_data
-        except Exception as e:
-            self.log(f"[检查环境变量] 发生错误: {str(e)}\n{traceback.format_exc()}", level="error")
-            raise
-
-    def dict_keys_to_lower(self, obj):
-        """
-        递归将字典的所有键名转为小写
-        """
-        if isinstance(obj, dict):
-            return {k.lower(): self.dict_keys_to_lower(v) for k, v in obj.items()}
-        elif isinstance(obj, list):
-            return [self.dict_keys_to_lower(i) for i in obj]
-        else:
-            return obj
-    
-    def wx_code_auth(self, wx_id):
-        """
-        微信授权取code
-        :param wx_id: 微信id
-        :return: 微信code
-        """
+    # ---------- 会员激活 ----------
+    def activate_member(self):
+        if self.is_member():
+            return True
         try:
-            url = self.wx_code_url
-            headers = {
-                "Authorization": self.wx_code_token,
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "wxid": wx_id,
-                "appid": self.wx_appid
-            }
-            response = requests.post(url, headers=headers, json=payload, timeout=5)
-            response.raise_for_status()
-            # 将所有键名转为小写
-            response_json = self.dict_keys_to_lower(response.json())
-            # 直接取授权code，不判断返回码code
-            code_value = response_json.get('data', {}).get('code', '')
-            if code_value:
-                code = code_value
-                return code
-            else:
-                self.log(f"[微信授权] 失败，错误信息: {response_json['message']}", level="error")
+            self.log("  📱 获取手机号授权...")
+            phone_code = get_single_phone_number(self.wx_appid, self.wx_id)
+            if not phone_code:
+                self.log("  ❌ 获取手机号 code 失败")
                 return False
-        except requests.RequestException as e:
-            self.log(f"[微信授权]发生网络错误: {str(e)}\n{traceback.format_exc()}", level="error")
-            return False
-        except Exception as e:
-            self.log(f"[微信授权]发生未知错误: {str(e)}\n{traceback.format_exc()}", level="error")
-            return False
-        
-    def wxlogin(self, session, code):
-        """
-        登录
-        :param session: session
-        :param code: 微信code
-        :return: 登录结果
-        """
-        try:
-            url = f"https://{self.host}/fe/mapi/user/loginX"
-            payload = {"appid":self.wx_appid,"basicInfo":{"bosId":"4020112618957","cid":"176205957","tcode":"weimob","vid":"6013753979957"},"env":"production","extendInfo":{"source":1},"is_pre_fetch_open":"true","parentVid":0,"pid":"4020112618957","storeId":"0","code":code,"queryAuthConfig":"true"}
-            response = session.post(url, json=payload, timeout=5)
-            response_json = response.json()
-            if int(response_json['errcode']) == 0:
-                self.log(f"[登录] 成功")
-                token = response_json['data']['token']
-                session.headers["x-wx-token"] = token
-                return True
-            else:
-                self.log(f"[登录] 发生错误: {response_json['message']}", level="error")
-                return False
-        except requests.RequestException as e:
-            self.log(f"[登录] 发生网络错误: {str(e)}\n{traceback.format_exc()}", level="error")
-            return False
-        except Exception as e:
-            self.log(f"[登录] 发生错误: {str(e)}\n{traceback.format_exc()}", level="error")
-            return False
-        
-    def get_sign_info(self, session):
-        """
-        获取签到信息
-        :param session: session
-        :return: 签到信息
-        """
-        try:
-            url = f"https://{self.host}/api3/onecrm/mactivity/sign/misc/sign/activity/c/signMainInfo"
-            payload = {"appid":"wx532ecb3bdaaf92f9","basicInfo":{"vid":6013753979957,"vidType":2,"bosId":4020112618957,"productId":146,"productInstanceId":3168798957,"productVersionId":"12017","merchantId":2000020692957,"tcode":"weimob","cid":176205957},"extendInfo":{"wxTemplateId":7916,"analysis":[],"bosTemplateId":1000001984,"childTemplateIds":[{"customId":90004,"version":"crm@0.1.63"},{"customId":90002,"version":"ec@68.1"},{"customId":90006,"version":"hudong@0.0.229"},{"customId":90008,"version":"cms@0.0.504"}],"quickdeliver":{"enable":"false"},"youshu":{"enable":"false"},"source":1,"channelsource":5,"refer":"onecrm-signgift","mpScene":1145},"queryParameter":"null","i18n":{"language":"zh","timezone":"8"},"pid":"4020112618957","storeId":"0","customInfo":{"source":0,"wid":3118552467}}
-            response = session.post(url, json=payload)
-            response_json = response.json()
-            if int(response_json['errcode']) == 0:
-                return response_json['data']['hasSign']
-            else:
-                self.log(f"[获取签到信息] 发生错误: {response_json['errmsg']}", level="error")
-                return False
-        except Exception as e:
-            self.log(f"[获取签到信息] 发生错误: {str(e)}\n{traceback.format_exc()}", level="error")
-            return False
-
-    def sign_in(self, session):
-        """
-        签到
-        :param session: session
-        :return: 签到结果
-        """
-        try:
-            url = f"https://{self.host}/api3/onecrm/mactivity/sign/misc/sign/activity/core/c/sign"
-            payload = {"appid":"wx532ecb3bdaaf92f9","basicInfo":{"vid":6013753979957,"vidType":2,"bosId":4020112618957,"productId":146,"productInstanceId":3168798957,"productVersionId":"12017","merchantId":2000020692957,"tcode":"weimob","cid":176205957},"extendInfo":{"wxTemplateId":7916,"analysis":[],"bosTemplateId":1000001984,"childTemplateIds":[{"customId":90004,"version":"crm@0.1.63"},{"customId":90002,"version":"ec@68.1"},{"customId":90006,"version":"hudong@0.0.229"},{"customId":90008,"version":"cms@0.0.504"}],"quickdeliver":{"enable":"false"},"youshu":{"enable":"false"},"source":1,"channelsource":5,"refer":"onecrm-signgift","mpScene":1106},"queryParameter":"null","i18n":{"language":"zh","timezone":"8"},"pid":"4020112618957","storeId":"0","customInfo":{"source":0,"wid":3140960455}}
-            response = session.post(url, json=payload)
-            response_json = response.json()
-            if int(response_json['errcode']) == 0:
-                self.log(f"[签到] {response_json['errmsg']} 获得: {response_json['data']['fixedReward']['points']}积分 额外获得:{response_json['data']['extraReward']['points']}积分")
-                return True
-            else:
-                self.log(f"[签到] {response_json['errmsg']}", level="warning")
-                return False
-        except Exception as e:
-            self.log(f"[签到] 发生错误: {str(e)}\n{traceback.format_exc()}", level="error")
-            return False
-        
-    def get_activity_info(self, session, pageId="13906063"):
-        """
-        获取活动信息
-        :param session: session
-        :param pageId: 页面id
-        :return: 活动信息
-        """
-        try:
-            url = f"https://{self.host}/api3/mp-decoration/web/page/queryPageInfo"
-            paylaod = {"appid":"wx532ecb3bdaaf92f9","basicInfo":{"vid":6013753979957,"vidType":2,"bosId":4020112618957,"productId":1,"productInstanceId":3171023957,"productVersionId":"30044","merchantId":2000020692957,"tcode":"weimob","cid":176205957},"extendInfo":{"wxTemplateId":7916,"analysis":[],"bosTemplateId":1000001984,"childTemplateIds":[{"customId":90004,"version":"crm@0.1.63"},{"customId":90002,"version":"ec@68.1"},{"customId":90006,"version":"hudong@0.0.229"},{"customId":90008,"version":"cms@0.0.504"}],"quickdeliver":{"enable":"false"},"youshu":{"enable":"false"},"source":1,"channelsource":5,"refer":"cms-design","mpScene":1145},"queryParameter":"null","i18n":{"language":"zh","timezone":"8"},"pid":"4020112618957","storeId":"0","bosId":4020112618957,"requestType":1,"pageSize":10,"pageNum":1,"exParams":{"pageId":pageId},"jsonSwitch":"true","pageId":pageId,"$level":1}
-            response = session.post(url, json=paylaod)
-            response_json = response.json()
-            if int(response_json['errcode']) == 0:
-                return response_json['data']["pageModuleInfoList"]
-            else:
-                self.log(f"[获取活动信息] 发生错误: {response_json['errmsg']}", level="error")
-                return False
-        except Exception as e:
-            self.log(f"[获取活动信息] 发生错误: {str(e)}\n{traceback.format_exc()}", level="error")
-            return False
-        
-    def get_miniurl(self, activity_info):
-        for tmp_activity in activity_info:
-            module_json = tmp_activity.get("moduleJSON", {})
-            content = module_json.get("content", {})
-            items = content.get("items", [])
-            for item in items:
-                hot_zone_list = item.get("hotZoneList", [])
-                for hot_zone in hot_zone_list:
-                    link = hot_zone.get("link", {})
-                    mini_url = link.get("miniUrl", "")
-                    if "tmpKey" in mini_url:
-                        return mini_url
-        return False
-    
-    def check_activity(self, activity_info):
-        """
-        检查活动
-        :param activity_info: 活动信息
-        :return: 活动信息
-        """
-        activity_params = []
-        for tmp_activity in activity_info:
-            module_json = tmp_activity.get("moduleJSON", {})
-            content = module_json.get("content", {})
-            items = content.get("items", [])
-            for item in items:
-                # 统一处理 item 和 hotZone
-                for link_obj in [item.get("link", {})] + [hz.get("link", {}) for hz in item.get("hotZoneList", [])]:
-                    mini_url = link_obj.get("miniUrl", "")
-                    if mini_url and "?" in mini_url:
-                        url = mini_url.split('?', 1)[1]
-                        params = url.split("&")
-                        activity_param = {}
-                        for param in params:
-                            if "=" in param:
-                                key, value = param.split("=", 1)
-                                activity_param[key] = value
-                        # activity_name 兼容 item 和 hotZone
-                        activity_param['activity_name'] = link_obj.get('linkName', '')
-                        activity_params.append(activity_param)
-        # 去重
-        seen_actid = set()
-        result = []
-        for param in activity_params:
-            actid = param.get("actId")
-            if actid:
-                if actid in seen_actid:
-                    continue
-                seen_actid.add(actid)
-            result.append(param)
-        return result
-        
-        
-    def get_lottery_num(self, session, productInstanceId, actId):
-        """
-        查询抽奖次数
-        :param session: session
-        :param productInstanceId: 实例id
-        :param actId: 活动id
-        :return: 抽奖次数
-        """
-        try:
-            url = f"https://{self.host}/api3/orchestration/mobile/prize/getRemainingAssets"
-            payload = {"appid":"wx532ecb3bdaaf92f9","basicInfo":{"vid":6013753979957,"vidType":2,"bosId":4020112618957,"productId":226,"productInstanceId":productInstanceId,"productVersionId":"12008","merchantId":2000020692957,"tcode":"weimob","cid":176205957},"extendInfo":{"wxTemplateId":7526,"childTemplateIds":[{"customId":90004,"version":"crm@0.1.11"},{"customId":90002,"version":"ec@42.3"},{"customId":90006,"version":"hudong@0.0.201"},{"customId":90008,"version":"cms@0.0.419"}],"analysis":[],"quickdeliver":{"enable":"false"},"bosTemplateId":1000001420,"youshu":{"enable":"false"},"source":1,"channelsource":5,"refer":"hd-lego-index","mpScene":1089},"queryParameter":{"tracePromotionId":"100039234","tracepromotionid":"100039234"},"i18n":{"language":"zh","timezone":"8"},"pid":"4020112618957","storeId":"0","_transformBasicInfo":"true","_requrl":"/orchestration/mobile/prize/getRemainingAssets","templateId":748,"templateKey":"twistEgg","activityId":actId,"bussinessType":1,"channel":1,"channelType":1,"source":1,"_version":"2.5.4","activityIdentity":"20","assetTypes":["chance"],"openId":"oBk224m4im1J9PnLUe8AMagujqgM","wid":11068728376,"appId":"wx532ecb3bdaaf92f9","playSourceCode":"lcode","tracePromotionId":"100039234","tracepromotionid":"100039234","vid":6013753979957,"vidType":2,"bosId":4020112618957,"productId":226,"productInstanceId":productInstanceId,"productVersionId":"12008","merchantId":2000020692957,"tcode":"weimob","cid":176205957,"vidTypes":[2],"openid":"oBk224m4im1J9PnLUe8AMagujqgM"}
-            response = session.post(url, json=payload)
-            response_json = response.json()
-            if int(response_json['errcode']) == 0:
-                return response_json['data']['assets']['chance']['assetNum']
-            else:
-                self.log(f"[查询抽奖次数] {response_json['errmsg']}", level="warning")
-                return False
-        except Exception as e:
-            self.log(f"[查询抽奖次数] 发生错误: {str(e)}\n{traceback.format_exc()}", level="error")
-            return False
-        
-    def lottery(self, session, productInstanceId, actId):
-        """
-        抽奖
-        :param session: session
-        :param productInstanceId: 实例id
-        :param actId: 活动id
-        :return: 抽奖结果
-        """
-        try:
-            url = f"https://{self.host}/api3/orchestration/mobile/activity/draw/play"
-            payload = {"appid":"wx532ecb3bdaaf92f9","basicInfo":{"vid":6013753979957,"vidType":2,"bosId":4020112618957,"productId":226,"productInstanceId":productInstanceId,"productVersionId":"12008","merchantId":2000020692957,"tcode":"weimob","cid":176205957},"extendInfo":{"wxTemplateId":7526,"childTemplateIds":[{"customId":90004,"version":"crm@0.1.11"},{"customId":90002,"version":"ec@42.3"},{"customId":90006,"version":"hudong@0.0.201"},{"customId":90008,"version":"cms@0.0.419"}],"analysis":[],"quickdeliver":{"enable":"false"},"bosTemplateId":1000001420,"youshu":{"enable":"false"},"source":1,"channelsource":5,"refer":"hd-lego-index","mpScene":1089},"queryParameter":{"tracePromotionId":"100039234","tracepromotionid":"100039234"},"i18n":{"language":"zh","timezone":"8"},"pid":"4020112618957","storeId":"0","_transformBasicInfo":"true","_requrl":"/orchestration/mobile/prize/getRemainingAssets","templateId":748,"templateKey":"twistEgg","activityId":actId,"bussinessType":1,"channel":1,"channelType":1,"source":1,"_version":"2.5.4","activityIdentity":"20","assetTypes":["chance"],"openId":"oBk224m4im1J9PnLUe8AMagujqgM","wid":11068728376,"appId":"wx532ecb3bdaaf92f9","playSourceCode":"lcode","tracePromotionId":"100039234","tracepromotionid":"100039234","vid":6013753979957,"vidType":2,"bosId":4020112618957,"productId":226,"productInstanceId":productInstanceId,"productVersionId":"12008","merchantId":2000020692957,"tcode":"weimob","cid":176205957,"vidTypes":[2],"openid":"oBk224m4im1J9PnLUe8AMagujqgM"}
-            response = session.post(url, json=payload)
-            response_json = response.json()
-            if int(response_json['errcode']) == 0:
-                prize_name = response_json['data']['prizes'][0]['name']
-                if prize_name:
-                    self.log(f"[抽奖] 获得:{prize_name}")
-                else:
-                    self.log(f"[抽奖] 未中奖")
-                return True
-            elif int(response_json['errcode']) == 101100003:
-                return False
-            else:
-                self.log(f"[抽奖] {response_json['errmsg']}", level="warning")
-                return False
-        except Exception as e:
-            self.log(f"[抽奖] 发生错误: {str(e)}\n{traceback.format_exc()}", level="error")
-            return False
-        
-    def get_points(self, session):
-        """
-        查询积分
-        :param session: session
-        :return: 积分
-        """
-        try:
-            url = f"https://{self.host}/api3/onecrm/point/myPoint/getSimpleAccountInfo"
-            payload = {"appid":"wx532ecb3bdaaf92f9","basicInfo":{"vid":6013753979957,"vidType":2,"bosId":4020112618957,"productId":1,"productInstanceId":3171023957,"productVersionId":"30044","merchantId":2000020692957,"tcode":"weimob","cid":176205957},"extendInfo":{"wxTemplateId":7916,"analysis":[],"bosTemplateId":1000001984,"childTemplateIds":[{"customId":90004,"version":"crm@0.1.63"},{"customId":90002,"version":"ec@68.1"},{"customId":90006,"version":"hudong@0.0.229"},{"customId":90008,"version":"cms@0.0.504"}],"quickdeliver":{"enable":"false"},"youshu":{"enable":"false"},"source":1,"channelsource":5,"refer":"cms-usercenter","mpScene":1145},"queryParameter":"null","i18n":{"language":"zh","timezone":"8"},"pid":"4020112618957","storeId":"0","targetBasicInfo":{"productInstanceId":3168798957},"request":{}}
-            response = session.post(url, json=payload)
-            response_json = response.json()
-            if int(response_json['errcode']) == 0:
-                self.log(f"[积分] {response_json['data']['availablePoint']}")
-                return response_json['data']['availablePoint']
-            else:
-                self.log(f"[积分] {response_json['errmsg']}", level="warning")
-                return False
-        except Exception as e:
-            self.log(f"[积分] 发生错误: {str(e)}\n{traceback.format_exc()}", level="error")
-            return False
-
-    def run(self):
-        """
-        运行任务
-        """
-        try:
-            self.log(f"【{self.script_name}】开始执行任务")
-            
-            # 检查环境变量
-            for index, wx_id in enumerate(self.check_env(), 1):
-                self.log("")
-                self.log(f"------ 【账号{index}】开始执行任务 ------")
-
-                if MULTI_ACCOUNT_PROXY:
-                    proxy = self.get_proxy()
-                    if proxy:
-                        session = requests.Session()
-                        session.proxies.update({"http": f"http://{proxy}", "https": f"http://{proxy}"})
-                        # 检查代理，不可用重新获取
-                        while not self.check_proxy(proxy, session):
-                            proxy = self.get_proxy()
-                            session.proxies.update({"http": f"http://{proxy}", "https": f"http://{proxy}"})
+            resp = self.wpost('/fe/mapi/user/getUserPhoneGrant', {"code": phone_code}, return_full=True)
+            phone = None
+            if isinstance(resp, dict):
+                d = resp.get('data', resp)
+                if d.get('phone'):
+                    phone = d['phone']
+                elif d.get('encryptedData') and d.get('iv'):
+                    if PRIVATE_KEY:
+                        try:
+                            phone = decrypt_phone(d['encryptedData'], d['iv'], PRIVATE_KEY)
+                        except Exception as e:
+                            self.log(f"  ❌ 解密手机号失败: {e}")
                     else:
-                        session = requests.Session()
-                else:
-                    session = requests.Session()
-                    
-                session.headers["User-Agent"] = self.user_agent
-
-                # 执行微信授权
-                code = self.get_wx_code(wx_id)
-                if code:
-                    if self.wxlogin(session, code):
-                        if not self.get_sign_info(session):
-                            # 签到
-                            self.sign_in(session)
-                            time.sleep(random.randint(1, 3))
-                        else:
-                            self.log(f"[签到] 今日已签到", level="warning")
-                        # 抽奖活动
-                        activity_info = self.get_activity_info(session)
-                        activity_params = self.check_activity(activity_info)
-                        for activity_param in activity_params:
-                            if "tmpKey" in activity_param:
-                                self.log(f"[活动] {activity_param['activity_name']}")
-                                lottery_num = self.get_lottery_num(session, activity_param['productInstanceId'], activity_param['actId'])
-                                for i in range(lottery_num):
-                                    time.sleep(random.randint(3, 5))
-                                    self.lottery(session, activity_param['productInstanceId'], activity_param['actId'])
-                            elif "pageid" in activity_param:
-                                # 二次查询，防止页面内有抽奖活动
-                                activity_info = self.get_activity_info(session, activity_param['pageid'])
-                                activity_params = self.check_activity(activity_info)
-                                for activity_param in activity_params:
-                                    if "tmpKey" in activity_param:
-                                        lottery_num = self.get_lottery_num(session, activity_param['productInstanceId'], activity_param['actId'])
-                                        for i in range(lottery_num):
-                                            if not self.lottery(session, activity_param['productInstanceId'], activity_param['actId']):
-                                                break
-                        # 查询积分
-                        self.get_points(session)
-                self.log(f"------ 【账号{index}】执行任务完成 ------")
+                        self.log("  ⚠️ getUserPhoneGrant 返回加密手机号，但未配置 PRIVATE_KEY，无法解密（请填入小程序 RSA 私钥）")
+            if not phone:
+                self.log("  ❌ 未能解析手机号")
+                return False
+            add_resp = self.wpost('user/addV2',
+                                  {"phoneNumber": phone, "source": "MINI_PROGRAM", "registerSource": "MINI_PROGRAM"},
+                                  return_full=True)
+            self.log(f"  ✅ 会员激活请求已发送: {json.dumps(add_resp, ensure_ascii=False)[:200]}")
+            return True
         except Exception as e:
-            self.log(f"【{self.script_name}】执行过程中发生错误: {str(e)}\n{traceback.format_exc()}", level="error")
-        finally:
-            if NOTIFY:
-                # 如果notify模块不存在，从远程下载至本地
-                if not os.path.exists("notify.py"):
-                    url = "https://raw.githubusercontent.com/whyour/qinglong/refs/heads/develop/sample/notify.py"
-                    response = requests.get(url)
-                    with open("notify.py", "w", encoding="utf-8") as f:
-                        f.write(response.text)
-                    import notify
+            self.log(f"  ❌ 会员激活异常: {e}")
+            return False
+
+    # ---------- 积分签到 ----------
+    def get_sign_info(self):
+        r = self.wpost('/fe/mapi/credits/sign/getSignInfo', {})
+        if r and r.get('code') in ('200', 200):
+            return r.get('data') or {}
+        return None
+
+    def sign_in(self):
+        return self.wpost('/fe/mapi/credits/signIn', {"taskId": "signIn"})
+
+    @staticmethod
+    def _ok(r):
+        return bool(r) and r.get('code') in ('200', 200, 0, '0')
+
+    def do_sign_in(self):
+        info = self.get_sign_info()
+        if info and info.get('isSigned'):
+            self.log("✅ 今日已签到")
+            return
+        r = self.sign_in()
+        if self._ok(r):
+            self.log("✅ 签到成功")
+            return
+        # 失败：非会员则尝试激活后重新登录再签到
+        if not self.is_member():
+            self.log("⚠️ 签到失败且非会员，尝试会员激活")
+            if self.activate_member():
+                self.ensure_login()
+                r2 = self.sign_in()
+                if self._ok(r2):
+                    self.log("✅ 激活并签到成功")
+                    return
+                self.log("⚠️ 激活后签到仍失败")
+        else:
+            self.log("⚠️ 签到失败: %s" % (json.dumps(r, ensure_ascii=False)[:200] if r else '无响应'))
+
+    # ---------- 抽奖（保留原逻辑） ----------
+    def lottery(self):
+        try:
+            list_data = self.wpost('/fe/mapi/operate/list', {"taskName": "签到抽奖"})
+            if not list_data or list_data.get('code') != '200':
+                self.log("⚠️ 获取抽奖活动失败")
+                return
+            data = list_data.get('data', [])
+            if not data:
+                self.log("⚠️ 未找到抽奖活动")
+                return
+            activityId = data[0].get('activityId')
+            if not activityId:
+                self.log("⚠️ 未获取到 activityId")
+                return
+            self.log(f"🎁 开始抽奖 (activityId={activityId})")
+            for i in range(20):
+                do_data = self.wpost('/fe/mapi/operate/create', {
+                    "api方法": json.dumps({"method": "get", "url": "/campaign/ability/lottery/doLottery",
+                                            "data": {"activityId": activityId}}, ensure_ascii=False),
+                    "taskName": "签到抽奖"
+                })
+                if do_data and do_data.get('code') == '200':
+                    res = (do_data.get('data') or {}).get('result') or {}
+                    self.log(f"  🎉 第{i + 1}次抽奖: {res.get('title') or res.get('name') or '成功'}")
                 else:
-                    import notify
-                # 任务结束后推送日志
-                title = f"{self.script_name} 运行日志"
-                header = "作者：临渊\n\n"
-                content = header + "\n" +"\n".join(self.log_msgs)
-                notify.send(title, content)
+                    self.log(f"  ⏹ 第{i + 1}次抽奖结束: {do_data.get('message') if do_data else '无响应'}")
+                    break
+                time.sleep(1.5)
+        except Exception as e:
+            self.log(f"⚠️ 抽奖异常: {e}")
+
+    # ---------- 茄皇农场 ----------
+    def farm_common_plain(self, extra):
+        return {
+            'wmPid': '0',
+            'wmTenantId': WM_TENANT_ID,
+            'wmTemplateId': WM_TEMPLATE_ID,
+            't': now_ms(),
+            'wid': self.wid,
+            **extra,
+        }
+
+    def farm_post(self, path, plain):
+        enc = encrypt_farm_data(json.dumps(plain, ensure_ascii=False, separators=(',', ':')))
+        use_farm = not path.startswith('/common/user/login')
+        return self.wpost(path, enc, use_farm=use_farm, return_full=True)
+
+    def ensure_farm_login(self):
+        plain = {'openId': self.openid, 'businessCode': ''}
+        r = self.farm_post('/common/user/login', plain)
+        if self._ok(r):
+            self.log("🌱 农场登录成功")
+        else:
+            self.log(f"⚠️ 农场登录响应异常: {json.dumps(r, ensure_ascii=False)[:150]}")
+
+    def farm_home(self):
+        r = self.farm_post('/spa/member/queryHomeInfo', self.farm_common_plain({}))
+        if self._ok(r):
+            return r.get('data') or {}
+        self.log(f"⚠️ 农场首页获取失败: {json.dumps(r, ensure_ascii=False)[:150]}")
+        return {}
+
+    def farm_handle_tasks(self):
+        r = self.farm_post('/spa/task/list', self.farm_common_plain({}))
+        tasks = ((r.get('data') or {}).get('taskInfo') or []) if self._ok(r) else []
+        for t in tasks:
+            if t.get('status') == 2:  # 可领取
+                tid_ = t.get('taskId')
+                if not tid_:
+                    continue
+                rr = self.farm_post('/spa/task/getAward', self.farm_common_plain({'taskId': tid_}))
+                self.log(f"  🎯 领取任务奖励 {tid_}: {rr.get('message') if rr else '无响应'}")
+                time.sleep(1)
+
+    def farm_handle_friends(self):
+        r = self.farm_post('/spa/friend/list', self.farm_common_plain({}))
+        friends = ((r.get('data') or {}).get('friendList') or []) if self._ok(r) else []
+        for f in friends:
+            fid = f.get('userId') or f.get('friendId')
+            if not fid:
+                continue
+            rr = self.farm_post('/spa/friend/steal', self.farm_common_plain({'friendId': fid}))
+            self.log(f"  🤝 偷取好友 {fid} 能量: {rr.get('message') if rr else '无响应'}")
+            time.sleep(1)
+
+    def farm_handle_use(self):
+        home = self.farm_home()
+        energy = home.get('energy', 0) if isinstance(home, dict) else 0
+        try:
+            energy = int(energy or 0)
+        except Exception:
+            energy = 0
+        if energy >= 50:
+            rr = self.farm_post('/spa/member/useEnergy', self.farm_common_plain({'useNum': 50}))
+            self.log(f"  💡 消耗能量 50（当前 {energy}）: {rr.get('message') if rr else '无响应'}")
+        else:
+            self.log(f"  💡 能量不足（当前 {energy}），暂不消耗")
+
+    def farm_all(self):
+        try:
+            self.ensure_farm_login()
+            self.farm_handle_tasks()
+            self.farm_handle_friends()
+            self.farm_handle_use()
+            self.log("🌱 茄皇农场执行完成")
+        except Exception as e:
+            self.log(f"⚠️ 茄皇农场执行异常: {e}")
+
+    # ---------- 单账号主流程 ----------
+    def run(self, wx_id):
+        self.wx_id = wx_id
+        self.client_id = str(uuid.uuid4())
+        self.token = ''
+        self.wid = ''
+        self.openid = ''
+        self.is_member_flag = None
+        mask = wx_id[-6:] if wx_id else "未知"
+        log(f"👤 账号: ****{mask}")
+        try:
+            self.ensure_login()
+            self.do_sign_in()
+            self.lottery()
+            self.farm_all()
+        except Exception as e:
+            log(f"❌ 账号执行异常: {e}")
+
+
+# ============================================================
+#  入口
+# ============================================================
+def main():
+    soy_wxid_data = os.environ.get("WX_ID", "")
+    if not soy_wxid_data:
+        log("❌ 未配置 WX_ID 环境变量")
+        return
+    accounts = [a.strip() for a in re.split(r'[\n&]', soy_wxid_data) if a.strip()]
+    if not accounts:
+        log("❌ WX_ID 为空或解析失败")
+        return
+
+    log(f"🔔 统一梦时代, 开始! 共 {len(accounts)} 个账号")
+    log("─" * 50)
+    for i, wx_id in enumerate(accounts, 1):
+        log(f"──────────── 账号[{i}/{len(accounts)}] ────────────")
+        try:
+            task = AutoTask()
+            task.run(wx_id)
+        except Exception as e:
+            log(f"❌ 账号[{i}] 异常: {e}")
+        if i < len(accounts):
+            time.sleep(random.randint(3, 6))
+    log("═" * 50)
+    log("🏁 全部账号执行完毕")
 
 
 if __name__ == "__main__":
-    auto_task = AutoTask("统一梦时代")
-    auto_task.run() 
+    main()
