@@ -3,7 +3,7 @@
 @Author: sm
 @Date: 2026.06.01
 @Description: sinsin微信小程序签到
-cron: 47 9,18 * * *
+cron: 31 8,17 * * *
 变量名：sinsin
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
   wxid#备注  多个换行

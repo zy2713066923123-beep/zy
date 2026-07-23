@@ -3,7 +3,7 @@
 @Author: sm
 @Date: 2026.06.01
 @Description:  植白说小程序
-cron: 9 9,16 * * *
+cron: 26 8,14 * * *
 #Notice:
 变量名称：zbs
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行

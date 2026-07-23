@@ -1,5 +1,5 @@
 # name: DT生活
-# cron: 5 10,21 * * *
+# cron: 10 9,15 * * *
 import os
 import random
 import time

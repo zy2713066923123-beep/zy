@@ -4,7 +4,7 @@
 #需要配置WECHAT_SERVER、WX_ID，用于获取wx.login code
 #账号变量名:BREO
 #new Env("BREO")
-#cron 2 12,13 * * *
+#cron 2 11,14 * * *
 import requests
 import json
 import os

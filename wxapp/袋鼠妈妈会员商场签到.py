@@ -1,5 +1,5 @@
 # name: 袋鼠妈妈会员商场签到
-# cron: 47 9,13 * * *
+# cron: 56 8,14 * * *
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """

@@ -3,7 +3,7 @@
 @Author: sm
 @Date: 2026.06.01
 @Description:  千金健康生活微信小程序签到
-cron: 34 12,22 * * *
+cron: 40 9,15 * * *
 #Notice:
 变量名 qianjinjiankang
 变量值：wx_server 里的 openid/账号标识，多账户&或换行

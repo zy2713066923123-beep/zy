@@ -3,7 +3,7 @@
 @Author: sm
 @Date: 2026.05.31
 @Description: CASETiFY 签到
-cron: 57 11,13 * * *
+cron: 11 9,17 * * *
 变量名：casetify
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
 ------------------------------------------

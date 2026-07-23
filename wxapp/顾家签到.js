@@ -3,7 +3,7 @@
 @Author: sm
 @Date: 2026.05.31
 @Description: 顾家小程序签到
-cron: 15 11,18 * * *
+cron: 24 10,14 * * *
 变量名：gujiajiaju
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
 ------------------------------------------

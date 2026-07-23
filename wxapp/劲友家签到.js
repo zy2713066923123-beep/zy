@@ -3,7 +3,7 @@
 @Author: sm
 @Date: 2026.05.31
 @Description: 劲友家小程序签到
-cron: 4 12,20 * * *
+cron: 23 8,17 * * *
 变量名：jingyoujia
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
 ------------------------------------------

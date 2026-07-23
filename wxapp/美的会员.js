@@ -1,4 +1,4 @@
-/** cron: 24 11,23 * * *
+/** cron: 25 8,16 * * *
  * Show:每天运行一次
  * @author:https://github.com/smallfawn/QLScriptPublic
  * 变量名:wx_midea

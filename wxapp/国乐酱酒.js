@@ -4,7 +4,7 @@
 @Author: sm
 @Date: 2026.06.01
 @Description:  国乐酱酒小程序
-cron: 17 12,17 * * *
+cron: 4 9,17 * * *
 #Notice:
 变量名: gyjj
 变量值：wx_server 里的 openid/账号标识，多账号&或换行

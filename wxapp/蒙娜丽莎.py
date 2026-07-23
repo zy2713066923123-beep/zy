@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# cron: 24 11,23 * * *
+# cron: 30 9,16 * * *
 # @Time     : 2025-12-25
 # @Author   : 凉白开（修订版本）
 # @Version  ：5.0

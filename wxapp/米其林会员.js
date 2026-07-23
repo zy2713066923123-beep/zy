@@ -3,7 +3,7 @@
 @Author: sm (Modified by AI)
 @Date: 2024.06.07 19:15
 @Description:  
-cron: 0 10,21 * * *
+cron: 25 11,17 * * *
 #Notice:   
 米其林会员 每日任务
 变量名称：miqilin

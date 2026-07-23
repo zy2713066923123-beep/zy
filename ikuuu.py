@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding：utf-8 -*-
 """
-cron: 30 8 * * *
+cron: 33 10,16 * * *
 @脚本名称：ikuuu爱坤机场签到脚本（自动过验证版）
 @创建时间：2025-03-12
 @脚本作者：3iXi（https://github.com/3ixi）

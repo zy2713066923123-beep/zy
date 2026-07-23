@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 壹票达小程序 - 青龙每日签到
-cron: 56 11,14 * * *
+cron: 18 9,17 * * *
 环境变量（
   WX_ID / ypd_wxid / YPD_WXID
       格式：wxid#备注，多账号换行或 @

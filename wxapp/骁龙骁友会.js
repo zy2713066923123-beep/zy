@@ -3,7 +3,7 @@
  * 变量: WX_ID (wxid#备注 多号@或换行)
  * 变量: WECHAT_SERVER (协议服务地址)
  * 可选: WX_APPID (默认 wx026c06df6adc5d06)
- * cron: 22 10,17 * * *
+ * cron: 25 11,13 * * *
  */
 
 const ckName = "WX_ID";

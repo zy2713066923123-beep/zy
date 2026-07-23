@@ -3,7 +3,7 @@
 @Author: sm
 @Date: 2026.06.01
 @Description: fsdlb 微信小程序逢三得利吧 签到积分
-cron: 58 11,16 * * *
+cron: 20 10,14 * * *
 变量名：fsdlb
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
   wxid#备注  多个换行

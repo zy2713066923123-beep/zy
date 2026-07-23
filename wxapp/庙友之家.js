@@ -1,4 +1,4 @@
-/** cron: 9 9,14 * * *
+/** cron: 28 9,14 * * *
  * Show:微信公众号 庙友之家 每日签到 积分可换首饰
  * 变量名:miaoyouHome
  * 变量值:http://www.jumpingcarp.cn/scrm-rz-wechat-tzlm 公众号 左下角 每日签到 链接里面的headers 中的 COOKIE

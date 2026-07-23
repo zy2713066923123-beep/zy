@@ -3,7 +3,7 @@
 @Author: sm
 @Date: 2026.05.31
 @Description: 烈儿宝贝小程序签到
-cron: 6 9,16 * * *
+cron: 35 9,16 * * *
 变量名：lieer
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
 也支持直接填 token，格式：token=<access_token 或 bearer...>

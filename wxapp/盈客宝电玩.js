@@ -3,7 +3,7 @@
 @Author: sm
 @Date: 2026.05.31
 @Description: 盈客宝电玩小程序签到
-cron: 55 9,14 * * *
+cron: 13 11,15 * * *
 变量名：ykb
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
 

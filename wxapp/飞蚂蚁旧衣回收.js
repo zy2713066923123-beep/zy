@@ -1,5 +1,5 @@
 // name: 飞蚂蚁旧衣回收
-// cron: 41 9,22 * * *
+// cron: 2 10,13 * * *
 class Env {
     constructor(name) {
         this.name = name;

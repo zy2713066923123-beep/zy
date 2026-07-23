@@ -3,7 +3,7 @@
 @Author: sm
 @Date: 2026.06.01
 @Description: 梦想家TSE微信小程序签到
-cron: 46 11,19 * * *
+cron: 25 11,13 * * *
 变量名：mengxiangjia
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
   wxid#备注  多个换行

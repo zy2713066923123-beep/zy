@@ -1,5 +1,5 @@
 // name: 唯品会
-// cron: 30 10,22 * * *
+// cron: 8 11,16 * * *
 
 const axios = require("axios");
 const crypto = require("crypto");

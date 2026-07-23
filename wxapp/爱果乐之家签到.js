@@ -3,7 +3,7 @@
 @Author: sm
 @Date: 2026.06.01
 @Description: 爱果乐之家微信小程序签到
-cron: 9 9,20 * * *
+cron: 13 11,15 * * *
 变量名：aiguoyue
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
   wxid#备注  多个换行

@@ -3,7 +3,7 @@
 @Author: sm
 @Date: 2024.06.07 19:15
 @Description:  
-cron: 2 12,15 * * *
+cron: 38 11,13 * * *
 #Notice:   
 stokke 微信小程序 每周签到得积分 
 变量名称：stokke

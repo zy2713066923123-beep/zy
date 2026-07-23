@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# cron:1 10,15,20 * * *
+# cron:52 8,16 * * *
 """
 脚本名称：雀巢会员俱乐部
 说明：

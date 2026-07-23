@@ -10,7 +10,7 @@
  * @date 2024/08/19
  *
  * const $ = new Env('开天工作室')
- * cron: 33 9 * * *
+ * cron: 3 8,17 * * *
  */
 const initScript = require('../utils/initScript')
 const {$, notify, sudojia, checkUpdate} = initScript('开天工作室');

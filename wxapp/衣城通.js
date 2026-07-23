@@ -1,5 +1,5 @@
 // name: 衣城通
-// cron: 36 9,21 * * *
+// cron: 46 11,16 * * *
 
 class Env {
     constructor(name) {

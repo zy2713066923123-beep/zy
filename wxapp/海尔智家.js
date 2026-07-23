@@ -3,7 +3,7 @@
 @Author: sm
 @Date: 2024.06.07 19:15
 @Description:  海尔智家
-cron: 0 9,17 * * *
+cron: 2 8,15 * * *
 #Notice:   
 变量名hezj
 变量值填写 wx_server 里的 openid/账号标识，多账户&或换行

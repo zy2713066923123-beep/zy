@@ -1,4 +1,4 @@
-// cron: 58 12,15 * * *小程序链接：mp://PT0ugxBJEKQCgYi(#小程序://星韵优选/PT0ugxBJEKQCgYi) 每天0.1
+// cron: 15 8,13 * * *小程序链接：mp://PT0ugxBJEKQCgYi(#小程序://星韵优选/PT0ugxBJEKQCgYi) 每天0.1
 //一定要走我的这里的小程序 之前的也重进一遍 这样那种签到的视频会多
 // 环境变量配置（环境变量名xyyy（格式：16ea02cb998bc4f9246816ea02*****）
 //抓headers里的3rdsession的值

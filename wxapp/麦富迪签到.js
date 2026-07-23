@@ -3,7 +3,7 @@
 @Author: sm
 @Date: 2026.05.31
 @Description: 麦富迪会员小程序签到
-cron: 41 11,23 * * *
+cron: 33 8,13 * * *
 变量名：mfd
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
 

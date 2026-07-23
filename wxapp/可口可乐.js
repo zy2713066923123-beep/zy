@@ -3,7 +3,7 @@
 @Author: sm
 @Date: 2024.06.07 19:15
 @Description:  
-cron: 32 10,15 * * *
+cron: 0 8,14 * * *
 #Notice:   
 可口可乐 微信小程序 签到得积分 
 变量名称：kekoukele

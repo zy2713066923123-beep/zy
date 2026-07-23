@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * 创维小程序
- * cron: 19 12,14 * * *
+ * cron: 39 9,16 * * *
  *
  * 流程：
  * wxid -> WECHAT_SERVER取code -> /v2/user/exchange -> ticket -> /v2/user/signin -> Authorization

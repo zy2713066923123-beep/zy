@@ -4,7 +4,7 @@
 @Author: sm
 @Date: 2026.05.31
 @Description: parkson 呼啦圈小程序签到
-cron: 28 12,13 * * *
+cron: 8 8,17 * * *
 变量名：parkson
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
 ------------------------------------------

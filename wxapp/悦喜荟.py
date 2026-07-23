@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# cron: 12 9,17 * * *
+# cron: 46 9,15 * * *
 """
 中粮悦喜荟小程序签到脚本（青龙）
 

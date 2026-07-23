@@ -3,7 +3,7 @@
 @Author: sm
 @Date: 2026.06.01
 @Description: 蜜蜂惊喜社微信小程序签到
-cron: 47 10,20 * * *
+cron: 19 8,15 * * *
 变量名：mifengjingxishe
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
   wxid#备注  多个换行

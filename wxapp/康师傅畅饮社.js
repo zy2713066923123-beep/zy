@@ -3,7 +3,7 @@
 @Author: sm
 @Date: 2026.06.01
 @Description:  康师傅畅饮社
-cron: 19 10,17 * * *
+cron: 50 10,16 * * *
 #Notice:
 康师傅畅饮社小程序
 变量名 ksfcys

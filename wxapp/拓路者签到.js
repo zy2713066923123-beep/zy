@@ -3,7 +3,7 @@
 @Author: sm
 @Date: 2026.05.31
 @Description: tuoluzhe 拓路者小程序签到
-cron: 6 9,16 * * *
+cron: 0 10,15 * * *
 变量名：tuoluzhe
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
 ------------------------------------------

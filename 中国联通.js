@@ -13,7 +13,7 @@
    export chinaUnicomCookie="18600000000#123456"
    (多账号用 & 或 换行 隔开)
 
-cron: 37 10,20 * * *
+cron: 10 11,13 * * *
 const $ = new Env("中国联通");
 From：yaohuo28507 (Integration by AI)
 */

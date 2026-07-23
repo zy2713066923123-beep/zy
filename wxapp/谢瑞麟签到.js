@@ -3,7 +3,7 @@
 @Author: sm
 @Date: 2024.06.07 19:15
 @Description:  
-cron: 12 11,19 * * *
+cron: 6 9,14 * * *
 #Notice:   
 谢瑞麟 微信小程序 签到得积分 
 变量名称：tslj

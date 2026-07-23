@@ -3,7 +3,7 @@
 @Author: sm
 @Date: 2026.06.01
 @Description: 绿鼻子微信小程序签到
-cron: 42 9,17 * * *
+cron: 32 9,17 * * *
 变量名：lvbizi
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
   wxid#备注  多个换行

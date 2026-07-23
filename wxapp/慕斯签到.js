@@ -3,7 +3,7 @@
 @Author: sm
 @Date: 2024.06.07 19:15
 @Description:  
-cron: 17 12,14 * * *
+cron: 49 10,16 * * *
 #Notice:   
 慕斯小程序签到 
 变量名称：musi

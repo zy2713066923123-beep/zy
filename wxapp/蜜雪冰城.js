@@ -3,7 +3,7 @@
 @Author: sm
 @Date: 2024.06.07 19:15
 @Description:  蜜雪冰城APP/小程序
-cron: 50 11,15 * * *
+cron: 22 10,14 * * *
 #Notice:   
 变量名：mxbc
 变量值：wx_server 里的 openid/账号标识，多账号&或换行

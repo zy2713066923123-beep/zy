@@ -3,7 +3,7 @@
 @Author: sm
 @Date: 2024.06.07 19:15
 @Description:  
-cron: 26 9,13 * * *
+cron: 2 11,17 * * *
 #Notice:   
 谷雨 微信小程序 签到得积分 
 变量名称：WX_ID 微信账号，格式：wxid#备注，多账号用换行 / & 分隔

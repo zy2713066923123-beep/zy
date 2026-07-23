@@ -3,7 +3,7 @@
 @Author: sm
 @Date: 2026.06.01
 @Description: 橘子樱桃微信小程序签到
-cron: 58 10,14 * * *
+cron: 35 8,17 * * *
 变量名：juziyingtao
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
   wxid#备注  多个换行

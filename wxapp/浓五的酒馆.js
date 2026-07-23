@@ -3,7 +3,7 @@
 @Author: sm
 @Date: 2024.06.07 19:15
 @Description:  
-cron: 14 11,15 * * *
+cron: 17 8,13 * * *
 #Notice:   
 浓五的酒馆 微信小程序 签到得积分 
 变量名称：nwdjg

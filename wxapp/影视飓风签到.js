@@ -3,7 +3,7 @@
 @Author: sm
 @Date: 2026.05.31
 @Description: 影视飓风小程序签到
-cron: 11 10,17 * * *
+cron: 12 11,15 * * *
 变量名：yingshijufeng
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
 ------------------------------------------

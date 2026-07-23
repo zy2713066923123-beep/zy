@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# cron: 39 10,16 * * *
+# cron: 1 11,16 * * *
 """
 薇诺娜专柜商城
 

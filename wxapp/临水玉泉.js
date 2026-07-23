@@ -1,7 +1,7 @@
 /**
 微信协议-临水玉泉（getCode.js 统一版）
 变量：WX_ID  wxid#备注 多号换行
-cron: 6 9,16 * * *
+cron: 10 10,13 * * *
   WX_ID 由共享 getCode.js 读取并智能路由 牛子/应用宝
   WECHAT_SERVER / YYB_SERVER / SERVER_TYPE 在 getCode.js 中配置
  */
