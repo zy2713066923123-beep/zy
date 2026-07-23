@@ -1,29 +1,3 @@
-// cron: 48 11,18 * * * cron: 28 10,22 * * *
-
-const { getSingleCode } = require('./getCode.js');
-class WeChatServer {
-    constructor(config) { this.config = config; }
-    async getCode(wxid) {
-        try {
-            const actualWxid = String(wxid).split('#')[0].trim();
-            const code = await getSingleCode(this.config.appid, actualWxid);
-            return { data: { status: true, code, data: { code } } };
-        } catch (e) {
-            return { data: {} };
-        }
-    }
-}
-
-class Env {
-    constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; this.logs = []; const originalLog = console.log; console.log = (...args) => { this.logs.push(args.join(" ")); originalLog.apply(console, args); }; }
-    log(...args) { console.log(...args); this.logs.push(args.join(" ")); }
-    checkEnv(ckName) {
-        const val = process.env.WX_ID || process.env[ckName];
-        if (val) this.userList = val.split(/[\n&]+/).map(v => String(v).split('#')[0].trim()).filter(Boolean);
-        else console.log('未找到环境变量 WX_ID');
-    }
-    async done() { try { const notify = require('./sendNotify'); await notify.sendNotify(this.name, this.logs.join('\n')); } catch(e) { console.log('通知发送失败', e); } }
-}
 /*
 ------------------------------------------
 @Author: sm
@@ -54,6 +28,30 @@ WX_ID 格式：
   wxid#备注  多个换行
 */
 
+const { getSingleCode } = require('./getCode.js');
+class WeChatServer {
+    constructor(config) { this.config = config; }
+    async getCode(wxid) {
+        try {
+            const actualWxid = String(wxid).split('#')[0].trim();
+            const code = await getSingleCode(this.config.appid, actualWxid);
+            return { data: { status: true, code, data: { code } } };
+        } catch (e) {
+            return { data: {} };
+        }
+    }
+}
+
+class Env {
+    constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; this.logs = []; const originalLog = console.log; console.log = (...args) => { this.logs.push(args.join(" ")); originalLog.apply(console, args); }; }
+    log(...args) { console.log(...args); this.logs.push(args.join(" ")); }
+    checkEnv(ckName) {
+        const val = process.env.WX_ID || process.env[ckName];
+        if (val) this.userList = val.split(/[\n&]+/).map(v => String(v).split('#')[0].trim()).filter(Boolean);
+        else console.log('未找到环境变量 WX_ID');
+    }
+    async done() { try { const notify = require('./sendNotify'); await notify.sendNotify(this.name, this.logs.join('\n')); } catch(e) { console.log('通知发送失败', e); } }
+}
 
 const $ = new Env("康师傅畅饮社");
 const axios = require("axios");

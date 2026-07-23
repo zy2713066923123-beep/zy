@@ -1,4 +1,3 @@
-# cron: 45 11,18 * * *
 # cron: 45 12,14 * * *
 #!/usr/bin/env python3
 """
@@ -9,8 +8,6 @@
   WX_ID          账号配置，格式：wxid#备注，多账号换行 / & 分隔
   WECHAT_SERVER  微信协议服务地址，默认 http://127.0.0.1:8011
   NISSAN_SKIP_COMMUNITY =1 跳过社区任务，只做签到+查询
-
-cron: 8 12,17 * * *
 """
 
 import base64

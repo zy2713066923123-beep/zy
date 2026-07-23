@@ -1,4 +1,20 @@
-// cron: 56 12,23 * * * cron: 26 9,14 * * *
+/*
+------------------------------------------
+@Author: sm
+@Date: 2026.05.31
+@Description: 花生帮粉丝俱乐部签到任务
+cron: 28 11,23 * * *
+变量名：wb
+变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
+------------------------------------------
+
+变量：
+  WECHAT_SERVER  微信协议服务地址，默认 http://192.168.6.222:8011
+  WX_ID         微信账号，多账号支持换行、& 分隔，必须配置
+
+WX_ID 格式：
+  wxid#备注  多个换行
+*/
 
 const { getSingleCode } = require('./getCode.js');
 class WeChatServer {
@@ -24,24 +40,6 @@ class Env {
     }
     async done() { try { const notify = require('./sendNotify'); await notify.sendNotify(this.name, this.logs.join('\n')); } catch(e) { console.log('通知发送失败', e); } }
 }
-/*
-------------------------------------------
-@Author: sm
-@Date: 2026.05.31
-@Description: 花生帮粉丝俱乐部签到任务
-cron: 28 11,23 * * *
-变量名：wb
-变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
-------------------------------------------
-
-变量：
-  WECHAT_SERVER  微信协议服务地址，默认 http://192.168.6.222:8011
-  WX_ID         微信账号，多账号支持换行、& 分隔，必须配置
-
-WX_ID 格式：
-  wxid#备注  多个换行
-*/
-
 
 const $ = new Env("花生帮粉丝俱乐部签到任务");
 const axios = require("axios");

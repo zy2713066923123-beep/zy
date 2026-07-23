@@ -2,6 +2,7 @@
 'use strict';
 
 /**
+ * cron: 30 8 * * *
  * AgentRouter (agentrouter.org) 每日登录签到脚本
  *
  * 网站说明：
@@ -29,7 +30,7 @@
  *   AGENTROUTER_NOTIFY=0   关闭青龙 notify.py 消息推送，默认开启
  *   AGENTROUTER_QUOTA_PER_UNIT=500000  额度兑换美元的单位，默认 500000
  *
- * 定时建议：每天执行一次，例如 cron: 30 8 * * *
+ * 定时建议：每天执行一次，例如 
  */
 
 const https = require('https');

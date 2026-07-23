@@ -1,5 +1,21 @@
-// cron: 20 10,20 * * * cron: 1 11,23 * * *
+/*
+------------------------------------------
+@Author: sm
+@Date: 2026.05.31
+@Description: 烈儿宝贝小程序签到
+cron: 6 9,16 * * *
+变量名：lieer
+变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
+也支持直接填 token，格式：token=<access_token 或 bearer...>
+------------------------------------------
 
+变量：
+  WECHAT_SERVER  微信协议服务地址，默认 http://192.168.6.222:8011
+  WX_ID         微信账号，多账号支持换行、& 分隔，必须配置
+
+WX_ID 格式：
+  wxid#备注  多个换行
+*/
 const { getSingleCode } = require('./getCode.js');
 class WeChatServer {
     constructor(config) { this.config = config; }
@@ -24,26 +40,6 @@ class Env {
     }
     async done() { try { const notify = require('./sendNotify'); await notify.sendNotify(this.name, this.logs.join('\n')); } catch(e) { console.log('通知发送失败', e); } }
 }
-/*
-------------------------------------------
-@Author: sm
-@Date: 2026.05.31
-@Description: 烈儿宝贝小程序签到
-cron: 6 9,16 * * *
-变量名：lieer
-变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
-也支持直接填 token，格式：token=<access_token 或 bearer...>
-------------------------------------------
-
-变量：
-  WECHAT_SERVER  微信协议服务地址，默认 http://192.168.6.222:8011
-  WX_ID         微信账号，多账号支持换行、& 分隔，必须配置
-
-WX_ID 格式：
-  wxid#备注  多个换行
-*/
-
-
 const $ = new Env("烈儿宝贝小程序签到");
 const axios = require("axios");
 const fs = require("fs");

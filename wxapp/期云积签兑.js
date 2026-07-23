@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// cron: 17 12,15 * * * cron: 21 9,13 * * *
+// cron: 17 12,15 * * *
 'use strict';
 
 /**

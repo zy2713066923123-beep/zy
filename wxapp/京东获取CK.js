@@ -1,5 +1,6 @@
 // - export WECHAT_SERVER='http:ip:8011'
 // - wxjd：wxid#备注
+// cron: 17 12,18 * * *
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');

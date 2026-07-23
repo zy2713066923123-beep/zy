@@ -1,3 +1,4 @@
+# cron: 0 0 8,14,19 * * *
 import os
 import time
 import json as _json

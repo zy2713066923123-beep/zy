@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# cron: 44 12,14 * * *
 """
 作者: ChatGPT
 名称: 天机观自动任务（getCode版）

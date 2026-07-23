@@ -1,5 +1,3 @@
-# cron: 57 9,17 * * *
-# cron: 44 11,13 * * *
 #by:哆啦A梦
 #入口:http://mx.qrurl.net/h5/wxa/link?sid=26407uif5Oq
 #BREO变量填写wx_server里的openid/账号标识，多账号换行分割
@@ -7,8 +5,6 @@
 #账号变量名:BREO
 #new Env("BREO")
 #cron 2 12,13 * * *
-
-
 import requests
 import json
 import os

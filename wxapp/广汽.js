@@ -1,5 +1,6 @@
 /**
  * 广汽丰田新能源 - 微信协议版（无babel依赖）
+ * cron: 15 11,18 * * *
  * 变量：
  *   WX_ID=wxid#备注#deviceId#UA  (多号用换行或&，除了wxid其它皆选填，会自动生成一号一UA设备ID)
  *   WECHAT_SERVER/YYB_SERVER/SERVER_TYPE 在 getCode.js 中配置（微信协议地址）

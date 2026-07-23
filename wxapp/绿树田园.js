@@ -30,7 +30,7 @@
  *       示例：
  *         TREECOIN_AUTH_CODE = TREE8G5MXFQPF72&TREExxxxxxxxxxxxxxxx
  *    2. 青龙面板 → 定时任务 → 命令：task 绿树田园.js
- *         cron：0 8 * * *  (每天早上8点)
+ *         cron：0 16,8 * * *  (每天早上8点)
  *
  *  微信协议方式（可选，需清空 TREECOIN_AUTH_CODE）：
  *    WX_ID  微信账号（多账号换行/&/| 分隔），格式 wxid#备注

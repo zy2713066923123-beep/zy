@@ -1,17 +1,3 @@
-
-// cron: 33 12,18 * * * cron: 50 10,13 * * *
-
-class Env {
-    constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; this.logs = []; const originalLog = console.log; console.log = (...args) => { this.logs.push(args.join(" ")); originalLog.apply(console, args); }; }
-    log(...args) { console.log(...args); this.logs.push(args.join(" ")); }
-    checkEnv(ckName) {
-        const val = process.env.WX_ID || process.env[ckName];
-        if (val) this.userList = val.split(/[\n&]+/).map(v => String(v).split('#')[0].trim()).filter(Boolean);
-        else console.log('未找到环境变量 WX_ID');
-    }
-    wait(time) { return new Promise(resolve => setTimeout(resolve, time)); }
-    async done() { try { const notify = require('./sendNotify'); await notify.sendNotify(this.name, this.logs.join('\n')); } catch(e) { console.log('通知发送失败', e); } }
-}
 /*
 ------------------------------------------
 @Author: sm
@@ -40,6 +26,20 @@ cron: 34 12,22 * * *
 WX_ID 格式：
   wxid#备注  多个换行
 */
+
+
+class Env {
+    constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; this.logs = []; const originalLog = console.log; console.log = (...args) => { this.logs.push(args.join(" ")); originalLog.apply(console, args); }; }
+    log(...args) { console.log(...args); this.logs.push(args.join(" ")); }
+    checkEnv(ckName) {
+        const val = process.env.WX_ID || process.env[ckName];
+        if (val) this.userList = val.split(/[\n&]+/).map(v => String(v).split('#')[0].trim()).filter(Boolean);
+        else console.log('未找到环境变量 WX_ID');
+    }
+    wait(time) { return new Promise(resolve => setTimeout(resolve, time)); }
+    async done() { try { const notify = require('./sendNotify'); await notify.sendNotify(this.name, this.logs.join('\n')); } catch(e) { console.log('通知发送失败', e); } }
+}
+
 
 
 const $ = new Env("千金健康生活微信小程序签到");

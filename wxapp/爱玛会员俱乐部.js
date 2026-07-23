@@ -1,5 +1,17 @@
-// cron: 1 9,14 * * * cron: 54 11,23 * * *
+/*
+爱玛会员俱乐部 - 自动签到脚本
+变量名：aima
+cron: 19 9,20 * * *
+变量值：账号标识/openid（支持多账号，用 & 或换行分隔）
+  wxid#备注  多个换行
 
+变量：
+  WECHAT_SERVER  微信协议服务地址，默认 http://192.168.6.222:8011
+  WX_ID         微信账号，多账号支持换行、& 分隔，必须配置
+
+WX_ID 格式：
+  wxid#备注  多个换行
+*/
 class Env {
   constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; this.logs = []; const originalLog = console.log; console.log = (...args) => { this.logs.push(args.join(" ")); originalLog.apply(console, args); }; }
   log(...args) { console.log(...args); this.logs.push(args.join(" ")); }
@@ -12,20 +24,6 @@ class Env {
   msg(text) { console.log(text); }
   async done() { try { const notify = require('./sendNotify'); await notify.sendNotify(this.name, this.logs.join('\n')); } catch(e) { console.log('通知发送失败', e); } }
 }
-/*
-爱玛会员俱乐部 - 自动签到脚本
-变量名：aima
-变量值：账号标识/openid（支持多账号，用 & 或换行分隔）
-  wxid#备注  多个换行
-
-变量：
-  WECHAT_SERVER  微信协议服务地址，默认 http://192.168.6.222:8011
-  WX_ID         微信账号，多账号支持换行、& 分隔，必须配置
-
-WX_ID 格式：
-  wxid#备注  多个换行
-*/
-
 const { getSingleCode } = require('./getCode.js');
 const getWxCode = (wxid, appid) => getSingleCode(appid, String(wxid).split('#')[0].trim());
 const $ = new Env("爱玛会员俱乐部");

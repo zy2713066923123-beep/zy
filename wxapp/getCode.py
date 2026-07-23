@@ -1,6 +1,4 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-# cron "33 9,21 * * *"
+
 """
 微信小程序登录Code获取模块（双协议支持）
 支持两种服务：

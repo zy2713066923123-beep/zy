@@ -37,8 +37,8 @@ hostname = www.feihevip.com
 
 【定时任务】
 建议每天早上0点30分执行
-cron: 40 9 * * *
-cron: 11 13 * * *
+cron: 40 9,13 * * *
+
 
 【图标】
 https://raw.githubusercontent.com/leiyiyan/resource/main/icons/xmyx.png

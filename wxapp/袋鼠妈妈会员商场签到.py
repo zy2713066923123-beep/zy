@@ -2,7 +2,6 @@
 # cron: 47 9,13 * * *
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
 袋鼠妈妈会员商场小程序签到脚本
 使用 getCode 公共模块获取 code，使用 notify 模块推送通知

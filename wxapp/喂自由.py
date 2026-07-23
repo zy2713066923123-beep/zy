@@ -1,13 +1,5 @@
-import os, time, base64, logging, requests, calendar
-from datetime import datetime, timedelta
-
-import getCode  # 共享的微信小程序 code 获取模块（自动路由 牛子/应用宝，读取 WX_ID 过滤）
-
-logging.basicConfig(level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
-log = logging.getLogger(__name__)
-
 """
+# cron: 39 10,16 * * *
 ========================================
 环境变量配置说明
 ========================================
@@ -50,6 +42,15 @@ log = logging.getLogger(__name__)
 
 ========================================
 """
+
+import os, time, base64, logging, requests, calendar
+from datetime import datetime, timedelta
+
+import getCode  # 共享的微信小程序 code 获取模块（自动路由 牛子/应用宝，读取 WX_ID 过滤）
+
+logging.basicConfig(level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
+log = logging.getLogger(__name__)
 
 BASE_URL = "https://phapi.nutriciaeln.com.cn"
 TOOLS_URL = "https://api.digital4danone.com.cn/babyera/v1"

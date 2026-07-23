@@ -1,3 +1,11 @@
+"""
+
+变量: WX_ID / soy_wxid_data (微信id) 多个账号用换行分割 
+    PROXY_API_URL (代理api，返回一条txt文本，内容为代理ip:端口)
+定时: 一天两次
+cron: 56 11,17 * * *
+"""
+
 import os
 import requests
 import json

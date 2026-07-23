@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
  * 问问农
+ * cron: 39 10,16 * * *
  *
  * 功能：
  * 1) wx.login code -> /users/wechat-pre-login -> loginInfoAtom(token)

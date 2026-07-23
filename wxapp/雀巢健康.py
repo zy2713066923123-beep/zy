@@ -1,4 +1,4 @@
-# cron: 24 10,18 * * *
+
 # cron: 58 11,23 * * *
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
