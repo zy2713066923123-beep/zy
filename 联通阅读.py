@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-# cron "51 11,18 * * *"
+# cron: 51 11,18 * * *
 # -- coding: utf-8 --
 
 # 变量名：yd   

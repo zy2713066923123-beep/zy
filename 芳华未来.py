@@ -1,4 +1,4 @@
-# cron "19 12,15 * * *"
+# cron: 19 12,15 * * *
 import requests
 import time
 import random
