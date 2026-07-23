@@ -1,0 +1,51 @@
+name: Sync Commits to Docs
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch commits
+        id: fetch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          COMMITS=$(gh api repos/${{ github.repository }}/commits \
+            --paginate --limit 25 \
+            -q '[.[] | {
+              sha: .sha,
+              message: (.commit.message | split("\n")[0]),
+              date: .commit.author.date,
+              author: .commit.author.name,
+              url: .html_url
+            }]')
+          echo "commits<<EOF" >> $GITHUB_OUTPUT
+          echo "$COMMITS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Checkout docs repo
+        uses: actions/checkout@v4
+        with:
+          repository: ZHwin/kuakuaql-docs
+          token: ${{ secrets.DOCS_PUSH_TOKEN }}
+          path: docs
+
+      - name: Write commits.json
+        run: |
+          echo '${{ steps.fetch.outputs.commits }}' > docs/commits.json
+
+      - name: Push to docs repo
+        working-directory: docs
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add commits.json
+          git diff --cached --quiet || git commit -m "chore: 同步提交记录 $(date '+%Y-%m-%d %H:%M')"
+          git push
