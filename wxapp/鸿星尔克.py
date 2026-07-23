@@ -1,7 +1,8 @@
 #!/usr/bin/python3
 # -- coding: utf-8 --
 # -------------------------------
-# cron "21 10,16 * * *" script-path=xxx.py,tag=匹配cron用
+# cron: 21 10,16 * * *
+# name: 鸿星尔克官方会员中心小程序
 # 账号变量（二选一）：
 #   WX_ID = wxid#备注；多账号用换行或 & 分隔（走 getCode 取 code -> on_login 登录）
 #   HXEK  = memberId@enterpriseId；多账号用 # 分隔（原模式，无需 getCode）
