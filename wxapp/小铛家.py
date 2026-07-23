@@ -3,6 +3,7 @@
 小铛家小程序
  cron: 48 8,14 * * *
 环境变量:
+# name: 小铛家
   WX_ID: wxid列表，格式: wxid#备注，多个账号用换行或@分隔
          （由共享 getCode 模块读取并智能路由 牛子/应用宝）
   WECHAT_SERVER: 牛子协议地址（手机号加密包 get/all/mobile 使用，getCode 读取），默认: http://127.0.0.1:8011

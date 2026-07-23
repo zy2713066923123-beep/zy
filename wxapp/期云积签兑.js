@@ -1,3 +1,4 @@
+﻿// name:期云积签兑
 #!/usr/bin/env node
 // cron: 47 11,16 * * *
 'use strict';

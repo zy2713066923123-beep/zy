@@ -1,6 +1,7 @@
 
 # cron: 24 11,16 * * *
 #!/usr/bin/env python3
+# name: 星妈会
 # -*- coding: utf-8 -*-
 """
 星妈会小程序自动任务（支持 wxid 自动续期 + Authorization 直连）

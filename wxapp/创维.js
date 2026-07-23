@@ -1,3 +1,4 @@
+﻿// name:创维小程序
 #!/usr/bin/env node
 /**
  * 创维小程序

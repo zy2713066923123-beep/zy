@@ -3,6 +3,7 @@
 iqoo社区 小程序
 cron: 25 10,13 * * *
 登录入口：
+# name: iqoo社区
   1. 优先读取本地 iqoo_token.json 中缓存 of token
   2. 缓存缺失或不可用时，使用环境变量 WX_ID / IQOO_WXID 自动登录
 

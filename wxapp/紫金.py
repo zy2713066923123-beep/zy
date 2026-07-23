@@ -5,6 +5,7 @@
 定时: 一天两次
 cron: 53 8,14 * * *
 """
+# name: 紫金
 
 import os
 import requests

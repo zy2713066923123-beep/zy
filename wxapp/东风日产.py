@@ -1,5 +1,6 @@
 # cron: 42 9,15 * * *
 #!/usr/bin/env python3
+# name: 东风日产
 """
 东风日产 人车生活 小程序签到脚本（code版）
 

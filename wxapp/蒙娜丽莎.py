@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # cron: 30 9,16 * * *
 # @Time     : 2025-12-25
+# name: 蒙娜丽莎
 # @Author   : 凉白开（修订版本）
 # @Version  ：5.0
 # @Desc     : 蒙娜丽莎小程序：自动获取token → 自动签到，一体化脚本（使用 WX_ID 变量与 getCode 模块）

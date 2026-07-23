@@ -1,5 +1,6 @@
 # cron: 44 10,17 * * *
 import os, sys, json, time, random, string, base64, asyncio, certifi, requests
+# name: 电信任务加转盘
 from typing import Dict, Any, Union
 from datetime import datetime
 from pathlib import Path

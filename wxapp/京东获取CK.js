@@ -1,3 +1,4 @@
+﻿// name:京东获取CK
 // - export WECHAT_SERVER='http:ip:8011'
 // - wxjd：wxid#备注
 // cron: 56 8,13 * * *

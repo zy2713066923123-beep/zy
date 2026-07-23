@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 # cron: 51 11,18 * * *
 # -- coding: utf-8 --
+# name: 联通阅读
 
 # 变量名：yd   
 # 格式：手机号@手机号

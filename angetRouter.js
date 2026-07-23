@@ -1,3 +1,4 @@
+﻿// name:AgentRouter 签到
 #!/usr/bin/env node
 'use strict';
 

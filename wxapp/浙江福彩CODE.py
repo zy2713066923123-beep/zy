@@ -9,6 +9,7 @@ name: 浙江福彩签到 (微信协议版)
 账号变量名:zjfc
 cron: 34 8,14 * * *
 """
+# name: 浙江福彩签到
 
 import requests
 import json

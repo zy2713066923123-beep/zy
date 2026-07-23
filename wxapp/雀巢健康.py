@@ -1,6 +1,7 @@
 
 # cron: 55 10,16 * * *
 #!/usr/bin/env python3
+# name: 雀巢健康
 # -*- coding: utf-8 -*-
 """
 青龙脚本：雀巢健康科学会员中心小程序每日签到

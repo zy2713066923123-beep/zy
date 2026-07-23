@@ -1,5 +1,6 @@
 # cron: 53 11,23 * * *
 '''
+# name: 联通权益
 不想抽奖后自动领取的就注释掉isGrantPrize = True
 isGrantPrize = True
 isGrantPrize = True  是否抽奖完成自动领取

@@ -1,5 +1,6 @@
 # cron: 19 12,15 * * *
 import requests
+# name: 芳华未来
 import time
 import random
 import sys

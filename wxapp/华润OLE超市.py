@@ -1,8 +1,9 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 华润 OLE 超市小程序 - 青龙每日签到
 cron: 56 11,13 * * *
+# name: 华润OLE超市
 
 环境变量：
   WX_ID           微信账号，格式 wxid#备注，多账号换行或 & / @ 分隔

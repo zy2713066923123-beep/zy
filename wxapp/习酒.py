@@ -36,6 +36,7 @@
 
 cron: 31 8,16 * * *
 """
+# name: 习酒
 
 import os
 import sys
