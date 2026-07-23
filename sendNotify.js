@@ -1,3 +1,4 @@
+﻿// name: 青龙通知服务
 
 const querystring = require('node:querystring');
 // 兼容高版本青龙面板，优先使用 axios，降级使用 got

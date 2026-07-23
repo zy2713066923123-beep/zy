@@ -1,3 +1,4 @@
+﻿// name: Bing - 账号管理
 /**
  * Account - 账号管理器（包含 AccountStorage、AuthManager、TokenManager）
  */

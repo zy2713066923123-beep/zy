@@ -1,3 +1,4 @@
+﻿// name: 微信应用通知服务
 
 const querystring = require('node:querystring');
 const { request: undiciRequest, ProxyAgent, FormData } = require('undici');

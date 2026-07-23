@@ -2,9 +2,10 @@
 
 /* 多账号使用 @ 或者 & 或 新建多个环境变量
  * cron: 40 9,16 * * *
+ * name: 战马能量星球
  */
 
-const $ = Env('战马能量星球');
+const $ = new Env('战马能量星球');
 const notify = $.isNode() ? require('./sendNotify.js') : '';      // 这里是 node（青龙属于node环境）通知相关的
 const Notify = 0; //0为关闭通知，1为打开通知,未添加
 const debug = 0; //0为关闭调试，1为打开调试,默认为0
