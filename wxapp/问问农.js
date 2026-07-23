@@ -1,5 +1,5 @@
-﻿// name:问问农
 #!/usr/bin/env node
+// name:问问农
 /**
  * 问问农
  * cron: 47 10,15 * * *

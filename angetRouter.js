@@ -1,5 +1,5 @@
-﻿// name:AgentRouter 签到
 #!/usr/bin/env node
+// name:AgentRouter 签到
 'use strict';
 
 /**

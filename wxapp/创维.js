@@ -1,5 +1,5 @@
-﻿// name:创维小程序
 #!/usr/bin/env node
+// name:创维小程序
 /**
  * 创维小程序
  * cron: 39 9,16 * * *
