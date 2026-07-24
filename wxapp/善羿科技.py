@@ -11,7 +11,7 @@
 
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# cron: 12 10,13 * * * *
+# cron: 12 7,13,20 * * * *
 """
 # name: 善羿科技
 善M/YSKJ 每日签到脚本（微信协议版），适配青龙面板。
