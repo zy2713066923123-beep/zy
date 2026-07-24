@@ -1,66 +1,66 @@
-/*
+/**
+// name: 烈儿宝贝
 ------------------------------------------
 @Author: sm
-@Date: 2026.05.31
-@Description: 烈儿宝贝小程序签到
-cron: 35 9,16 * * *
-变量名：lieer
-变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
-也支持直接填 token，格式：token=<access_token 或 bearer...>
+@Date: 2026.07.24
+@Description: 烈儿宝贝 微信小程序每日签到（微信协议版，适配青龙）
+cron: 46 9,14 * * *
+
+变量名：WX_ID
+变量值：微信账号（openid/wxid），多账号支持换行、& 分隔，必须配置
+
 ------------------------------------------
 
 变量：
-  WECHAT_SERVER  微信协议服务地址，默认 http://192.168.6.222:8011
-  WX_ID         微信账号，多账号支持换行、& 分隔，必须配置
+  WX_ID          微信账号（openid/wxid），多账号换行 / & 分隔，必须配置
+  WECHAT_SERVER  牛子协议服务地址（可选，getCode.js 内配置）
+  YYB_SERVER     应用宝服务地址（可选）
 
 WX_ID 格式：
   wxid#备注  多个换行
+------------------------------------------
 */
-const { getSingleCode } = require('./getCode.js');
-class WeChatServer {
-    constructor(config) { this.config = config; }
-    async getCode(wxid) {
-        try {
-            const actualWxid = String(wxid).split('#')[0].trim();
-            const code = await getSingleCode(this.config.appid, actualWxid);
-            return { data: { status: true, code, data: { code } } };
-        } catch (e) {
-            return { data: {} };
-        }
-    }
-}
 
-class Env {
-    constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; this.logs = []; const originalLog = console.log; console.log = (...args) => { this.logs.push(args.join(" ")); originalLog.apply(console, args); }; }
-    log(...args) { console.log(...args); this.logs.push(args.join(" ")); }
-    checkEnv(ckName) {
-        const val = process.env.WX_ID || process.env[ckName];
-        if (val) this.userList = val.split(/[\n&]+/).map(v => String(v).split('#')[0].trim()).filter(Boolean);
-        else console.log('未找到环境变量 WX_ID');
-    }
-    async done() { try { const notify = require('./sendNotify'); await notify.sendNotify(this.name, this.logs.join('\n')); } catch(e) { console.log('通知发送失败', e); } }
-}
-const $ = new Env("烈儿宝贝小程序签到");
 const axios = require("axios");
+const { getSingleCode } = require("./getCode.js");
 const fs = require("fs");
 const path = require("path");
-
+// ====================== 账号（环境变量 WX_ID = wxid#备注，换行或&） ======================
+const SERVERS = (process.env.WX_ID || "")
+    .split(/\r?\n|&/)
+    .map(s => s.trim())
+    .filter(Boolean);
+if (!SERVERS.length) {
+    console.error("未配置环境变量 WX_ID，请设置后重试（格式：wxid#备注，换行或&）");
+    process.exit(1);
+}
+function parseYybGoEntry(rawValue) {
+    const value = String(rawValue || "").trim();
+    if (!value) return { server: "", ref: "" };
+    const ref = value.split("#")[0].trim();
+    return { server: "", ref };
+}
+async function getCode(server) {
+    const __id = String(server).split("#")[0].trim();
+    if (!__id) return null;
+    try {
+        return await getSingleCode(MINI_APP_ID, __id);
+    } catch (e) {
+        console.log(__id + " 获取code异常: " + (e && e.message ? e.message : e));
+        return null;
+    }
+}
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+let userIdx = 1;
 
 const MINI_APP_ID = "wxf98a118ca21bbf5f";
 const PAGE_VERSION = "139";
 const APP_VERSION = "2.31.2";
 const ENV_VERSION = "release";
 const API_BASE = "https://smp-api.iyouke.com/dtapi";
-const TOKEN_CACHE_FILE = path.join(__dirname, "lieer_token_cache.json");
+const TOKEN_CACHE_FILE = path.join(__dirname, "token_caches", "lieer_token_cache.json");
+try { fs.mkdirSync(path.dirname(TOKEN_CACHE_FILE), { recursive: true }); } catch (e) {}
 const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) MicroMessenger/3.9.12 MiniProgramEnv/Windows WindowsWechat/WMPF";
-
-let ckName = "WX_ID";
-
-const wechat = new WeChatServer({
-    url: process.env.WECHAT_SERVER || "http://192.168.6.222:8011",
-    appid: MINI_APP_ID,
-    WX_ID: process.env.WX_ID || "",
-});
 
 function readTokenCache() {
     try {
@@ -75,7 +75,7 @@ function writeTokenCache(cache) {
     try {
         fs.writeFileSync(TOKEN_CACHE_FILE, JSON.stringify(cache, null, 2), "utf8");
     } catch (e) {
-        $.log(`写入token缓存失败: ${e.message || e}`);
+        console.log(`写入token缓存失败: ${e.message || e}`);
     }
 }
 
@@ -100,8 +100,12 @@ function maskMobile(mobile = "") {
 
 class Task {
     constructor(account) {
-        this.index = $.userIdx++;
-        this.account = String(account || "").split('#')[0].trim();
+        this.server = account;
+        const _yyb = parseYybGoEntry(this.server);
+        this.ref = _yyb.ref;
+        this.openid = _yyb.ref;
+        this.index = userIdx++;
+        this.account = String(account || "").trim();
         this.accessToken = "";
         this.authorization = "";
         this.userInfo = {};
@@ -116,16 +120,16 @@ class Task {
             const cached = this.getCachedToken();
             if (cached) {
                 this.applyToken(cached);
-                $.log(`账号[${this.index}] 使用缓存token`);
+                console.log(`账号[${this.index}] 使用缓存token`);
                 if (!(await this.checkToken())) {
                     this.removeCachedToken();
-                    $.log(`账号[${this.index}] 缓存token失效，重新登录`);
+                    console.log(`账号[${this.index}] 缓存token失效，重新登录`);
                 }
             }
         }
 
         if (!this.authorization) {
-            try { await this.loginByWxCode(); } catch (e) { $.log(`账号[${this.index}] 登录失败: ${e.message || e}`); }
+            await this.loginByWxCode();
             if (!this.authorization) return;
         }
 
@@ -215,10 +219,7 @@ class Task {
     }
 
     async getLoginCode() {
-        const { data } = await wechat.getCode(this.account);
-        const code = data?.code || data?.data?.code;
-        if (!code) throw new Error(`wx_server 未返回 code: ${JSON.stringify(data)}`);
-        return code;
+        return await getCode(this.server);
     }
 
     async loginByWxCode() {
@@ -235,9 +236,9 @@ class Task {
             this.applyToken(data);
             if (!this.authorization) throw new Error(`登录未返回token: ${JSON.stringify(data)}`);
             this.saveCachedToken();
-            $.log(`账号[${this.index}] 登录成功: userId=${data.userId || ""}`);
+            console.log(`账号[${this.index}] 登录成功: userId=${data.userId || ""}`);
         } catch (e) {
-            $.log(`账号[${this.index}] 登录失败: ${e.message || e}`);
+            console.log(`账号[${this.index}] 登录失败: ${e.message || e}`);
         }
     }
 
@@ -263,7 +264,7 @@ class Task {
         if (log) {
             const name = data.nickName || data.memberName || data.userId || "未知";
             const mobile = data.userMobile || data.mobile || "";
-            $.log(`账号[${this.index}] 用户: ${name}${mobile ? ` ${maskMobile(mobile)}` : ""}`);
+            console.log(`账号[${this.index}] 用户: ${name}${mobile ? ` ${maskMobile(mobile)}` : ""}`);
         }
         return data;
     }
@@ -274,11 +275,11 @@ class Task {
                 method: "GET",
                 apiPath: "/pointsSign/user/pointsInfo/query",
             });
-            $.log(`账号[${this.index}] 积分: ${data?.pointsNums ?? "未知"} 连签=${data?.seriesDays ?? 0} 今日=${data?.signTodayResult ? "已签" : "未签"}`);
+            console.log(`账号[${this.index}] 积分: ${data?.pointsNums ?? "未知"} 连签=${data?.seriesDays ?? 0} 今日=${data?.signTodayResult ? "已签" : "未签"}`);
             return data;
         } catch (e) {
             const message = e.message || e;
-            $.log(`账号[${this.index}] 查询积分失败: ${message}`);
+            console.log(`账号[${this.index}] 查询积分失败: ${message}`);
             if (/token|登录|授权|401/i.test(String(message))) this.removeCachedToken();
         }
     }
@@ -294,17 +295,17 @@ class Task {
             const todayItem = Array.isArray(data) ? data.find((item) => item?.isToday || item?.dateStr === today) : null;
             this.todayDate = todayItem?.dateStr || today;
             this.isTodaySign = Number(todayItem?.daySignStatus) === 2 || Boolean(todayItem?.sign);
-            $.log(`账号[${this.index}] 签到状态: ${this.todayDate} ${this.isTodaySign ? "已签" : "未签"}`);
+            console.log(`账号[${this.index}] 签到状态: ${this.todayDate} ${this.isTodaySign ? "已签" : "未签"}`);
         } catch (e) {
             const message = e.message || e;
-            $.log(`账号[${this.index}] 查询签到状态失败: ${message}`);
+            console.log(`账号[${this.index}] 查询签到状态失败: ${message}`);
             if (/token|登录|授权|401/i.test(String(message))) this.removeCachedToken();
         }
     }
 
     async doSign() {
         if (this.isTodaySign) {
-            $.log(`账号[${this.index}] 今日已签到`);
+            console.log(`账号[${this.index}] 今日已签到`);
             return;
         }
         try {
@@ -314,24 +315,23 @@ class Task {
                 apiPath: "/pointsSign/user/sign",
                 params: { date },
             });
-            $.log(`账号[${this.index}] 签到成功: +${data?.signReward ?? data?.reward ?? "未知"}积分`);
+            console.log(`账号[${this.index}] 签到成功: +${data?.signReward ?? data?.reward ?? "未知"}积分`);
         } catch (e) {
             const message = String(e.message || e);
             if (/已签|重复|今日.*签/i.test(message)) {
-                $.log(`账号[${this.index}] 今日已签到`);
+                console.log(`账号[${this.index}] 今日已签到`);
                 return;
             }
-            $.log(`账号[${this.index}] 签到失败: ${message}`);
+            console.log(`账号[${this.index}] 签到失败: ${message}`);
             if (/token|登录|授权|401/i.test(message)) this.removeCachedToken();
         }
     }
 }
 
 !(async () => {
-    $.checkEnv(ckName);
-    for (const account of $.userList) {
+    
+    for (const account of SERVERS) {
         await new Task(account).run();
     }
 })()
-    .catch((e) => $.log(e.message || e))
-    .finally(() => $.done());
+    .catch((e) => console.log(e.message || e))

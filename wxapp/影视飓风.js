@@ -1,53 +1,57 @@
-/*
+/**
+// name: 影视飓风
 ------------------------------------------
 @Author: sm
-@Date: 2026.05.31
-@Description: 影视飓风小程序签到
-cron: 12 11,15 * * *
-变量名：yingshijufeng
-变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
+@Date: 2026.07.24
+@Description: 影视飓风 微信小程序每日签到（微信协议版，适配青龙）
+cron: 29 8,14 * * *
+
+变量名：WX_ID
+变量值：微信账号（openid/wxid），多账号支持换行、& 分隔，必须配置
+
 ------------------------------------------
 
 变量：
-  WECHAT_SERVER  微信协议服务地址，默认 http://192.168.6.222:8011
-  WX_ID         微信账号，多账号支持换行、& 分隔，必须配置
+  WX_ID          微信账号（openid/wxid），多账号换行 / & 分隔，必须配置
+  WECHAT_SERVER  牛子协议服务地址（可选，getCode.js 内配置）
+  YYB_SERVER     应用宝服务地址（可选）
 
 WX_ID 格式：
   wxid#备注  多个换行
+------------------------------------------
 */
 
-const { getSingleCode } = require('./getCode.js');
-class WeChatServer {
-    constructor(config) { this.config = config; }
-    async getCode(wxid) {
-        try {
-            const actualWxid = String(wxid).split('#')[0].trim();
-            const code = await getSingleCode(this.config.appid, actualWxid);
-            return { data: { status: true, code, data: { code } } };
-        } catch (e) {
-            return { data: {} };
-        }
-    }
-}
-
-class Env {
-    constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; this.logs = []; const originalLog = console.log; console.log = (...args) => { this.logs.push(args.join(" ")); originalLog.apply(console, args); }; }
-    log(...args) { console.log(...args); this.logs.push(args.join(" ")); }
-    checkEnv(ckName) {
-        const val = process.env.WX_ID || process.env[ckName];
-        if (val) this.userList = val.split(/[\n&]+/).map(v => String(v).split('#')[0].trim()).filter(Boolean);
-        else console.log('未找到环境变量 WX_ID');
-    }
-    async done() { try { const notify = require('./sendNotify'); await notify.sendNotify(this.name, this.logs.join('\n')); } catch(e) { console.log('通知发送失败', e); } }
-}
-
-
-
-const $ = new Env("影视飓风小程序签到");
 const axios = require("axios");
+const { getSingleCode } = require("./getCode.js");
 const fs = require("fs");
 const path = require("path");
-
+// ====================== 账号（环境变量 WX_ID = wxid#备注，换行或&） ======================
+const SERVERS = (process.env.WX_ID || "")
+    .split(/\r?\n|&/)
+    .map(s => s.trim())
+    .filter(Boolean);
+if (!SERVERS.length) {
+    console.error("未配置环境变量 WX_ID，请设置后重试（格式：wxid#备注，换行或&）");
+    process.exit(1);
+}
+function parseYybGoEntry(rawValue) {
+    const value = String(rawValue || "").trim();
+    if (!value) return { server: "", ref: "" };
+    const ref = value.split("#")[0].trim();
+    return { server: "", ref };
+}
+async function getCode(server) {
+    const __id = String(server).split("#")[0].trim();
+    if (!__id) return null;
+    try {
+        return await getSingleCode(MINI_APP_ID, __id);
+    } catch (e) {
+        console.log(__id + " 获取code异常: " + (e && e.message ? e.message : e));
+        return null;
+    }
+}
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+let userIdx = 1;
 
 const MINI_APP_ID = "wx92782ef90ebc836d";
 const CLIENT_ID = "4d65249d377b2c3ed8";
@@ -58,16 +62,9 @@ const KDT_ID = "149536603";
 const USER_VERSION = "2.226.7.101";
 const PAGE_VERSION = "17";
 const API_BASE = "https://h5.youzan.com";
-const TOKEN_CACHE_FILE = path.join(__dirname, "yingshijufeng_token_cache.json");
+const TOKEN_CACHE_FILE = path.join(__dirname, "token_caches", "yingshijufeng_token_cache.json");
+try { fs.mkdirSync(path.dirname(TOKEN_CACHE_FILE), { recursive: true }); } catch (e) {}
 const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) MicroMessenger/3.9.12 MiniProgramEnv/Windows WindowsWechat/WMPF";
-
-let ckName = "WX_ID";
-
-const wechat = new WeChatServer({
-    url: process.env.WECHAT_SERVER || "http://192.168.6.222:8011",
-    appid: MINI_APP_ID,
-    WX_ID: process.env.WX_ID || "",
-});
 
 function readTokenCache() {
     try {
@@ -82,7 +79,7 @@ function writeTokenCache(cache) {
     try {
         fs.writeFileSync(TOKEN_CACHE_FILE, JSON.stringify(cache, null, 2), "utf8");
     } catch (e) {
-        $.log(`写入token缓存失败: ${e.message || e}`);
+        console.log(`写入token缓存失败: ${e.message || e}`);
     }
 }
 
@@ -100,8 +97,12 @@ function isTokenError(message) {
 
 class Task {
     constructor(openid) {
-        this.index = $.userIdx++;
-        this.openid = String(openid || "").split('#')[0].trim();
+        this.server = openid;
+        const _yyb = parseYybGoEntry(this.server);
+        this.ref = _yyb.ref;
+        this.openid = _yyb.ref;
+        this.index = userIdx++;
+        this.openid = String(openid || "").trim();
         this.token = "";
         this.sessionId = "";
         this.cookie = "";
@@ -113,15 +114,15 @@ class Task {
         const cached = this.getCachedToken();
         if (cached) {
             this.applyToken(cached);
-            $.log(`账号[${this.index}] 使用缓存token`);
+            console.log(`账号[${this.index}] 使用缓存token`);
             if (!(await this.checkToken())) {
                 this.removeCachedToken();
-                $.log(`账号[${this.index}] 缓存token失效，重新登录`);
+                console.log(`账号[${this.index}] 缓存token失效，重新登录`);
             }
         }
 
         if (!this.token) {
-            try { await this.loginByWxCode(); } catch (e) { $.log(`账号[${this.index}] 登录失败: ${e.message || e}`); }
+            await this.loginByWxCode();
             if (!this.token) return;
         }
 
@@ -216,10 +217,7 @@ class Task {
     }
 
     async getLoginCode() {
-        const { data } = await wechat.getCode(this.openid);
-        const code = data?.code || data?.data?.code;
-        if (!code) throw new Error(`wx_server 未返回 code: ${JSON.stringify(data)}`);
-        return code;
+        return await getCode(this.server);
     }
 
     async authorize(code, data) {
@@ -251,9 +249,9 @@ class Task {
             this.applyToken(data);
             this.userInfo = data || {};
             this.saveCachedToken();
-            $.log(`账号[${this.index}] 登录成功: ${data.nick_name || data.nickName || ""} ${maskPhone(data.mobile) || ""}`);
+            console.log(`账号[${this.index}] 登录成功: ${data.nick_name || data.nickName || ""} ${maskPhone(data.mobile) || ""}`);
         } catch (e) {
-            $.log(`账号[${this.index}] 登录失败: ${e.message || e}`);
+            console.log(`账号[${this.index}] 登录失败: ${e.message || e}`);
         }
     }
 
@@ -271,16 +269,16 @@ class Task {
             const data = await this.request({ path: "/wscump/checkin/show_checkin_page_v2.json" });
             this.checkinId = data?.checkinId;
             this.isShow = !!data?.isShow;
-            $.log(`账号[${this.index}] 签到活动: checkinId=${this.checkinId || "未获取"} isShow=${this.isShow}`);
+            console.log(`账号[${this.index}] 签到活动: checkinId=${this.checkinId || "未获取"} isShow=${this.isShow}`);
         } catch (e) {
-            $.log(`账号[${this.index}] 获取签到活动失败: ${e.message || e}`);
+            console.log(`账号[${this.index}] 获取签到活动失败: ${e.message || e}`);
             if (isTokenError(e.message || e)) this.removeCachedToken();
         }
     }
 
     async doCheckin() {
         if (!this.checkinId) {
-            $.log(`账号[${this.index}] 未获取到 checkinId，跳过签到`);
+            console.log(`账号[${this.index}] 未获取到 checkinId，跳过签到`);
             return;
         }
         try {
@@ -289,14 +287,14 @@ class Task {
                 params: { checkinId: this.checkinId },
             });
             const awards = (data?.list || []).map((item) => item?.infos?.title).filter(Boolean).join(", ");
-            $.log(`账号[${this.index}] 签到成功: ${data?.desc || ""}${awards ? ` ${awards}` : ""}`);
+            console.log(`账号[${this.index}] 签到成功: ${data?.desc || ""}${awards ? ` ${awards}` : ""}`);
         } catch (e) {
             const message = String(e.message || e);
             if (/已达最大参与次数|已签到|重复签到/.test(message)) {
-                $.log(`账号[${this.index}] 今日已签到`);
+                console.log(`账号[${this.index}] 今日已签到`);
                 return;
             }
-            $.log(`账号[${this.index}] 签到失败: ${message}`);
+            console.log(`账号[${this.index}] 签到失败: ${message}`);
             if (isTokenError(message)) this.removeCachedToken();
         }
     }
@@ -304,18 +302,17 @@ class Task {
     async getPoints() {
         try {
             const data = await this.request({ path: "/wscump/integral/user_points.json" });
-            $.log(`账号[${this.index}] 当前积分: ${data?.current_points ?? data?.real_points ?? "未知"}`);
+            console.log(`账号[${this.index}] 当前积分: ${data?.current_points ?? data?.real_points ?? "未知"}`);
         } catch (e) {
-            $.log(`账号[${this.index}] 查询积分失败: ${e.message || e}`);
+            console.log(`账号[${this.index}] 查询积分失败: ${e.message || e}`);
         }
     }
 }
 
 !(async () => {
-    $.checkEnv(ckName);
-    for (const openid of $.userList) {
+    
+    for (const openid of SERVERS) {
         await new Task(openid).run();
     }
 })()
-    .catch((e) => $.log(e.message || e))
-    .finally(() => $.done());
+    .catch((e) => console.log(e.message || e))

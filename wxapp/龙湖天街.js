@@ -1,65 +1,75 @@
-/*
+/**
+// name: 龙湖天街
 ------------------------------------------
 @Author: sm
-@Date: 2026.05.31
-@Description: 龙湖天街小程序签到（增强版）
-cron: 44 8,13 * * *
-【方式一】微信协议自动登录（推荐）
+@Date: 2026.07.24
+@Description: 龙湖天街 微信小程序每日签到（微信协议版，适配青龙）
+cron: 42 9,14 * * *
+
 变量名：WX_ID
-变量值：wxid#备注，多账号用 & 或换行
+变量值：微信账号（openid/wxid），多账号支持换行、& 分隔，必须配置
 
-【方式二】直接传入Token（最简单）
-变量名：LONGFOR_TOKEN
-变量值：用户Token，多账号用 @ 或换行分隔
+------------------------------------------
 
-  获取方法：
-    1. 抓包或从缓存文件获取 token
-    2. 设置环境变量即可跳过登录流程
+变量：
+  WX_ID          微信账号（openid/wxid），多账号换行 / & 分隔，必须配置
+  WECHAT_SERVER  牛子协议服务地址（可选，getCode.js 内配置）
+  YYB_SERVER     应用宝服务地址（可选）
 
-【可选变量】
-  longfor_dx_token     手动指定顶象 constID
-  longfor_gps          指定 gps，经纬度格式：longitude,latitude
-
-【依赖】
-  WECHAT_SERVER  微信协议服务地址（方式一需要）
-  WX_ID          微信账号（方式一需要）
-
-优先级: LONGFOR_TOKEN > 缓存Token > Code登录
+WX_ID 格式：
+  wxid#备注  多个换行
+------------------------------------------
 */
 
-const { getSingleCode } = require('./getCode.js');
-class WeChatServer {
-    constructor(config) { this.config = config; }
-    async getCode(wxid) {
-        try {
-            const actualWxid = String(wxid).split('#')[0].trim();
-            const code = await getSingleCode(this.config.appid, actualWxid);
-            return { data: { status: true, code, data: { code } } };
-        } catch (e) {
-            return { data: {} };
-        }
-    }
-}
-
-class Env {
-    constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; this.logs = []; const originalLog = console.log; console.log = (...args) => { this.logs.push(args.join(" ")); originalLog.apply(console, args); }; }
-    log(...args) { console.log(...args); this.logs.push(args.join(" ")); }
-    checkEnv(ckName) {
-        const val = process.env.WX_ID || process.env[ckName];
-        if (val) this.userList = val.split(/[\n&]+/).map(v => String(v).split('#')[0].trim()).filter(Boolean);
-        else console.log('未找到环境变量 WX_ID');
-    }
-    async done() { try { const notify = require('./sendNotify'); await notify.sendNotify(this.name, this.logs.join('\n')); } catch(e) { console.log('通知发送失败', e); } }
-}
-
-
-
-const $ = new Env("龙湖天街签到");
 const axios = require("axios");
+const { getSingleCode } = require("./getCode.js");
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
-
+// ====================== 账号（环境变量 WX_ID = 换行或&分隔，每个为 wxid#备注） ======================
+// 任何形如 [object Object] 或不含 @ 的脏行都会被自动跳过，不影响其他有效账号。
+function buildServers() {
+    const raw = String(process.env.WX_ID || "").trim();
+    if (!raw) {
+        console.error("未配置环境变量 WX_ID，请设置后重试（格式：wxid#备注，换行或&）");
+        process.exit(1);
+    }
+    console.log("WX_ID 原始内容(前200字): " + raw.slice(0, 200).replace(/\r/g, "").replace(/\n/g, "\\n"));
+    return raw
+        .split(/\r?\n|&/)
+        .map(s => String(s).trim())
+        .filter(Boolean)
+        .filter(line => {
+            if (line === "[object Object]") {
+                console.log("已跳过无效行: [object Object]");
+                return false;
+            }
+            return true;
+        });
+}
+const SERVERS = buildServers();
+if (!SERVERS.length) {
+    console.error("未配置有效的 WX_ID 账号（每行格式：wxid#备注）");
+    process.exit(1);
+}
+function parseYybGoEntry(rawValue) {
+    const value = String(rawValue || "").trim();
+    if (!value) return { server: "", ref: "" };
+    const ref = value.split("#")[0].trim();
+    return { server: "", ref };
+}
+async function getCode(server) {
+    const __id = String(server).split("#")[0].trim();
+    if (!__id) return null;
+    try {
+        return await getSingleCode(MINI_APP_ID, __id);
+    } catch (e) {
+        console.log(__id + " 获取code异常: " + (e && e.message ? e.message : e));
+        return null;
+    }
+}
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+let userIdx = 1;
 
 const MINI_APP_ID = "wx50282644351869da";
 const PAGE_VERSION = "506";
@@ -118,19 +128,10 @@ const DX_KEY_MAP = {
     windowWidth: "ww",
     gps: "gps",
 };
-const TOKEN_CACHE_FILE = path.join(__dirname, "longfor_token_cache.json");
+const TOKEN_CACHE_FILE = path.join(__dirname, "token_caches", "longfor_token_cache.json");
+try { fs.mkdirSync(path.dirname(TOKEN_CACHE_FILE), { recursive: true }); } catch (e) {}
 const USER_AGENT =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) MicroMessenger/3.9.12 MiniProgramEnv/Windows WindowsWechat/WMPF";
-
-let ckName = "WX_ID";
-// 支持直接传入Token（优先级最高）
-const LONGFOR_TOKEN_RAW = (process.env.LONGFOR_TOKEN || "").trim();
-
-const wechat = new WeChatServer({
-    url: process.env.WECHAT_SERVER || "http://192.168.6.222:8011",
-    appid: MINI_APP_ID,
-    WX_ID: process.env.WX_ID || "",
-});
 
 function readCache() {
     try {
@@ -145,7 +146,7 @@ function writeCache(cache) {
     try {
         fs.writeFileSync(TOKEN_CACHE_FILE, JSON.stringify(cache, null, 2), "utf8");
     } catch (e) {
-        $.log(`写入token缓存失败: ${e.message || e}`);
+        console.log(`写入token缓存失败: ${e.message || e}`);
     }
 }
 
@@ -203,7 +204,7 @@ function dxMakeLocalId(length = 32) {
 function dxEncrypt(data) {
     const text = JSON.stringify(data) || "";
     let output = "";
-    for (let index = 0; index < text.length;) {
+    for (let index = 0; index < text.length; ) {
         const first = text.charCodeAt(index++);
         const second = text.charCodeAt(index++);
         const third = text.charCodeAt(index++);
@@ -262,7 +263,7 @@ async function dxCollect(options = {}) {
 
 class MiniDxConstId {
     constructor(options = {}) {
-        this.options = { ...DX_MINI_CONFIG, ...options };
+        this.options = { ...DX_MINI_CONFIG, ...(options || {}) };
         this.options.appId = this.options.appId || this.options.appKey;
         if (!this.options.server || !this.options.appId) throw new Error("missing dx server/appId");
     }
@@ -353,16 +354,14 @@ function tokenError(error) {
 }
 
 class Task {
-    constructor(account, tokenFromEnv = "") {
-        this.index = $.userIdx++;
-        this.account = String(account || "").split('#')[0].trim();
-        this.tokenFromEnv = tokenFromEnv || "";
+    constructor(account) {
+        this.index = userIdx++;
+        this.account = String(account || "").trim();
+        this.server = this.account;
         this.token = "";
         this.lmid = "";
         this.expire = 0;
         this.activityNo = "";
-        // 签到结果
-        this.signResult = { success: false, message: "", reward: "" };
     }
 
     applyToken(data = {}) {
@@ -463,51 +462,36 @@ class Task {
     }
 
     async getLoginCode() {
-        const { data } = await wechat.getCode(this.account);
-        const code = data?.code || data?.data?.code;
-        if (!code) throw new Error(`wx_server 未返回 code: ${JSON.stringify(data)}`);
+        const code = await getCode(this.server);
+        if (!code) console.log(`账号[${this.index}] 获取微信code失败：请检查 WX_ID 格式是否为 wxid#备注（换行或&分隔）且 getCode 服务可访问`);
         return code;
     }
 
     async loginByWxCode() {
-        const maxRetry = 2;
-        for (let attempt = 1; attempt <= maxRetry; attempt++) {
-            try {
-                const checkData = {
-                    appId: MINI_APP_ID,
-                    thirdType: "WX_APPLET",
-                    fingerprint: "",
-                    authCode: await this.getLoginCode(),
-                };
-                $.log(`账号[${this.index}] 第${attempt}次登录: 获取checkLoginType code成功`);
-                const check = await this.miniPost(`${BASE_HOST}/mine/${API_VERSION}/publicApi/login/checkLoginType`, checkData);
-                $.log(`账号[${this.index}] 第${attempt}次登录: check完成, ticket=${check?.ticket ? check.ticket.slice(0, 16) + '...' : '无'}`);
-
-                const loginData = {
-                    appId: MINI_APP_ID,
-                    authCode: await this.getLoginCode(),
-                    isNew: false,
-                    thirdType: "WX_APPLET",
-                    fingerprint: "",
-                    ticket: check?.ticket || "",
-                };
-                $.log(`账号[${this.index}] 第${attempt}次登录: 获取loginByMiniApp code成功`);
-                const login = await this.miniPost(`${BASE_HOST}/mine/${API_VERSION}/publicApi/login/loginByMiniApp`, loginData);
-                this.applyToken(login);
-                if (!this.token) throw new Error(`登录响应未返回 token: ${JSON.stringify(login)}`);
-                this.saveCachedToken();
-                $.log(`账号[${this.index}] 登录成功: token=${shortValue(this.token)} lmid=${shortValue(this.lmid)}`);
-                return;
-            } catch (e) {
-                $.log(`账号[${this.index}] 第${attempt}/${maxRetry}次登录失败: ${e.message || e}`);
-                if (attempt < maxRetry) {
-                    $.log(`账号[${this.index}] 等待3秒后重试...`);
-                    await new Promise(r => setTimeout(r, 3000));
-                } else {
-                    throw e;
-                }
-            }
+        const code = await this.getLoginCode();
+        if (!code) {
+            throw new Error(`获取微信code失败：请检查 WX_ID 中该账号在 getCode 是否已绑定龙湖天街小程序（appId ${MINI_APP_ID}）`);
         }
+        const checkData = {
+            appId: MINI_APP_ID,
+            thirdType: "WX_APPLET",
+            fingerprint: "",
+            authCode: code,
+        };
+        const check = await this.miniPost(`${BASE_HOST}/mine/${API_VERSION}/publicApi/login/checkLoginType`, checkData);
+        const loginData = {
+            appId: MINI_APP_ID,
+            authCode: code,
+            isNew: false,
+            thirdType: "WX_APPLET",
+            fingerprint: "",
+            ticket: check?.ticket || "",
+        };
+        const login = await this.miniPost(`${BASE_HOST}/mine/${API_VERSION}/publicApi/login/loginByMiniApp`, loginData);
+        this.applyToken(login);
+        if (!this.token) throw new Error(`登录响应未返回 token: ${JSON.stringify(login)}`);
+        this.saveCachedToken();
+        console.log(`账号[${this.index}] 登录成功: token=${shortValue(this.token)} lmid=${shortValue(this.lmid)}`);
     }
 
     findActivityNo(payload) {
@@ -561,18 +545,11 @@ class Task {
         if (!this.activityNo) throw new Error("未在会员页配置中找到签到 activity_no");
 
         const pageInfo = await this.getPageInfo();
-        const alreadySigned = this.todaySigned(pageInfo);
-        $.log(`账号[${this.index}] 活动: ${pageInfo.task_name || "签到"} 今日=${alreadySigned ? "已签到" : "未签到"}`);
-        if (alreadySigned) {
-            // 已签到：显示连续天数
-            const signDays = pageInfo.sign_days || pageInfo.continuous_days || 0;
-            $.log(`✅ 账号[${this.index}] 今日已签到（连续${signDays}天）`);
-            this.signResult = { success: true, message: "已签到", reward: "" };
-            return;
-        }
+        console.log(`账号[${this.index}] 活动: ${pageInfo.task_name || "签到"} 今日=${this.todaySigned(pageInfo) ? "已签到" : "未签到"}`);
+        if (this.todaySigned(pageInfo)) return;
 
         const dxToken = await getDxToken();
-        $.log(`账号[${this.index}] 风控指纹${dxToken ? "获取成功" : "获取失败，直接尝试"}`);
+        console.log(`账号[${this.index}] 风控指纹${dxToken ? "获取成功" : "获取失败，直接尝试"}`);
 
         const result = await this.taskPost("/openapi/task/v1/signature/clock", { activity_no: this.activityNo }, dxToken);
         if (!ok(result?.code)) {
@@ -580,114 +557,39 @@ class Task {
             err.code = result?.code;
             throw err;
         }
-
-        // 解析奖励信息
-        const rewardStr = this.rewardText(result?.data?.reward_info);
-        if (rewardStr) {
-            $.log(`🎉 账号[${this.index}] 签到成功！获得 ${rewardStr}`);
-        } else {
-            $.log(`✅ 账号[${this.index}] 签到成功`);
-        }
-        this.signResult = { success: true, message: "签到成功", reward: rewardStr };
+        console.log(`账号[${this.index}] 签到成功${this.rewardText(result?.data?.reward_info) ? `: ${this.rewardText(result.data.reward_info)}` : ""}`);
     }
 
     async run() {
-        $.log(`\n${'='.repeat(40)}`);
-        $.log(`▶ 账号[${this.index}]: ${this.account || 'Token直传'}`);
-        $.log('='.repeat(40));
-
-        // ======== Token获取优先级 ========
-        // 1. 环境变量直接传入
-        if (this.tokenFromEnv) {
-            this.token = this.tokenFromEnv;
-            $.log(`🍪 使用环境变量Token: ${shortValue(this.token)}`);
-        }
-
-        // 2. 缓存Token
         const cached = this.getCachedToken();
-        if (!this.token && cached) {
+        if (cached) {
             this.applyToken(cached);
-            $.log(`📦 使用缓存Token: ${shortValue(this.token)}`);
+            console.log(`账号[${this.index}] 使用缓存token: ${shortValue(this.token)}`);
             if (!(await this.checkToken())) {
                 this.removeCachedToken();
-                $.log(`缓存Token失效`);
-                this.token = "";
+                console.log(`账号[${this.index}] 缓存token失效，重新登录`);
             }
         }
+        if (!this.token) await this.loginByWxCode();
+        if (!this.token) return;
 
-        // 3. Code登录
-        if (!this.token && (process.env.WECHAT_SERVER || wechat.config?.url)) {
-            try {
-                await this.loginByWxCode();
-            } catch (e) {
-                $.log(`❌ 登录失败: ${e.message || e}`);
-            }
-        }
-
-        if (!this.token) {
-            $.log(`⚠️ 无可用Token，跳过此账号`);
-            $.log(`   可设置 LONGFOR_TOKEN 环境变量直接传入`);
-            return;
-        }
-
-        // ======== 执行签到 ========
         try {
             await this.signIn();
         } catch (e) {
-            $.log(`❌ 签到失败${e.code ? `(${e.code})` : ""}: ${e.message || e}`);
-            if (tokenError(e)) {
-                this.removeCachedToken();
-                $.log(`🗑️ 已清除失效的缓存Token`);
-            }
+            console.log(`账号[${this.index}] 签到失败${e.code ? `(${e.code})` : ""}: ${e.message || e}`);
+            if (tokenError(e)) this.removeCachedToken();
         }
     }
 }
 
 !(async () => {
-    // 随机延迟 1~10 秒（模拟真人操作）
-    const delay = Math.floor(Math.random() * 10) + 1;
-    $.log(`等待 ${delay} 秒后开始执行...`);
-    await new Promise(r => setTimeout(r, delay * 1000));
-
-    // ========== 解析账号列表 ==========
-    // 优先解析 LONGFOR_TOKEN（Token直传模式）
-    let tokenList = [];
-    if (LONGFOR_TOKEN_RAW) {
-        tokenList = LONGFOR_TOKEN_RAW.split(/[@\n&]+/).map(t => t.trim()).filter(Boolean);
-        $.log(`检测到 LONGFOR_TOKEN 环境变量，共 ${tokenList.length} 个Token`);
-    }
-
-    // 解析 WX_ID（微信登录模式）
-    $.checkEnv(ckName);
-
-    // ========== 执行任务 ==========
-    // Token直传模式：每个Token创建一个Task实例
-    for (let i = 0; i < tokenList.length; i++) {
-        const task = new Task(`Token[${i + 1}]`, tokenList[i]);
-        await task.run();
-        // 多账号间随机间隔 1~5 秒
-        if (i < tokenList.length - 1 || $.userList.length > 0) {
-            const gap = Math.floor(Math.random() * 5) + 1;
-            $.log(`等待 ${gap} 秒后处理下一个...`);
-            await new Promise(r => setTimeout(r, gap * 1000));
+    for (const account of SERVERS) {
+        const task = new Task(account);
+        try {
+            await task.run();
+        } catch (e) {
+            console.log(`账号[${task.index}] 处理异常已跳过: ${e.message || e}`);
         }
-    }
-
-    // 微信登录模式：每个WX_ID创建一个Task实例
-    for (const account of $.userList) {
-        await new Task(account).run();
-        if ($.userList.indexOf(account) < $.userList.length - 1) {
-            const gap = Math.floor(Math.random() * 5) + 1;
-            $.log(`等待 ${gap} 秒后处理下一个...`);
-            await new Promise(r => setTimeout(r, gap * 1000));
-        }
-    }
-
-    if (tokenList.length === 0 && $.userList.length === 0) {
-        $.log(`未配置任何账号，请设置以下任一环境变量：`);
-        $.log(`  1. LONGFOR_TOKEN  → Token直传模式（推荐）`);
-        $.log(`  2. WX_ID         → 微信登录模式`);
     }
 })()
-    .catch((e) => $.log(e.message || e))
-    .finally(() => $.done());
+    .catch((e) => console.log(e.message || e))

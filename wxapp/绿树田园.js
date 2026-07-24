@@ -1,49 +1,26 @@
-// 当前脚本来自于 http://script.345yun.cn 脚本库下载！
-// 当前脚本来自于 http://2.345yun.cn 脚本库下载！
-// 当前脚本来自于 http://2.345yun.cc 脚本库下载！
-// 脚本库官方QQ群1群: 429274456
-// 脚本库官方QQ群2群: 1077801222
-// 脚本库官方QQ群3群: 433030897
-// 脚本库中的所有脚本文件均来自热心网友上传和互联网收集。
-// 脚本库仅提供文件上传和下载服务，不提供脚本文件的审核。
-// 您在使用脚本库下载的脚本时自行检查判断风险。
-// 所涉及到的 账号安全、数据泄露、设备故障、软件违规封禁、财产损失等问题及法律风险，与脚本库无关！均由开发者、上传者、使用者自行承担。
-
 /**
- * ============================================================
- *  绿树田园 - 青龙面板每日签到脚本（微信协议版）
- *  现已上线小程序公众号注册，每日签到得1元！
- * ============================================================
- *
- *  脚本功能：
- *    1. 优先使用 TreeCoin 授权码(TREE+28位)：从 TREECOIN_AUTH_CODE 读取，
- *       多账号用 & 或换行分隔，走 /auth/login-by-auth-code 登录获取 token
- *    2. 兼容微信协议：配置 WX_ID 时自动经 getCode.js 获取微信 code，
- *       传给 /wechat/miniprogram/login 登录（需未配置 TREECOIN_AUTH_CODE）
- *    3. 模拟页面访问设置 page_visit 标记
- *    4. 执行每日签到（POST /app/signin，明文 body，token 走 Authorization）
- *    5. 输出签到结果(树苗/大树收益)
- *
- *  使用方法（推荐：授权码）：
- *    1. 青龙面板 → 环境变量 → 添加：
- *         TREECOIN_AUTH_CODE = 授权码（多账号用 & 或换行分隔）
- *       示例：
- *         TREECOIN_AUTH_CODE = TREE8G5MXFQPF72&TREExxxxxxxxxxxxxxxx
- *    2. 青龙面板 → 定时任务 → 命令：task 绿树田园.js
- *         cron: 0 16,8 * * *
- *         name: 绿树田园
- *
- *  微信协议方式（可选，需清空 TREECOIN_AUTH_CODE）：
- *    WX_ID  微信账号（多账号换行/&/| 分隔），格式 wxid#备注
- *
- *  环境变量：
- *    TREECOIN_AUTH_CODE  授权码（优先，默认已内置一个，多账号 &/换行 分隔）
- *    WX_ID             微信账号（自动 getcode，仅在未配置 TREECOIN_AUTH_CODE 时生效）
- *    TREECOIN_APPID    绿树田园小程序 AppID（默认 wx1cc3b7be9bf56740，可覆盖）
- *    TREECOIN_API_BASE 后端地址（默认 https://treecoin.cn/api）
- *    TREECOIN_INVITE_CODE 邀请码（默认空）
- * ============================================================
- */
+------------------------------------------
+@Author: sm
+@Date: 2026.07.24
+@Description: 绿树田园微信小程序每日签到（微信协议版，适配青龙）
+cron: 30 7,13 * * *
+
+变量名：WX_ID / TREECOIN_AUTH_CODE
+变量值：WX_ID=微信账号(wxid#备注,多账号换行/&/|分隔)；TREECOIN_AUTH_CODE=授权码(优先,多账号&/换行分隔)
+
+------------------------------------------
+
+变量：
+  WX_ID              微信账号（自动经 getCode.js 获取 code，仅在未配置 TREECOIN_AUTH_CODE 时生效）
+  TREECOIN_AUTH_CODE 授权码（优先，多账号 &/换行 分隔）
+  TREECOIN_APPID     小程序 AppID（默认 wx1cc3b7be9bf56740）
+  TREECOIN_API_BASE  后端地址（默认 https://treecoin.cn/api）
+  TREECOIN_INVITE_CODE 邀请码（默认空）
+
+WX_ID 格式：
+  wxid#备注  多个换行
+------------------------------------------
+*/
 
 const crypto = require('crypto')
 const https = require('https')
@@ -375,13 +352,3 @@ main().catch(err => {
     console.error(err)
 })
 
-// 当前脚本来自于 http://script.345yun.cn 脚本库下载！
-// 当前脚本来自于 http://2.345yun.cn 脚本库下载！
-// 当前脚本来自于 http://2.345yun.cc 脚本库下载！
-// 脚本库官方QQ群1群: 429274456
-// 脚本库官方QQ群2群: 1077801222
-// 脚本库官方QQ群3群: 433030897
-// 脚本库中的所有脚本文件均来自热心网友上传和互联网收集。
-// 脚本库仅提供文件上传和下载服务，不提供脚本文件的审核。
-// 您在使用脚本库下载的脚本时自行检查判断风险。
-// 所涉及到的 账号安全、数据泄露、设备故障、软件违规封禁、财产损失等问题及法律风险，与脚本库无关！均由开发者、上传者、使用者自行承担。
