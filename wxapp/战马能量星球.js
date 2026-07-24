@@ -76,18 +76,20 @@ function getCommonHeaders() {
 
 // ===================== 账号/code/手机号 统一走 getCode.js =====================
 
-// 解析 WX_ID：返回需要运行的账号标识集合（用于筛选账号）
+// 解析 WX_ID（格式：identifier#备注，多账号换行 / & / @ 分隔）
 function getWXIDAccounts() {
     const raw = (process.env.WX_ID || '').trim();
     if (!raw) return [];
-    const set = new Set();
-    for (const line of raw.split(/[\n@&|]+/)) {
+    const list = [];
+    for (const line of raw.split(/[&\n@]/)) {
         const trimmed = line.trim();
         if (!trimmed) continue;
-        const id = trimmed.split('#')[0].trim();
-        if (id) set.add(id);
+        const parts = trimmed.split('#');
+        const identifier = parts[0].trim();
+        const remark = parts[1] || identifier;
+        if (identifier) list.push({ openid: identifier, wxid: identifier, nickname: remark });
     }
-    return [...set];
+    return list;
 }
 
 // 通过统一 getCode 模块获取 wx.login code（自动路由牛子/应用宝）
@@ -235,32 +237,18 @@ async function getOrRefreshSafe(account, tokenStore) {
 
 // ===================== 初始化 =====================
 async function Envs() {
-    console.log('开始通过 getCode（WX_ID / YYB_SERVER）获取账号列表...');
-    let accounts;
-    try {
-        accounts = (await getCode.getOnlineAccounts()).map(x => x.account);
-    } catch (e) {
-        console.log('获取账号列表失败:', e && e.message ? e.message : e);
+    console.log('开始解析环境变量 WX_ID 获取账号列表...');
+    const accounts = getWXIDAccounts();
+    if (!accounts.length) {
+        console.log('未解析到任何账号，请检查环境变量 WX_ID（格式：wxid#备注，多账号换行/@/& 分隔）');
         return false;
     }
-    if (!accounts?.length) {
-        console.log('未获取到微信账号（请检查 YYB_SERVER / WX_ID 配置）');
-        return false;
-    }
-    // 配置了 WX_ID 时，仅运行其中列出的账号
-    const wxidFilter = getWXIDAccounts();
-    let runList = accounts;
-    if (wxidFilter.length) {
-        const set = new Set(wxidFilter);
-        runList = accounts.filter(a => set.has(a.openid) || set.has(a.wxid) || set.has(String(a._ref)));
-        console.log(`按 WX_ID 过滤后保留 ${runList.length} 个账号`);
-    }
-    console.log(`共 ${runList.length} 个账号`);
+    console.log(`共 ${accounts.length} 个账号`);
 
     const tokenStore = readTokenFile();
     if (!tokenStore.accounts) tokenStore.accounts = {};
 
-    for (const acc of runList) {
+    for (const acc of accounts) {
         const cred = await getOrRefreshSafe(acc, tokenStore);
         if (cred) zmnlxqArr.push(cred);
         await $.wait(2000);
