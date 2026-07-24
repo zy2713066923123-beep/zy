@@ -7,7 +7,7 @@ cron: 0 8,12,20 * * *
 变量:
   export WECHAT_SERVER="http://127.0.0.1:8069"
   export WX_ID="wxid#备注"
-  多账号用换行 或 @ 分隔（兼容 yyb:openid / wx:wxid 前缀）
+  多账号用换行 或 @ 分隔
 """
 
 from __future__ import annotations
@@ -136,8 +136,7 @@ def is_wechat_protocol_id(value: str) -> bool:
 
 
 def normalize_protocol_wxid(value: str) -> str:
-    text = (value or "").strip()
-    return text[3:] if text.startswith("wx:") else text
+    return (value or "").strip()
 
 
 def parse_account(raw: str) -> Dict[str, str]:
@@ -257,10 +256,8 @@ def get_wx_code(account: AccountCtx, label: str) -> Optional[str]:
     if not protocol_wxid:
         log("[" + label + "] 账号标识缺失")
         return None
-    use_yyb = protocol_wxid.startswith("yyb:")
-    identifier = protocol_wxid[4:] if use_yyb else protocol_wxid
     try:
-        code = getCode.get_single_code(TARGET_APPID, identifier, use_yyb=use_yyb)
+        code = getCode.get_single_code(TARGET_APPID, protocol_wxid)
     except Exception as exc:
         log("[" + label + "] 获取 code 异常：" + str(exc)[:160])
         return None

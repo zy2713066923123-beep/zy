@@ -300,6 +300,50 @@ class YYBAdapter {
             throw new Error(`[YYB] 请求手机号code失败: ${msg}`);
         }
     }
+
+    async getPhoneEncrypted(ref, appId) {
+        const url = `${this.serverUrl}/wxapp/getPhoneNumber`;
+        const resolvedRef = await this._resolveRef(ref);
+        try {
+            console.log(`[YYB] 请求手机号加密数据: ref=${resolvedRef}, app_id=${appId}`);
+            const r = await axios.post(url, { ref: resolvedRef, app_id: appId }, {
+                headers: { 'Content-Type': 'application/json' },
+                timeout: 30000,
+                validateStatus: () => true
+            });
+            if (r.status === 404) {
+                const errMsg = r.data?.msg || r.data?.error || JSON.stringify(r.data).slice(0, 80);
+                throw new Error(`接口/账号不存在(404): ${errMsg}`);
+            }
+            if (r.status === 409) {
+                throw new Error('账号login_buffer已过期，需要重新扫码登录');
+            }
+            const result = r.data;
+            const codeVal = result?.code ?? -1;
+            if (codeVal !== 0) {
+                throw new Error(`[${codeVal}] ${result?.msg || `HTTP ${r.status}`}`);
+            }
+            const data = result?.data;
+            const inner = data?.result ?? data;
+            if (!inner || typeof inner !== 'object') {
+                throw new Error(`响应data异常: ${JSON.stringify(inner).slice(0, 100)}`);
+            }
+            const encryptedData = inner.encryptedData ?? inner.encrypted_data;
+            const iv = inner.iv ?? inner.IV;
+            if (!encryptedData || !iv) {
+                // 部分服务仅返回手机号 code，不含加密载荷
+                if (inner.code) {
+                    console.warn('[YYB] 该服务仅返回手机号 code，不含 encryptedData/iv');
+                    return { encryptedData: null, iv: null, code: String(inner.code) };
+                }
+                throw new Error(`未拿到 encryptedData/iv: ${JSON.stringify(result).slice(0, 150)}`);
+            }
+            return { encryptedData: String(encryptedData), iv: String(iv), code: inner.code ? String(inner.code) : null };
+        } catch (e) {
+            const msg = (e && e.message) ? e.message : String(e);
+            throw new Error(`[YYB] 请求手机号加密数据失败: ${msg}`);
+        }
+    }
 }
 
 
@@ -551,7 +595,7 @@ class WeChatCodeGetter {
         
         this.targetWxIds = [];
         if (this.wxIdFilter) {
-            this.targetWxIds = this.wxIdFilter.split('&').map(id => id.trim()).filter(id => id);
+            this.targetWxIds = this.wxIdFilter.split(/[@&\n|]+/).map(id => id.trim()).filter(id => id);
             console.log(`[getCode] WX_ID筛选: ${this.targetWxIds.join(', ')}`);
         }
         
@@ -804,6 +848,58 @@ class WeChatCodeGetter {
         }
     }
 
+    /**
+     * 获取单个账号的手机号加密数据（encryptedData/iv，智能路由）
+     * 目前仅应用宝(YYB)协议支持
+     */
+    async getAppletPhoneEncrypted(appId, identifier) {
+        if (identifier === undefined || identifier === null || identifier === '') {
+            throw new Error('identifier 未提供，请检查 WX_ID 环境变量或调用参数');
+        }
+        const targetProtocol = this._detectProtocolForIdentifier(identifier);
+        console.log(`[getCode] 手机号加密数据路由: ${identifier} → ${targetProtocol}`);
+
+        const cacheKey = `hc_${targetProtocol}`;
+        if (!this._healthCache || this._healthCache[cacheKey] === undefined) {
+            this._healthCache = this._healthCache || {};
+            if (targetProtocol === 'yyb') {
+                const ok = await new YYBAdapter(this.yybServer).healthCheck();
+                this._healthCache.hc_yyb = ok;
+            } else {
+                const ok = await new WechatAdapter(this.wechatServer, this.adminKey).healthCheck();
+                this._healthCache.hc_wechat = ok;
+            }
+        }
+        const isHealthy = this._healthCache[cacheKey];
+
+        let primary, primaryName;
+        if (targetProtocol === 'yyb') {
+            primary = new YYBAdapter(this.yybServer);
+            primaryName = '应用宝';
+        } else {
+            primary = new WechatAdapter(this.wechatServer, this.adminKey);
+            primaryName = '牛子';
+        }
+
+        if (!isHealthy) {
+            throw new Error(`${primaryName}服务不可用 (${targetProtocol === 'yyb' ? this.yybServer : this.wechatServer})`);
+        }
+
+        try {
+            let result;
+            if (targetProtocol === 'yyb') {
+                result = await primary.getPhoneEncrypted(identifier, appId);
+            } else {
+                throw new Error(`${primaryName}(牛子协议暂不支持手机号加密数据)`);
+            }
+            console.log(`[getCode] ✓ ${primaryName}获取手机号加密数据成功`);
+            return result;
+        } catch (primaryError) {
+            console.log(`[getCode] ⚠ ${primaryName}获取手机号加密数据失败: ${primaryError.message}`);
+            throw primaryError;
+        }
+    }
+
     async getCodesForAllOnlineAccounts(appId) {
         const online = await this.getOnlineAccounts();
         const codes = {};
@@ -900,12 +996,28 @@ async function getSinglePhoneNumber(appId, identifier) {
     }
 }
 
+/**
+ * 为指定账号获取手机号加密数据（encryptedData/iv，便捷函数）
+ * 目前仅 YYB 协议支持；若服务仅返回手机号 code，则返回 { encryptedData: null, iv: null, code }
+ */
+async function getSinglePhoneEncrypted(appId, identifier) {
+    const getter = new WeChatCodeGetter();
+    await getter.init();
+    try {
+        return await getter.getAppletPhoneEncrypted(appId, identifier);
+    } catch (e) {
+        console.log(`[getCode] 获取手机号加密数据失败: ${e.message}`);
+        throw e;
+    }
+}
+
 module.exports = {
     WeChatCodeGetter,
     getWechatCodes,
     printOnlineStatus,
     getSingleCode,
     getSinglePhoneNumber,
+    getSinglePhoneEncrypted,
     YYBAdapter,
     WechatAdapter
 };
