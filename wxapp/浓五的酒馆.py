@@ -96,6 +96,48 @@ USER_AGENT = (
 )
 
 
+# ====================== 本地 token 缓存（先走缓存，失效后再 getCode） ======================
+CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "token_caches")
+try:
+    os.makedirs(CACHE_DIR, exist_ok=True)
+except Exception:
+    pass
+
+
+def cache_path_for(server: str) -> str:
+    ref, _ = parse_yyb_go_entry(server)
+    ref = ref or str(server)
+    return os.path.join(CACHE_DIR, f"nongwu_token_cache_{ref}.json")
+
+
+def load_cache(path: str):
+    try:
+        if not os.path.exists(path):
+            return None
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def save_cache(token: str, path: str) -> None:
+    if not token:
+        return
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"token": token, "updatedAt": datetime.now().isoformat()}, f, ensure_ascii=False, indent=2)
+    except Exception as exc:
+        print(f"⚠️ [缓存] 写入失败: {exc}")
+
+
+def remove_cache(path: str) -> None:
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except Exception:
+        pass
+
+
 def now_text() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -432,45 +474,71 @@ def run_account(index: int, total: int, server: str) -> Dict[str, Any]:
     print(f"⏳ [延迟] 启动延迟 {delay}s")
     sleep(delay)
 
-    code = get_code(server)
-    if not code:
-        result["error"] = "获取 code 失败"
-        return result
+    # ===================== 先走缓存，失效后再 getCode =====================
+    ref, _ = parse_yyb_go_entry(server)
+    token = None
+    cache_valid = False
+    cached = load_cache(cache_path_for(server))
+    if cached and cached.get("token"):
+        print(f"[{ref}] 尝试使用缓存 token")
+        token = cached["token"]
+        v = api_get(server, USER_INFO_URL, token, proxies)
+        if v.get("code") == 0 and v.get("data"):
+            member_data = v["data"].get("member", {})
+            grade_data = v["data"].get("grade", {})
+            points_balance = to_int(member_data.get("points", 0))
+            result["initialScore"] = points_balance
+            result["userInfo"] = f"{member_data.get('nick_name', '未知')} {grade_data.get('level_name', '普通会员')} 当前积分{points_balance}"
+            cache_valid = True
+            print(f"✅ [{ref}] 缓存 token 有效，跳过 getCode")
+        else:
+            print(f"⚠️ [{ref}] 缓存 token 失效，重新登录")
+            token = None
+            remove_cache(cache_path_for(server))
 
-    token, raw_login = login_by_code(server, code, proxies)
     if not token:
-        result["error"] = f"登录失败: {json_preview(raw_login)}"
-        return result
+        code = get_code(server)
+        if not code:
+            result["error"] = "获取 code 失败"
+            return result
+
+        token, raw_login = login_by_code(server, code, proxies)
+        if not token:
+            result["error"] = f"登录失败: {json_preview(raw_login)}"
+            return result
+
+        save_cache(token, cache_path_for(server))
 
     result["token"] = mask(token)
 
     try:
-        print(f"🔍 [用户] 开始查询用户信息...")
-        user_info_resp = api_get(
-            server,
-            USER_INFO_URL,
-            token,
-            proxies
-        )
+        if not cache_valid:
+            print(f"🔍 [用户] 开始查询用户信息...")
+            user_info_resp = api_get(
+                server,
+                USER_INFO_URL,
+                token,
+                proxies
+            )
 
-        print(f"🔍 [用户] 响应数据: {json_preview(user_info_resp, 200)}")
+            print(f"🔍 [用户] 响应数据: {json_preview(user_info_resp, 200)}")
 
-        if user_info_resp.get("code") == 0 and user_info_resp.get("data"):
-            member_data = user_info_resp["data"].get("member", {})
-            grade_data = user_info_resp["data"].get("grade", {})
-            points_balance = to_int(member_data.get("points", 0))
-            member_name = member_data.get("nick_name", "未知")
-            member_level = grade_data.get("level_name", "普通会员")
+            if user_info_resp.get("code") == 0 and user_info_resp.get("data"):
+                member_data = user_info_resp["data"].get("member", {})
+                grade_data = user_info_resp["data"].get("grade", {})
+                points_balance = to_int(member_data.get("points", 0))
+                member_name = member_data.get("nick_name", "未知")
+                member_level = grade_data.get("level_name", "普通会员")
 
-            result["initialScore"] = points_balance
-            result["userInfo"] = f"{member_name} {member_level} 当前积分{points_balance}"
+                result["initialScore"] = points_balance
+                result["userInfo"] = f"{member_name} {member_level} 当前积分{points_balance}"
 
-            print(f"✅ [用户] {result['userInfo']}")
-        else:
-            error_msg = user_info_resp.get("msg") or "获取用户信息失败"
-            result["userInfo"] = error_msg
-            print(f"⚠️ [用户] {result['userInfo']}")
-            print(f"⚠️ [用户] 完整响应: {json_preview(user_info_resp, 500)}")
+                print(f"✅ [用户] {result['userInfo']}")
+            else:
+                error_msg = user_info_resp.get("msg") or "获取用户信息失败"
+                result["userInfo"] = error_msg
+                print(f"⚠️ [用户] {result['userInfo']}")
+                print(f"⚠️ [用户] 完整响应: {json_preview(user_info_resp, 500)}")
 
         sleep(2)
 

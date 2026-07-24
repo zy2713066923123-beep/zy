@@ -22,6 +22,8 @@ WX_ID 格式：
 */
 
 const axios = require("axios");
+const fs = require("fs");
+const path = require("path");
 const { getSingleCode } = require("./getCode.js");
 
 // ====================== 账号（环境变量 WX_ID = wxid#备注，换行或&） ======================
@@ -116,6 +118,27 @@ async function getWxCode(identifier) {
     return await getSingleCode(APP.appid, String(identifier).split("#")[0].trim());
 }
 
+// ====================== 本地登录态缓存（先走缓存，失效后再 getCode） ======================
+const TOKEN_CACHE_FILE = path.join(__dirname, "token_caches", "oppo_token_cache.json");
+try { fs.mkdirSync(path.dirname(TOKEN_CACHE_FILE), { recursive: true }); } catch (e) {}
+
+function readTokenCache() {
+    try {
+        if (!fs.existsSync(TOKEN_CACHE_FILE)) return {};
+        return JSON.parse(fs.readFileSync(TOKEN_CACHE_FILE, "utf8")) || {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function writeTokenCache(cache) {
+    try {
+        fs.writeFileSync(TOKEN_CACHE_FILE, JSON.stringify(cache, null, 2), "utf8");
+    } catch (e) {
+        console.log(`写入登录态缓存失败: ${e.message || e}`);
+    }
+}
+
 
 class OppoTask {
     constructor(rawAccount, index) {
@@ -201,8 +224,63 @@ class OppoTask {
         return result;
     }
 
+    get cacheKey() {
+        return this.wxid || String(this.account.openid || "").trim();
+    }
+
+    getCachedSession() {
+        const cache = readTokenCache();
+        return cache[this.cacheKey] || null;
+    }
+
+    saveCachedSession() {
+        if (!this.sessionId) return;
+        const cache = readTokenCache();
+        cache[this.cacheKey] = {
+            sessionId: this.sessionId,
+            encryptedSession: this.encryptedSession,
+            openId: this.openId,
+            updatedAt: new Date().toISOString(),
+        };
+        writeTokenCache(cache);
+    }
+
+    removeCachedSession() {
+        const cache = readTokenCache();
+        if (cache[this.cacheKey]) {
+            delete cache[this.cacheKey];
+            writeTokenCache(cache);
+        }
+        this.sessionId = "";
+        this.encryptedSession = "";
+        this.openId = "";
+    }
+
+    async checkSession() {
+        try {
+            const base = await this.miniRequest("GET", "/member/baseInfo", { sessionId: this.sessionId });
+            return !!(base && base.data);
+        } catch (e) {
+            return false;
+        }
+    }
+
     async login() {
+        // 先走缓存: 本地缓存的登录态仍有效则直接使用, 不调用 getCode
+        const cached = this.getCachedSession();
+        if (cached && cached.sessionId) {
+            this.sessionId = cached.sessionId;
+            this.encryptedSession = cached.encryptedSession || "";
+            this.openId = cached.openId || "";
+            if (await this.checkSession()) {
+                this.log(`使用缓存登录态 openId=${this.openId || "未知"}`);
+                return;
+            }
+            this.log(`缓存登录态失效, 重新登录`);
+            this.removeCachedSession();
+        }
         const code = await getWxCode(this.wxid);
+        if (!code) throw new Error("获取code失败");
         const { status, data } = await request({
             method: "POST",
             url: `${MINI_API}/user/pre/auth`,
@@ -218,6 +296,7 @@ class OppoTask {
         this.encryptedSession = info.encryptedSession || "";
         this.openId = info.openId || "";
         if (!this.sessionId) throw new Error(`登录响应缺少 sessionId: ${short(data)}`);
+        this.saveCachedSession();
         this.log(`登录成功 openId=${this.openId || "未知"}`);
     }
 

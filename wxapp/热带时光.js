@@ -22,6 +22,8 @@ WX_ID 格式：
 */
 
 const axios = require("axios");
+const fs = require("fs");
+const path = require("path");
 const { getSingleCode } = require("./getCode.js");
 // ====================== 账号（环境变量 WX_ID = wxid#备注，换行或&） ======================
 const SERVERS = (process.env.WX_ID || "")
@@ -46,6 +48,47 @@ async function getCode(server) {
     } catch (e) {
         console.log(__id + " 获取code异常: " + (e && e.message ? e.message : e));
         return null;
+    }
+}
+
+// ====================== 本地登录态缓存（先走缓存，失效后再 getCode） ======================
+const TOKEN_CACHE_FILE = path.join(__dirname, "token_caches", "rdtg_token_cache.json");
+try { fs.mkdirSync(path.dirname(TOKEN_CACHE_FILE), { recursive: true }); } catch (e) {}
+
+function readTokenCache() {
+    try {
+        if (!fs.existsSync(TOKEN_CACHE_FILE)) return {};
+        return JSON.parse(fs.readFileSync(TOKEN_CACHE_FILE, "utf8")) || {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function writeTokenCache(cache) {
+    try {
+        fs.writeFileSync(TOKEN_CACHE_FILE, JSON.stringify(cache, null, 2), "utf8");
+    } catch (e) {
+        console.log(`写入登录态缓存失败: ${e.message || e}`);
+    }
+}
+
+function getCachedToken(ref) {
+    const cache = readTokenCache();
+    return cache[ref] || null;
+}
+
+function saveCachedToken(ref, value) {
+    if (!value || !value.shiruanKey) return;
+    const cache = readTokenCache();
+    cache[ref] = { ...value, updatedAt: new Date().toISOString() };
+    writeTokenCache(cache);
+}
+
+function removeCachedToken(ref) {
+    const cache = readTokenCache();
+    if (cache[ref]) {
+        delete cache[ref];
+        writeTokenCache(cache);
     }
 }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -195,7 +238,56 @@ class Task {
         return await getCode(this.server);
     }
 
+    get cacheKey() {
+        return String(this.server).split("#")[0].trim();
+    }
+
+    getCachedSession() {
+        return getCachedToken(this.cacheKey);
+    }
+
+    saveCachedSession() {
+        saveCachedToken(this.cacheKey, {
+            shiruanKey: this.shiruanKey,
+            openid: this.openid,
+            mobile: this.mobile,
+            templateUrl: this.templateUrl,
+        });
+    }
+
+    removeCachedSession() {
+        removeCachedToken(this.cacheKey);
+        this.shiruanKey = "";
+    }
+
+    async pingAuth() {
+        try {
+            const { data } = await axios.post(
+                `${this.app.apiBase}/mini/user-asset`,
+                {},
+                { headers: this.authHeaders(), timeout: 30000 }
+            );
+            return data?.code === 200;
+        } catch (e) {
+            return false;
+        }
+    }
+
     async login() {
+        // 先走缓存: 本地缓存的登录态仍有效则直接使用, 不调用 getCode
+        const cached = this.getCachedSession();
+        if (cached && cached.shiruanKey) {
+            this.shiruanKey = cached.shiruanKey;
+            this.openid = cached.openid || this.openid;
+            this.mobile = cached.mobile || "";
+            this.templateUrl = cached.templateUrl || "";
+            if (await this.pingAuth()) {
+                this.log(`使用缓存登录态: ${this.openid || maskPhone(this.mobile)}`);
+                return;
+            }
+            this.log(`缓存登录态失效, 重新登录`);
+            this.removeCachedSession();
+        }
         const code = await this.getWxCode();
         if (!code) throw new Error("获取code失败");
         const { data } = await axios.post(
@@ -215,6 +307,7 @@ class Task {
         this.openid = data.data?.openid || "";
         this.mobile = data.data?.mobile || "";
         this.templateUrl = data.data?.templateUrl || "";
+        this.saveCachedSession();
         this.log(`登录成功: ${maskPhone(this.mobile)} openId=${this.openid}`);
     }
 

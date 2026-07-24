@@ -22,6 +22,8 @@ WX_ID 格式：
 */
 
 const axios = require("axios");
+const fs = require("fs");
+const path = require("path");
 const { getSingleCode } = require("./getCode.js");
 /* __WX_ID_DOLLAR_SHIM__ */
 if (typeof $ === 'undefined') {
@@ -76,6 +78,47 @@ async function getCode(server) {
         return null;
     }
 }
+
+// ====================== 本地 token 缓存（先走缓存，失效后再 getCode） ======================
+const TOKEN_CACHE_FILE = path.join(__dirname, "token_caches", "guyu_token_cache.json");
+try { fs.mkdirSync(path.dirname(TOKEN_CACHE_FILE), { recursive: true }); } catch (e) {}
+
+function readTokenCache() {
+    try {
+        if (!fs.existsSync(TOKEN_CACHE_FILE)) return {};
+        return JSON.parse(fs.readFileSync(TOKEN_CACHE_FILE, "utf8")) || {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function writeTokenCache(cache) {
+    try {
+        fs.writeFileSync(TOKEN_CACHE_FILE, JSON.stringify(cache, null, 2), "utf8");
+    } catch (e) {
+        console.log(`写入 token 缓存失败: ${e.message || e}`);
+    }
+}
+
+function getCachedToken(ref) {
+    const cache = readTokenCache();
+    return cache[ref] || null;
+}
+
+function saveCachedToken(ref, token) {
+    if (!token) return;
+    const cache = readTokenCache();
+    cache[ref] = { token, updatedAt: new Date().toISOString() };
+    writeTokenCache(cache);
+}
+
+function removeCachedToken(ref) {
+    const cache = readTokenCache();
+    if (cache[ref]) {
+        delete cache[ref];
+        writeTokenCache(cache);
+    }
+}
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 let userIdx = 1;
 
@@ -99,16 +142,37 @@ class Task {
     async run() {
         //随机延迟5-30s 模拟人工操作
         await await sleep(Math.floor(Math.random() * 20 + 5) * 1000);
-        let code = await getCode(this.server)
-        if (code) {
-            await this.getUserToken(code)
+        // 先走缓存: 本地缓存 token 仍有效则直接使用, 不调用 getCode
+        let usedCache = false;
+        const cached = getCachedToken(this.ref);
+        if (cached && cached.token) {
+            this.token = cached.token;
+            this._pointsQueried = false;
+            const ok = await this.getUserPoints();
+            if (ok) {
+                usedCache = true;
+                console.log(`🌸账号[${this.index}] 使用缓存 token，跳过 getCode`);
+            } else {
+                console.log(`🌸账号[${this.index}] 缓存 token 失效，重新登录`);
+                removeCachedToken(this.ref);
+                this.token = null;
+                this._pointsQueried = false;
+            }
         }
-        if (!this.token) {
-            console.log(`账号[${this.index}] 获取用户Token失败❌`)
-            return
+        if (!usedCache) {
+            let code = await getCode(this.server);
+            if (code) {
+                await this.getUserToken(code);
+            }
+            if (!this.token) {
+                console.log(`账号[${this.index}] 获取用户Token失败❌`);
+                return;
+            }
+            saveCachedToken(this.ref, this.token);
+            this._pointsQueried = false;
         }
-        await this.signIn()
-        await this.getUserPoints()
+        await this.signIn();
+        if (!this._pointsQueried) await this.getUserPoints();
     }
     async getUserToken(code) {
         let data = JSON.stringify({
@@ -244,10 +308,13 @@ class Task {
         let {
             data: result
         } = await this.request(options);
+        this._pointsQueried = true;
         if (result?.success) {
             console.log(`账号[${this.index}]` + `积分:${result.result[0].score}`);
+            return true;
         } else {
-            console.log(`账号[${this.index}] 获取积分-失败:${result.msg}❌`)
+            console.log(`账号[${this.index}] 获取积分-失败:${result.msg}❌`);
+            return false;
         }
     }
 

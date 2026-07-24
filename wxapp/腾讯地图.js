@@ -22,6 +22,8 @@ WX_ID 格式：
 */
 
 const axios = require("axios");
+const fs = require("fs");
+const path = require("path");
 const { getSingleCode } = require("./getCode.js");
 const crypto = require("crypto");
 // ====================== 账号（环境变量 WX_ID = wxid#备注，换行或&） ======================
@@ -47,6 +49,47 @@ async function getCode(server) {
     } catch (e) {
         console.log(__id + " 获取code异常: " + (e && e.message ? e.message : e));
         return null;
+    }
+}
+
+// ====================== 本地登录态缓存（先走缓存，失效后再 getCode） ======================
+const TOKEN_CACHE_FILE = path.join(__dirname, "token_caches", "tmap_token_cache.json");
+try { fs.mkdirSync(path.dirname(TOKEN_CACHE_FILE), { recursive: true }); } catch (e) {}
+
+function readTokenCache() {
+    try {
+        if (!fs.existsSync(TOKEN_CACHE_FILE)) return {};
+        return JSON.parse(fs.readFileSync(TOKEN_CACHE_FILE, "utf8")) || {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function writeTokenCache(cache) {
+    try {
+        fs.writeFileSync(TOKEN_CACHE_FILE, JSON.stringify(cache, null, 2), "utf8");
+    } catch (e) {
+        console.log(`写入登录态缓存失败: ${e.message || e}`);
+    }
+}
+
+function getCachedLoginInfo(ref) {
+    const cache = readTokenCache();
+    return cache[ref] || null;
+}
+
+function saveCachedLoginInfo(ref, loginInfo, openid) {
+    if (!loginInfo || !loginInfo.user_id) return;
+    const cache = readTokenCache();
+    cache[ref] = { loginInfo, openid, updatedAt: new Date().toISOString() };
+    writeTokenCache(cache);
+}
+
+function removeCachedLoginInfo(ref) {
+    const cache = readTokenCache();
+    if (cache[ref]) {
+        delete cache[ref];
+        writeTokenCache(cache);
     }
 }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -352,10 +395,43 @@ class TencentMap {
         console.log(`签到：成功${prizes ? `，${prizes}` : ""}`);
     }
 
+    get cacheKey() {
+        return this.ref || String(this.server).split("#")[0].trim();
+    }
+
+    getCachedLogin() {
+        return getCachedLoginInfo(this.cacheKey);
+    }
+
+    saveCachedLogin() {
+        saveCachedLoginInfo(this.cacheKey, this.loginInfo, this.openid);
+    }
+
+    removeCachedLogin() {
+        removeCachedLoginInfo(this.cacheKey);
+    }
+
     async run() {
         console.log(`\n========== ${APP.name} 账号[${this.index}] ${this.account.remark || this.openid} ==========`);
-        await this.miniLogin();
-        await this.queryUser();
+        // 先走缓存: 本地缓存登录态仍有效则直接使用, 不调用 getCode
+        const cached = this.getCachedLogin();
+        if (cached && cached.loginInfo) {
+            this.loginInfo = cached.loginInfo;
+            this.openid = cached.openid || this.openid;
+            await this.queryUser();
+            if (this.userInfo && this.userInfo.userid) {
+                console.log(`使用缓存登录态 openid=${this.openid}`);
+                this._userQueried = true;
+            } else {
+                console.log(`缓存登录态失效，重新登录`);
+                this.removeCachedLogin();
+                await this.miniLogin();
+            }
+        } else {
+            await this.miniLogin();
+        }
+        this.saveCachedLogin();
+        if (!this._userQueried) await this.queryUser();
         await this.queryBalance("签到前现金余额");
         await this.queryAssets();
         await this.checkin();

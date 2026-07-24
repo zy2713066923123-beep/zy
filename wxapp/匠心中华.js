@@ -22,6 +22,8 @@ WX_ID 格式：
 */
 
 const axios = require("axios");
+const fs = require("fs");
+const path = require("path");
 const { getSingleCode } = require("./getCode.js");
 const crypto = require("crypto");
 // ====================== 账号（环境变量 WX_ID = wxid#备注，换行或&） ======================
@@ -47,6 +49,47 @@ async function getCode(server) {
     } catch (e) {
         console.log(__id + " 获取code异常: " + (e && e.message ? e.message : e));
         return null;
+    }
+}
+
+// ====================== 本地 token 缓存（先走缓存，失效后再 getCode） ======================
+const TOKEN_CACHE_FILE = path.join(__dirname, "token_caches", "jiangxin_token_cache.json");
+try { fs.mkdirSync(path.dirname(TOKEN_CACHE_FILE), { recursive: true }); } catch (e) {}
+
+function readTokenCache() {
+    try {
+        if (!fs.existsSync(TOKEN_CACHE_FILE)) return {};
+        return JSON.parse(fs.readFileSync(TOKEN_CACHE_FILE, "utf8")) || {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function writeTokenCache(cache) {
+    try {
+        fs.writeFileSync(TOKEN_CACHE_FILE, JSON.stringify(cache, null, 2), "utf8");
+    } catch (e) {
+        console.log(`写入 token 缓存失败: ${e.message || e}`);
+    }
+}
+
+function getCachedToken(ref) {
+    const cache = readTokenCache();
+    return cache[ref] || null;
+}
+
+function saveCachedToken(ref, token) {
+    if (!token) return;
+    const cache = readTokenCache();
+    cache[ref] = { token, updatedAt: new Date().toISOString() };
+    writeTokenCache(cache);
+}
+
+function removeCachedToken(ref) {
+    const cache = readTokenCache();
+    if (cache[ref]) {
+        delete cache[ref];
+        writeTokenCache(cache);
     }
 }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -182,8 +225,26 @@ class Quwa {
 async function runAccount(openid, index) {
     console.log(`\n========== ${APP.name} 账号[${index}] ${openid} ==========`);
     const runner = new Quwa(openid);
+    const cacheKey = String(openid).split("#")[0].trim();
     try {
-        console.log(`登录：${await runner.login()}`);
+        const cached = getCachedToken(cacheKey);
+        if (cached && cached.token) {
+            runner.token = cached.token;
+            // 用 checkOpenid 校验缓存 token 是否有效（同时取回 userID）
+            const v = await runner.api("/consumer/consumer/checkOpenid.do", { invitation: "" });
+            if (String(v?.code) === "1") {
+                const data = v?.data || {};
+                runner.userID = data.userID || data.userid || data.id || "";
+                console.log(`使用缓存 token（${openid}）`);
+            } else {
+                console.log(`缓存 token 失效，重新登录`);
+                removeCachedToken(cacheKey);
+                console.log(`登录：${await runner.login()}`);
+            }
+        } else {
+            console.log(`登录：${await runner.login()}`);
+        }
+        if (runner.token) saveCachedToken(cacheKey, runner.token);
         console.log(`查询：${await runner.query()}`);
         console.log(`签到：${await runner.sign()}`);
     } catch (e) {

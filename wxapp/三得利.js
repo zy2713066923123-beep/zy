@@ -22,6 +22,8 @@ WX_ID 格式：
 */
 
 const axios = require("axios");
+const fs = require("fs");
+const path = require("path");
 const { getSingleCode } = require("./getCode.js");
 const { SocksProxyAgent } = require('socks-proxy-agent');
 const { HttpsProxyAgent } = require('https-proxy-agent');
@@ -287,6 +289,47 @@ async function getCode(server) {
     }
 }
 
+// ====================== 本地 token 缓存（先走缓存，失效后再 getCode） ======================
+const TOKEN_CACHE_FILE = path.join(__dirname, "token_caches", "sandeli_token_cache.json");
+try { fs.mkdirSync(path.dirname(TOKEN_CACHE_FILE), { recursive: true }); } catch (e) {}
+
+function readTokenCache() {
+    try {
+        if (!fs.existsSync(TOKEN_CACHE_FILE)) return {};
+        return JSON.parse(fs.readFileSync(TOKEN_CACHE_FILE, "utf8")) || {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function writeTokenCache(cache) {
+    try {
+        fs.writeFileSync(TOKEN_CACHE_FILE, JSON.stringify(cache, null, 2), "utf8");
+    } catch (e) {
+        console.log(`写入 token 缓存失败: ${e.message || e}`);
+    }
+}
+
+function getCachedToken(ref) {
+    const cache = readTokenCache();
+    return cache[ref] || null;
+}
+
+function saveCachedToken(ref, token) {
+    if (!token) return;
+    const cache = readTokenCache();
+    cache[ref] = { token, updatedAt: new Date().toISOString() };
+    writeTokenCache(cache);
+}
+
+function removeCachedToken(ref) {
+    const cache = readTokenCache();
+    if (cache[ref]) {
+        delete cache[ref];
+        writeTokenCache(cache);
+    }
+}
+
 
 // 登录 【走代理+直连兜底】
 async function wxLogin(jsCode, UA, proxyAgent, server) {
@@ -403,31 +446,51 @@ async function runAccount(server, globalProxyAgent) {
         await sleep(PROXY_FETCH_INTERVAL);
     }
 
+    // ===================== 先走缓存，失效后再 getCode =====================
+    const ref = String(server).split("#")[0].trim();
+    let token = null;
+    const cached = getCachedToken(ref);
+    if (cached && cached.token) {
+        console.log(`ℹ️ [${server}] 尝试使用缓存 token`);
+        token = cached.token;
+        const v = await commonPost('/user/member/info', {}, token, UA, proxyAgent, server);
+        if (v && v.code == 200) {
+            result.score = v?.data?.currentScore || 0;
+            console.log(`✅ [${server}] 缓存 token 有效，跳过 getCode 与登录`);
+        } else {
+            console.log(`ℹ️ [${server}] 缓存 token 失效，重新登录`);
+            token = null;
+            removeCachedToken(ref);
+        }
+    }
+
     try {
         // 启动延迟（防风控）
         let startDelay = random(2000, 6000);
         console.log(`⏳ [${server}] 启动延迟 ${startDelay / 1000}s`);
         await sleep(startDelay);
 
-        // 1️⃣ 获取code
-        let code = await getCode(server);
-        if (!code) {
-            result.error = "获取code失败";
-            console.log(`❌ [${server}] 获取code失败`);
-            return result;
-        }
+        if (!token) {
+            // 1️⃣ 获取code
+            let code = await getCode(server);
+            if (!code) {
+                result.error = "获取code失败";
+                console.log(`❌ [${server}] 获取code失败`);
+                return result;
+            }
 
-        // 2️⃣ 登录获取token
-        let login = await wxLogin(code, UA, proxyAgent, server);
-        if (!login || login.code != 200) {
-            result.error = login?.msg || "登录失败";
-            console.log(`❌ [${server}] 登录失败：${login?.msg || "未知错误"}`);
-            return result;
-        }
+            // 2️⃣ 登录获取token
+            let login = await wxLogin(code, UA, proxyAgent, server);
+            if (!login || login.code != 200) {
+                result.error = login?.msg || "登录失败";
+                console.log(`❌ [${server}] 登录失败：${login?.msg || "未知错误"}`);
+                return result;
+            }
 
-        let token = login.data.tokenInfo.access_token;
-        console.log(`✅ [${server}] 登录成功`);
-        await sleep(random(3000, 8000));
+            token = login.data.tokenInfo.access_token;
+            console.log(`✅ [${server}] 登录成功`);
+            await sleep(random(3000, 8000));
+        }
 
         // 3️⃣ 签到
         let sign = await commonPost('/coupon/auth/signIn', {"miniappId":159}, token, UA, proxyAgent, server);
@@ -451,10 +514,14 @@ async function runAccount(server, globalProxyAgent) {
         }
         await sleep(random(2000, 5000));
 
-        // 5️⃣ 查询积分
-        let info = await commonPost('/user/member/info', {}, token, UA, proxyAgent, server);
-        result.score = info?.data?.currentScore || 0;
-        console.log(`🎯 [${server}] 当前积分：${result.score}`);
+        // 5️⃣ 查询积分（缓存有效时已在校验中获取则跳过重复请求）
+        if (cached && cached.token && result.score) {
+            console.log(`🎯 [${server}] 当前积分：${result.score}（来自缓存校验）`);
+        } else {
+            let info = await commonPost('/user/member/info', {}, token, UA, proxyAgent, server);
+            result.score = info?.data?.currentScore || 0;
+            console.log(`🎯 [${server}] 当前积分：${result.score}`);
+        }
 
         result.success = true;
         console.log(`✅ [${server}] 账号执行完成`);

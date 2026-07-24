@@ -22,6 +22,8 @@ WX_ID 格式：
 */
 
 const axios = require("axios");
+const fs = require("fs");
+const path = require("path");
 const { getSingleCode } = require("./getCode.js");
 // ====================== 账号（环境变量 WX_ID = wxid#备注，换行或&） ======================
 const SERVERS = (process.env.WX_ID || "")
@@ -116,6 +118,27 @@ async function getWxCode(server) {
         return await getCode(server);
     }
 
+// ====================== 本地 sId 缓存（先走缓存，失效后再 getCode） ======================
+const TOKEN_CACHE_FILE = path.join(__dirname, "token_caches", "huazhu_token_cache.json");
+try { fs.mkdirSync(path.dirname(TOKEN_CACHE_FILE), { recursive: true }); } catch (e) {}
+
+function readTokenCache() {
+    try {
+        if (!fs.existsSync(TOKEN_CACHE_FILE)) return {};
+        return JSON.parse(fs.readFileSync(TOKEN_CACHE_FILE, "utf8")) || {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function writeTokenCache(cache) {
+    try {
+        fs.writeFileSync(TOKEN_CACHE_FILE, JSON.stringify(cache, null, 2), "utf8");
+    } catch (e) {
+        console.log(`写入 sId 缓存失败: ${e.message || e}`);
+    }
+}
+
 
 function wxHeaders(sId = "") {
   return {
@@ -156,13 +179,65 @@ class Huazhu {
     console.log(`账号[${this.index}]${this.account.remark ? `[${this.account.remark}]` : ""} ${message}`);
   }
 
+  async checkSid(sId = this.sId) {
+    try {
+      const { status, data } = await request({
+        method: "POST",
+        url: `${PERSONAL_BASE}/personalCenter/rightAndInterest/getBriefInfo`,
+        headers: wxHeaders(sId),
+        data: {},
+      });
+      return status === 200 && ok(data);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  get cacheKey() {
+    return this.account.openid || this.server;
+  }
+
+  getCachedSid() {
+    const cache = readTokenCache();
+    return cache[this.cacheKey] || null;
+  }
+
+  saveCachedSid() {
+    if (!this.sId) return;
+    const cache = readTokenCache();
+    cache[this.cacheKey] = {
+      sId: this.sId,
+      memberId: this.memberId,
+      updatedAt: new Date().toISOString(),
+    };
+    writeTokenCache(cache);
+  }
+
+  removeCachedSid() {
+    const cache = readTokenCache();
+    if (cache[this.cacheKey]) {
+      delete cache[this.cacheKey];
+      writeTokenCache(cache);
+    }
+    this.sId = "";
+  }
+
   async login() {
-    if (this.sId) {
-      this.log(`使用已有 sId: ${mask(this.sId)}`);
-      return;
+    // 先走缓存: 本地缓存的 sId 仍有效则直接使用, 不调用 getCode
+    const cached = this.getCachedSid();
+    if (cached && cached.sId) {
+      if (await this.checkSid(cached.sId)) {
+        this.sId = cached.sId;
+        this.memberId = cached.memberId || "";
+        this.log(`使用缓存 sId: ${mask(this.sId)}`);
+        return;
+      }
+      this.log(`缓存 sId 失效, 重新登录`);
+      this.removeCachedSid();
     }
 
     const code = await getWxCode(this.server);
+    if (!code) throw new Error(`获取微信 code 失败`);
     const { status, data } = await request({
       method: "POST",
       url: `${LOGIN_BASE}/applet/authCheck?code=${encodeURIComponent(code)}`,
@@ -174,6 +249,7 @@ class Huazhu {
     this.sId = data?.Extend?.crossAuth || data?.Data || "";
     this.memberId = data?.Extend?.memberId || "";
     if (!this.sId) throw new Error(`登录响应缺少 sId: ${short(data)}`);
+    this.saveCachedSid();
     this.log(`登录成功 memberId=${this.memberId || "-"} sId=${mask(this.sId)}`);
   }
 
@@ -184,6 +260,10 @@ class Huazhu {
       headers: wxHeaders(this.sId),
       data: {},
     });
+    if (status === 401 || status === 403) {
+      this.removeCachedSid();
+      throw new Error(`会员查询失败 HTTP ${status}: ${short(data)}`);
+    }
     if (status !== 200 || !ok(data)) throw new Error(`会员查询失败 HTTP ${status}: ${short(data)}`);
 
     const basic = data?.content?.basicInfo || {};
