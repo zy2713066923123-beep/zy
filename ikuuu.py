@@ -21,7 +21,6 @@ import json
 import os
 import sys
 import io
-import yaml
 import base64
 import shutil
 import subprocess
