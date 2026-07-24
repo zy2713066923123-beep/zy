@@ -199,6 +199,7 @@ class Task {
     async loginByWxCode() {
         try {
             const code = await this.getLoginCode();
+            if (!code) throw new Error("获取code失败");
             const data = await this.request({
                 apiPath: "/appLogin",
                 skipToken: true,
@@ -208,9 +209,26 @@ class Task {
                 },
             });
             this.applyToken(data);
+            if (!this.accessToken) {
+                const keys = Object.keys(data).join(",");
+                const subKeys = data && typeof data.data === "object" ? `, data内: ${Object.keys(data.data).join(",")}` : "";
+                console.log(`账号[${this.index}] 登录响应缺少 accessToken（响应字段: ${keys}${subKeys}）`);
+                throw new Error("登录响应缺少 accessToken");
+            }
+            // 登录后立即校验 token 是否真实可用，避免拿到无效 token 后级联 401
+            if (!(await this.checkToken())) {
+                const keys = Object.keys(data).join(",");
+                const subKeys = data && typeof data.data === "object" ? `, data内: ${Object.keys(data.data).join(",")}` : "";
+                console.log(`账号[${this.index}] 登录响应字段: ${keys}${subKeys}，token 无效（账号可能未注册/未绑定呼啦圈）`);
+                throw new Error("登录成功但 token 无效（账号可能未注册/未绑定呼啦圈）");
+            }
             this.saveCachedToken();
-            console.log(`账号[${this.index}] 登录成功: userId=${data.userId || ""}`);
+            const uid = this.userInfo.userId || data.userId || "";
+            console.log(`账号[${this.index}] 登录成功: userId=${uid}`);
         } catch (e) {
+            // 登录/校验失败则清空 token，使 run() 的守卫能提前退出，避免级联 401
+            this.accessToken = "";
+            this.authorization = "";
             console.log(`账号[${this.index}] 登录失败: ${e.message || e}`);
         }
     }

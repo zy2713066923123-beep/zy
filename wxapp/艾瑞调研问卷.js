@@ -225,9 +225,30 @@ class Task {
   }
 
   async ensureLogin() {
-    if (!this.token) this.token = this.getCached().token || "";
+    if (!this.token) {
+      const cached = this.getCached();
+      if (cached.token) {
+        this.token = cached.token;
+        // 先走缓存: 复用前先校验 token 是否仍有效, 失效则清缓存重新 getCode
+        if (await this.checkToken()) {
+          console.log(`账号[${this.index}] 使用缓存token`);
+          return;
+        }
+        console.log(`账号[${this.index}] 缓存token失效，重新登录`);
+        this.removeToken();
+      }
+    }
     if (this.token) return;
     await this.login();
+  }
+
+  async checkToken() {
+    try {
+      const res = await apiRequest("GET", "/iclick-new/usercenter/getUserDetails", { token: this.token });
+      return Number(res?.code) === 1;
+    } catch (e) {
+      return false;
+    }
   }
 
   async requestWithRelogin(method, urlPath, options = {}) {

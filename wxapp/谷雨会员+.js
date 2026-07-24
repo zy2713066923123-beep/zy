@@ -160,7 +160,7 @@ class Task {
             }
         }
         if (!usedCache) {
-            let code = await getCode(this.server);
+            let code = await this.getLoginCode();
             if (code) {
                 await this.getUserToken(code);
             }
@@ -174,48 +174,64 @@ class Task {
         await this.signIn();
         if (!this._pointsQueried) await this.getUserPoints();
     }
-    async getUserToken(code) {
-        let data = JSON.stringify({
-            "code": "" + code,
-            "appid": "wxda948f3be0afc375",
-            "shopId": null,
-            "envVersion": "release",
-            "isEnterpriseWx": false,
-            "scene": 1168,
-            "referrerInfo": {
-                "appId": "wxda948f3be0afc375"
-            }
-        });
-
-        let options = {
-            method: 'POST',
-            url: 'https://mall-mobile-v6.vecrp.com/mobile/wxAppLogin',
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36 MicroMessenger/7.0.20.1781 NetType/WIFI MiniProgramEnv/Windows WindowsWechat/WMPF XWEB/50249',
-                'Content-Type': 'application/json;charset=UTF-8',
-                'xweb_xhr': '1',
-                'appid': 'wxda948f3be0afc375',
-                'token': '',
-                'Sec-Fetch-Site': 'cross-site',
-                'Sec-Fetch-Mode': 'cors',
-                'Sec-Fetch-Dest': 'empty',
-                'Referer': 'https://servicewechat.com/wxda948f3be0afc375/65/page-frame.html',
-                'Accept-Language': 'zh-CN,zh;q=0.9'
-            },
-            data: data
-        };
-
-        let {
-            data: result
-        } = await axios.request(options);
-        console.log(result);
-
-        if (result?.success) {
-            this.token = result.result.mobileToken
-            console.log(`🌸账号[${this.index}] 获取用户Token成功:${this.token}`)
-        } else {
-            console.log(`🌸账号[${this.index}] 获取用户Token-失败:${result.message}❌`)
+    async getLoginCode() {
+        const maxTry = 3;
+        for (let i = 1; i <= maxTry; i++) {
+            const code = await getCode(this.server);
+            if (code) return code;
+            console.log(`🌸账号[${this.index}] 第${i}/${maxTry}次获取code为空，重试...`);
+            await sleep(2000);
         }
+        return null;
+    }
+    async getUserToken(code) {
+        const maxTry = 3;
+        for (let i = 1; i <= maxTry; i++) {
+            let data = JSON.stringify({
+                "code": "" + code,
+                "appid": "wxda948f3be0afc375",
+                "shopId": null,
+                "envVersion": "release",
+                "isEnterpriseWx": false,
+                "scene": 1168,
+                "referrerInfo": {
+                    "appId": "wxda948f3be0afc375"
+                }
+            });
+
+            let options = {
+                method: 'POST',
+                url: 'https://mall-mobile-v6.vecrp.com/mobile/wxAppLogin',
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36 MicroMessenger/7.0.20.1781 NetType/WIFI MiniProgramEnv/Windows WindowsWechat/WMPF XWEB/50249',
+                    'Content-Type': 'application/json;charset=UTF-8',
+                    'xweb_xhr': '1',
+                    'appid': 'wxda948f3be0afc375',
+                    'token': '',
+                    'Sec-Fetch-Site': 'cross-site',
+                    'Sec-Fetch-Mode': 'cors',
+                    'Sec-Fetch-Dest': 'empty',
+                    'Referer': 'https://servicewechat.com/wxda948f3be0afc375/65/page-frame.html',
+                    'Accept-Language': 'zh-CN,zh;q=0.9'
+                },
+                data: data
+            };
+
+            let {
+                data: result
+            } = await axios.request(options);
+            console.log(result);
+
+            if (result?.success) {
+                this.token = result.result.mobileToken
+                console.log(`🌸账号[${this.index}] 获取用户Token成功:${this.token}`)
+                return;
+            }
+            console.log(`🌸账号[${this.index}] 第${i}/${maxTry}次获取Token失败:${result.msg || result.message || JSON.stringify(result)}，重试...`);
+            await sleep(2000);
+        }
+        this.token = null;
+        console.log(`🌸账号[${this.index}] 获取用户Token-失败❌`)
     }
     sha1(str) {
         return require("crypto").createHash("sha1").update(str).digest("hex");

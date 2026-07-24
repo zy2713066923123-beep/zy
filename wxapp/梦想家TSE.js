@@ -109,30 +109,34 @@ class Task {
     }
 
     async run() {
-        const cached = this.getCachedToken();
-        if (cached?.access_token || cached?.accessToken) {
-            this.loginResult = cached;
-            console.log(`账号[${this.index}] 使用缓存token: ${maskToken(this.accessToken)}`);
-            if (!(await this.checkToken())) {
-                this.removeCachedToken();
-                console.log(`账号[${this.index}] 缓存token失效，重新code登录`);
+        try {
+            const cached = this.getCachedToken();
+            if (cached?.access_token || cached?.accessToken) {
+                this.loginResult = cached;
+                console.log(`账号[${this.index}] 使用缓存token: ${maskToken(this.accessToken)}`);
+                if (!(await this.checkToken())) {
+                    this.removeCachedToken();
+                    console.log(`账号[${this.index}] 缓存token失效，重新code登录`);
+                }
             }
-        }
 
-        if (!this.accessToken) {
-            await this.loginByWxCode();
-            if (!this.accessToken) return;
-        }
+            if (!this.accessToken) {
+                await this.loginByWxCode();
+                if (!this.accessToken) return;
+            }
 
-        await this.getPointsInfo("签到前");
-        await this.getSignConfig();
-        const today = await this.getTodaySignItem();
-        if (today?.daySignStatus === 2) {
-            console.log(`账号[${this.index}] 今日已签到`);
-        } else {
-            await this.signIn(today?.dateStr);
+            await this.getPointsInfo("签到前");
+            await this.getSignConfig();
+            const today = await this.getTodaySignItem();
+            if (today?.daySignStatus === 2) {
+                console.log(`账号[${this.index}] 今日已签到`);
+            } else {
+                await this.signIn(today?.dateStr);
+            }
+            await this.getPointsInfo("签到后");
+        } catch (e) {
+            console.log(`账号[${this.index}] 执行异常: ${e.message || e}`);
         }
-        await this.getPointsInfo("签到后");
     }
 
     getCachedToken() {
@@ -168,7 +172,7 @@ class Task {
             "version": VERSION,
             "envVersion": "release",
         };
-        if (withToken && this.accessToken) headers.Authorization = `bearer${this.accessToken}`;
+        if (withToken && this.accessToken) headers.Authorization = `Bearer ${this.accessToken}`;
         return headers;
     }
 
