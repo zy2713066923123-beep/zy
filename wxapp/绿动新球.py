@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # name: 绿动新球
 # cron: 11 10,13 * * *
 # -*- coding: utf-8 -*-
@@ -6,14 +7,14 @@
 绿动新球小程序签到 code 版
  
 功能：
-  1. 通过 getCode 公共模块获取微信 code
+  1. 四端口本地服务获取微信 code
   2. 使用 code 换取 token
   3. 每日签到
-  4. notify 通知推送
+  4. PushPlus 推送
   5. 品赞代理，业务请求优先代理，失败直连兜底
  
 环境变量：
-  WX_ID             账号配置，格式：identifier#alias，多账号换行或 & 分隔
+  PLUSPLUS_TOKEN    PushPlus token，可选
   PROXY_API         品赞代理提取 API，可选
   PROXY_TYPE        http / socks5，默认 http
   LVDONG_TOKEN      绿动token（可选，支持直接使用token模式）
@@ -35,14 +36,6 @@ from typing import Any, Dict, List, Tuple
 from urllib.parse import quote
  
 import requests
-
-import getCode
-
-try:
-    from notify import send as notify_send
-except ImportError:
-    def notify_send(title, content):
-        print(f"--- 通知 ---\n{title}\n{content}\n-------------")
  
 # 禁用SSL警告
 import warnings
@@ -53,25 +46,43 @@ warnings.simplefilter('ignore', InsecureRequestWarning)
 APP_NAME = "绿动新球小程序签到"
 APPID = "wxa61a45f180dec800"
  
-ACCOUNTS = []
-_wx_id_raw = os.getenv("WX_ID", "")
-if _wx_id_raw:
-    for line in _wx_id_raw.replace("&", "\n").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        if "#" in line:
-            identifier, alias = line.split("#", 1)
-            ACCOUNTS.append((identifier.strip(), alias.strip()))
-        else:
-            ACCOUNTS.append((line, line))
+# ============ 统一取码（WX_ID + 统一 getCode 模块，支持牛子/YYB 双协议自动路由）============
+# 环境变量：
+#   WX_ID      微信账号标识，格式：wxid#备注 或 openid。多账号换行或 & 分隔
+#              - 以 wxid_ 开头或普通标识 → 牛子协议
+#              - 纯数字 / 以 o 开头的 openid（≥20位）→ YYB 应用宝协议
+#              - 由统一 getCode 模块按标识格式自动路由，无需手动指定
+#   YYB_SERVER YYB 应用宝取码服务地址（YYB 账号时使用，如 http://127.0.0.1:8088）
+#   WECHAT_SERVER 牛子取码服务地址（牛子账号时使用）
+import asyncio
+from getCode import get_single_code
 
-if not ACCOUNTS:
-    print("❌ 未配置环境变量 WX_ID")
+WX_IDS = [
+    s.strip()
+    for s in os.getenv("WX_ID", "").replace("&", "\n").splitlines()
+    if s.strip()
+]
+
+if not WX_IDS:
+    print("❌ 未配置环境变量 WX_ID，请设置后重试")
+    print("格式：wxid#备注 或 openid，多账号换行或 & 分隔")
     exit(1)
 
-print(f"✅ 成功读取 {len(ACCOUNTS)} 个账号")
+YYB_SERVER = os.getenv("YYB_SERVER", "").strip()
+WECHAT_SERVER = os.getenv("WECHAT_SERVER", "").strip()
+
+if not YYB_SERVER and not WECHAT_SERVER:
+    print("❌ 未配置取码服务地址，请设置 YYB_SERVER 或 WECHAT_SERVER 后重试")
+    exit(1)
+
+# 不强制 SERVER_TYPE，由统一 getCode 模块按 WX_ID 标识格式自动路由双协议
+if YYB_SERVER:
+    os.environ["YYB_SERVER"] = YYB_SERVER
+if WECHAT_SERVER:
+    os.environ["WECHAT_SERVER"] = WECHAT_SERVER
+print(f"✅ 读取到 {len(WX_IDS)} 个微信账号，自动路由牛子/YYB 双协议")
  
+PLUSPLUS_TOKEN = os.getenv("PLUSPLUS_TOKEN", "")
 PROXY_API = os.getenv("PROXY_API", "")
 PROXY_TYPE = os.getenv("PROXY_TYPE", "http").lower()
 LVDONG_TOKEN = os.getenv("LVDONG_TOKEN", "")
@@ -123,15 +134,15 @@ def log_title() -> None:
     print("╔" + "═" * 50 + "╗")
     print("║ 🌿 绿动新球小程序签到 code 版                   ║")
     print(f"║ 🕒 启动时间: {now_text():<32}║")
-    print(f"║ 🔢 账号数量: {len(ACCOUNTS):<34}║")
+    print(f"║ 🔢 账号数量: {len(WX_IDS):<34}║")
     print("╚" + "═" * 50 + "╝")
  
  
-def log_account_header(index: int, total: int, alias: str) -> None:
+def log_account_header(index: int, total: int, server: str) -> None:
     print()
     print("┌" + "─" * 50 + "┐")
     print(f"│ 🧩 账号 {index} / {total:<37}│")
-    print(f"│ 🌍 来源 {alias:<40}│")
+    print(f"│ 🌍 来源 {server:<40}│")
     print("└" + "─" * 50 + "┘")
  
  
@@ -199,6 +210,7 @@ def build_proxy_dict(proxy_info: Dict[str, Any] | None) -> Dict[str, str] | None
  
     auth = ""
     if username and password:
+        from urllib.parse import quote
         auth = f"{quote(username)}:{quote(password)}@"
  
     scheme = "socks5" if PROXY_TYPE == "socks5" else "http"
@@ -289,14 +301,29 @@ def request_with_proxy(
     return session.request(method, url, **kwargs)
  
  
-def get_wx_code(identifier):
-    try:
-        return getCode.get_single_code(APPID, identifier)
-    except Exception as e:
-        print(f"获取code失败: {e}")
-        return None
-
+def send_pushplus(title: str, content: str) -> None:
+    if not PLUSPLUS_TOKEN:
+        print("⚠️ [PushPlus] 未配置 PLUSPLUS_TOKEN，跳过推送")
+        return
  
+    try:
+        requests.post(
+            "https://www.pushplus.plus/send",
+            json={
+                "token": PLUSPLUS_TOKEN,
+                "title": title,
+                "content": content,
+                "template": "txt",
+            },
+            timeout=10,
+        )
+        print("✅ [PushPlus] 推送成功")
+    except Exception as exc:
+        print(f"❌ [PushPlus] 推送失败: {exc}")
+ 
+ 
+# 取微信 code 使用统一模块 getCode 的 get_single_code（按 WX_ID 自动路由牛子/YYB 双协议）
+
 def common_headers() -> Dict[str, str]:
     return {
         "User-Agent": USER_AGENT,
@@ -309,32 +336,11 @@ def common_headers() -> Dict[str, str]:
         "Sec-Fetch-Site": "cross-site",
         "Sec-Fetch-Mode": "cors",
         "Sec-Fetch-Dest": "empty",
-    "Accept-Encoding": "gzip, deflate, br",
+        "Accept-Encoding": "gzip, deflate, br",
     }
-
-
-def _parse_response(response):
-    """解析响应，兼容接口将 data 字段甚至整体以 JSON 字符串返回（双重编码）的情况"""
-    try:
-        data = response.json()
-    except Exception:
-        return {"code": -1, "msg": f"JSON解析失败: {response.text[:300]}"}
-    if isinstance(data, str):
-        try:
-            data = json.loads(data)
-        except Exception:
-            return {"code": -1, "msg": f"JSON解析失败: {response.text[:300]}"}
-    if isinstance(data, dict):
-        inner = data.get("data")
-        if isinstance(inner, str):
-            try:
-                data["data"] = json.loads(inner)
-            except Exception:
-                pass
-    return data
-
-
-def login_by_code(alias: str, code: str, proxies: Dict[str, str] | None) -> Tuple[str | None, Dict[str, Any] | None]:
+ 
+ 
+def login_by_code(server: str, code: str, proxies: Dict[str, str] | None) -> Tuple[str | None, Dict[str, Any] | None]:
     try:
         print("🔐 [登录] 使用 code 换取 token")
         post_data = {
@@ -349,11 +355,14 @@ def login_by_code(alias: str, code: str, proxies: Dict[str, str] | None) -> Tupl
             headers=common_headers(),
             data=post_data,
             proxies=proxies,
-            server=alias,
+            server=server,
         )
  
-        data = _parse_response(response)
-
+        try:
+            data = response.json()
+        except Exception:
+            data = {"raw": response.text[:800]}
+ 
         if data.get("code") == 1000 and data.get("data", {}).get("token"):
             token = data["data"]["token"]
             print(f"✅ [登录] token 获取成功: {mask(token)}")
@@ -366,19 +375,25 @@ def login_by_code(alias: str, code: str, proxies: Dict[str, str] | None) -> Tupl
         return None, None
  
  
-def get_user_info(alias: str, token: str, proxies: Dict[str, str] | None) -> Dict[str, Any]:
+def get_user_info(server: str, token: str, proxies: Dict[str, str] | None) -> Dict[str, Any]:
     response = request_with_proxy(
         "POST",
         USER_INFO_URL,
         headers=common_headers(),
         data={"token": token},
         proxies=proxies,
-        server=alias,
+        server=server,
     )
-    return _parse_response(response)
+    try:
+        return response.json()
+    except Exception:
+        return {
+            "code": -1,
+            "msg": f"JSON解析失败: {response.text[:300]}",
+        }
  
  
-def daily_sign(alias: str, token: str, proxies: Dict[str, str] | None) -> Tuple[bool, str]:
+def daily_sign(server: str, token: str, proxies: Dict[str, str] | None) -> Tuple[bool, str]:
     try:
         print("📝 [签到] 执行签到操作")
         response = request_with_proxy(
@@ -387,7 +402,7 @@ def daily_sign(alias: str, token: str, proxies: Dict[str, str] | None) -> Tuple[
             headers=common_headers(),
             data={"token": token},
             proxies=proxies,
-            server=alias,
+            server=server,
         )
  
         try:
@@ -421,9 +436,9 @@ def daily_sign(alias: str, token: str, proxies: Dict[str, str] | None) -> Tuple[
         return False, msg
  
  
-def run_account(index: int, total: int, identifier: str, alias: str) -> Dict[str, Any]:
+def run_account(index: int, total: int, openid: str) -> Dict[str, Any]:
     result = {
-        "alias": alias,
+        "server": openid,
         "success": False,
         "proxyStatus": "未使用代理",
         "proxyIp": "-",
@@ -433,47 +448,52 @@ def run_account(index: int, total: int, identifier: str, alias: str) -> Dict[str
         "signMsg": "-",
         "error": "",
     }
- 
-    log_account_header(index, total, alias)
- 
-    proxies, proxy_ip = get_valid_proxy(alias)
+
+    proxy_key = f"{YYB_SERVER}@{openid}"
+    log_account_header(index, total, proxy_key)
+
+    proxies, proxy_ip = get_valid_proxy(proxy_key)
     result["proxyStatus"] = "使用专属代理" if proxies else "使用直连"
     result["proxyIp"] = proxy_ip or "-"
- 
+
     sleep(PROXY_FETCH_INTERVAL)
- 
+
     delay = random.randint(2, 6)
     print(f"⏳ [延迟] 启动延迟 {delay}s")
     sleep(delay)
- 
+
     token = None
- 
+
     if LVDONG_TOKEN:
         print("🔐 [登录] 使用环境变量中的 LVDONG_TOKEN")
         token = LVDONG_TOKEN
     else:
-        code = get_wx_code(identifier)
+        try:
+            code = get_single_code(APPID, openid)
+        except Exception as e:
+            code = None
+            print(f"❌ [取码] 获取 code 异常: {e}")
         if not code:
             result["error"] = "获取 code 失败"
             return result
- 
-        token, raw_login = login_by_code(alias, code, proxies)
+
+        token, raw_login = login_by_code(YYB_SERVER, code, proxies)
         if not token:
             result["error"] = f"登录失败: {json_preview(raw_login)}"
             return result
- 
+
     result["token"] = mask(token)
- 
-    user_info = get_user_info(alias, token, proxies)
+
+    user_info = get_user_info(YYB_SERVER, token, proxies)
     if user_info.get("code") == 1000:
         result["nickname"] = user_info.get("data", {}).get("nickname", "-")
         result["score"] = user_info.get("data", {}).get("score", 0)
         print(f"👤 [用户] 昵称: {result['nickname']}, 积分: {result['score']}")
- 
-    sign_success, sign_msg = daily_sign(alias, token, proxies)
+
+    sign_success, sign_msg = daily_sign(YYB_SERVER, token, proxies)
     result["signMsg"] = sign_msg
     result["success"] = sign_success
- 
+
     return result
  
  
@@ -481,7 +501,7 @@ def build_notify(results: List[Dict[str, Any]]) -> str:
     success_count = sum(1 for item in results if item["success"])
     fail_count = len(results) - success_count
  
-    content = f"""🌿 绿动新球多账号签到结果
+    content = f"""🌿 绿动新球四账号签到结果
  
 ━━━━━━━━━━━━━━━━━━━━
 🏁 总结：{success_count} 成功 / {fail_count} 失败
@@ -494,7 +514,7 @@ def build_notify(results: List[Dict[str, Any]]) -> str:
  
         content += f"""
 🧩 账号 {idx}
-🌍 来源：{res["alias"]}
+🌍 来源：{res["server"]}
 🌐 代理：{res["proxyStatus"]}
 📡 出口IP：{res["proxyIp"]}
 👤 昵称：{res["nickname"]}
@@ -517,14 +537,14 @@ def main() -> None:
  
     results: List[Dict[str, Any]] = []
  
-    for index, (identifier, alias) in enumerate(ACCOUNTS, 1):
+    for index, openid in enumerate(WX_IDS, 1):
         try:
-            result = run_account(index, len(ACCOUNTS), identifier, alias)
+            result = run_account(index, len(WX_IDS), openid)
             results.append(result)
         except Exception as exc:
-            print(f"❌ [主程序] {alias} 执行异常: {exc}")
+            print(f"❌ [主程序] {openid} 执行异常: {exc}")
             results.append({
-                "alias": alias,
+                "server": server,
                 "success": False,
                 "proxyStatus": "-",
                 "proxyIp": "-",
@@ -535,7 +555,7 @@ def main() -> None:
                 "error": traceback.format_exc().strip(),
             })
  
-        if index < len(ACCOUNTS):
+        if index < len(WX_IDS):
             print("⏳ [间隔] 等待 2s 后处理下一个账号")
             sleep(2)
  
@@ -550,8 +570,9 @@ def main() -> None:
     print(f"║ 🕒 结束时间: {now_text():<32}║")
     print("╚" + "═" * 50 + "╝")
  
-    notify_send("🌿 绿动新球多账号签到完成", build_notify(results))
+    send_pushplus("🌿 绿动新球四账号签到完成", build_notify(results))
  
  
 if __name__ == "__main__":
     main()
+ 

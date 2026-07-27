@@ -496,6 +496,39 @@ class WechatAdapter {
         return subType === 'Niuzi' ? this._niuziGetCode(identifier, appId) : this._legacyGetCode(identifier, appId);
     }
 
+    /**
+     * 获取登录用的 operate 数据（encryptedData/iv/code）
+     * 牛子协议专属：调用 /wx/operatedata 接口，返回小程序登录所需的完整数据。
+     * 部分服务仅返回手机号 code，不含加密载荷。
+     */
+    async getOperateWxData(wxid, appId) {
+        const actualWxid = String(wxid).split('#')[0].trim();
+        if (!appId || appId === 'undefined') {
+            throw new Error(`appid 参数缺失！调用方必须传入有效的 appid。当前值: ${appId}`);
+        }
+        const url = `${this.serverUrl}/wx/operatedata`;
+        const auth = process.env.WX_ID || this.adminKey || '';
+        console.log(`[牛子] 请求 operate 数据: wxid=${actualWxid}, appid=${appId}`);
+        try {
+            const r = await axios.post(url, { appid: appId, openid: actualWxid }, {
+                headers: { auth: String(auth).replace(/[\x00-\x1F\x7F]/g, '').replace(/\s+/g, ' ').trim() },
+                timeout: 45000,
+                validateStatus: () => true
+            });
+            const result = r.data?.data || {};
+            const code = result.code;
+            const encryptedData = result.encryptedData ?? result.encrypted_data;
+            const iv = result.iv ?? result.IV;
+            if (!code || !encryptedData || !iv) {
+                throw new Error(`operatedata 未返回完整登录数据: ${JSON.stringify(r.data)}`);
+            }
+            return { code: String(code), encryptedData: String(encryptedData), iv: String(iv) };
+        } catch (e) {
+            const msg = (e && e.message) ? e.message : String(e);
+            throw new Error(`[牛子] 请求 operate 数据失败: ${msg}`);
+        }
+    }
+
     async _niuziGetCode(wxid, appId) {
         const actualWxid = String(wxid).split('#')[0].trim();
         
@@ -1011,6 +1044,25 @@ async function getSinglePhoneEncrypted(appId, identifier) {
     }
 }
 
+/**
+ * 为单个账号获取登录用的 operate 数据（encryptedData/iv/code，智能路由）
+ * - 牛子(wxid_/真实wxid) → 调用 /wx/operatedata，返回完整 {code, encryptedData, iv}
+ * - 应用宝(openid) → 仅返回 {code, encryptedData:null, iv:null}（应用宝协议不提供登录 operate 数据）
+ */
+async function getSingleOperateWxData(appId, identifier) {
+    const getter = new WeChatCodeGetter();
+    await getter.init();
+    const targetProtocol = getter._detectProtocolForIdentifier(identifier);
+    if (targetProtocol === 'yyb') {
+        console.log(`[getCode] operate 路由: ${identifier} → 应用宝(仅返回code)`);
+        const code = await getter.getAppletCode(appId, identifier);
+        return { code, encryptedData: null, iv: null };
+    }
+    console.log(`[getCode] operate 路由: ${identifier} → 牛子`);
+    const adapter = new WechatAdapter(getter.wechatServer, getter.adminKey);
+    return adapter.getOperateWxData(identifier, appId);
+}
+
 module.exports = {
     WeChatCodeGetter,
     getWechatCodes,
@@ -1018,6 +1070,7 @@ module.exports = {
     getSingleCode,
     getSinglePhoneNumber,
     getSinglePhoneEncrypted,
+    getSingleOperateWxData,
     YYBAdapter,
     WechatAdapter
 };

@@ -44,6 +44,7 @@ const $ = new Env("海天美味馆小程序");
 const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
+const { getSingleCode, getSingleOperateWxData } = require("./getCode.js");
 
 const ckName = "WX_ID";
 const strSplitor = "#";
@@ -237,20 +238,8 @@ class Task {
     }
 
     async getOperateData() {
-        const url = (process.env.WECHAT_SERVER || "http://192.168.6.222:8011").replace(/\/$/, "");
-        const { data } = await axios.post(`${url}/wx/operatedata`, {
-            appid: MINI_APP_ID,
-            openid: this.accountId,
-        }, {
-            headers: { auth: sanitizeHeader(process.env.WX_ID) },
-            timeout: 45000,
-            validateStatus: () => true,
-        });
-        const result = data?.data || {};
-        if (!data?.status || !result.code || !result.encryptedData || !result.iv) {
-            throw new Error(`wx_server 未返回完整登录数据: ${JSON.stringify(data)}`);
-        }
-        return result;
+        // 统一取码（getCode，支持牛子/YYB 双协议自动路由）
+        return await getSingleOperateWxData(MINI_APP_ID, this.accountId);
     }
 
     async getArticleIds() {

@@ -359,7 +359,7 @@ async function getPhoneCodeInfo(wxid) {
         respData = resp.data;
     }
 
-    if (respData && (respData.Code === 0 || respData.code === 0 || respData.Success === true || respData.Data)) {
+    if (respData && (respData.Code === 0 || respData.code === 0 || respData.Success === true || respData.Data || respData.result || respData.openid)) {
         // 从返回中提取 hex 格式 phoneCode，同时尽量提取明文手机号用于日志展示。
         let mobile = '';
         const walk = (node, depth = 0) => {
@@ -527,10 +527,17 @@ async function getEncryptKey(wxid) {
             const walk = (node, depth = 0) => {
                 if (depth > 8 || node == null) return null;
                 if (typeof node === 'string') {
+                    // 1) base64（24+ 可见字符）解码后可能是嵌套 JSON
                     if (/^[A-Za-z0-9+/=]{24,}$/i.test(node)) {
                         try {
                             const decoded = Buffer.from(node, 'base64').toString('utf8');
                             if (decoded) return walk(JSON.parse(decoded), depth + 1);
+                        } catch {}
+                    }
+                    // 2) 直接是 JSON 字符串（YYB: {"encrypt_key":"...","version":...,"iv":...}）
+                    if (node.trim().startsWith('{')) {
+                        try {
+                            return walk(JSON.parse(node), depth + 1);
                         } catch {}
                     }
                     return null;
@@ -591,19 +598,20 @@ async function getEncryptKey(wxid) {
         
         const yybAdapter = new YYBAdapter(getter.yybServer);
         const resolvedRef = await yybAdapter._resolveRef(cleanWxid);
-        const url = getter.yybServer.replace(/\/+$/, '') + '/wxapp/call/function';
+        const url = getter.yybServer.replace(/\/+$/, '') + '/wxapp/operateWxData';
         
         if (debug) log(`[YYB] 请求EncryptKey: ref=${resolvedRef}, app_id=${APPID}`);
         const resp = await axios.post(url, {
             ref: resolvedRef,
             app_id: APPID,
-            api_name: 'webapi_getuserencryptkey'
+            payload: { api_name: 'webapi_getuserencryptkey' }
         }, {
             headers: { 'Content-Type': 'application/json' },
             timeout: 30000,
             validateStatus: () => true
         });
         respData = resp.data;
+        if (debug) log('  [YYB][debug] getuserencryptkey 原始响应: ' + JSON.stringify(respData).substring(0, 1200));
     } else {
         const resp = await axios.post(WECHAT_SERVER + '/api/v1/wx/app/call/function', {
             wxid: cleanWxid,
@@ -614,24 +622,53 @@ async function getEncryptKey(wxid) {
         respData = resp.data;
     }
 
-    if (debug) log('  getUserCryptoManager: ' + (respData ? JSON.stringify(respData).substring(0, 500) : 'null'));
-    if (respData && (respData.Code === 0 || respData.code === 0 || respData.Success === true || respData.Data)) {
+    // 原始响应始终打印（便于排查 YYB/牛子 不同返回格式），不再依赖 debug 开关
+    log('  [encryptKey][raw] ' + JSON.stringify(respData).substring(0, 1500));
+
+    if (respData && (respData.Code === 0 || respData.code === 0 || respData.Success === true || respData.Data || respData.data || respData.result || respData.openid)) {
         try {
-            // Data.data 是 base64 编码的 JSON
-            const outer = respData.Data.Data || respData.Data.data || '';
-            const decoded = JSON.parse(Buffer.from(outer, 'base64').toString('utf8'));
-            // decoded.data 又是一个 JSON 字符串
-            const inner = typeof decoded.data === 'string' ? JSON.parse(decoded.data) : decoded;
-            return {
-                encryptKey: inner.encrypt_key || inner.encryptKey || '',
-                version: String(inner.version || ''),
-                iv: inner.iv || '',
-            };
+            // 兼容多种结构:
+            //   牛子/养鸡场: Data.Data / Data.data（base64）
+            //   应用宝 YYB:  data.result / data.data（base64 或 JSON 字符串）
+            let outer = respData.Data?.Data || respData.Data?.data ||
+                        respData.data?.result || respData.data?.data || respData.data?.Data ||
+                        respData.result?.data || respData.result?.Data || respData.result || '';
+            let decoded = '';
+            if (outer) {
+                try {
+                    decoded = Buffer.from(outer, 'base64').toString('utf8');
+                } catch {
+                    decoded = '';
+                }
+                // base64 解码失败/为空时，尝试直接把 outer 当 JSON 字符串
+                if (!decoded) decoded = (typeof outer === 'string') ? outer : '';
+            }
+            let inner;
+            try {
+                inner = decoded ? JSON.parse(decoded) : {};
+            } catch {
+                inner = (typeof decoded === 'object') ? decoded : {};
+            }
+            if (inner && (inner.encrypt_key !== undefined || inner.encryptKey !== undefined || inner.version !== undefined)) {
+                return {
+                    encryptKey: inner.encrypt_key || inner.encryptKey || '',
+                    version: String(inner.version || ''),
+                    iv: inner.iv || '',
+                };
+            }
         } catch (e) {
-            if (debug) log('  解析encryptKey失败: ' + e.message);
+            log('  [encryptKey] 解析异常: ' + e.message);
         }
     }
-    throw new Error('获取加密密钥失败');
+    // 兜底：用通用递归提取器在 YYB/牛子 多样结构中找 encryptKey（处理 base64 / 嵌套 JSON / 直出字段）
+    try {
+        const fb = tryParseEncryptKey(respData);
+        if (fb?.encryptKey) {
+            if (debug) log('  [encryptKey] 兜底递归提取成功');
+            return fb;
+        }
+    } catch {}
+    throw new Error('获取加密密钥失败, 响应预览: ' + JSON.stringify(respData).substring(0, 600));
 }
 
 // 签到
