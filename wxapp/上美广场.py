@@ -119,6 +119,8 @@ def json_preview(data: Any, limit: int = 800) -> str:
 
 # ============ YYB Server 交互 ============
 
+_persistent_session = None
+
 def get_persistent_session() -> requests.Session:
     global _persistent_session
     if _persistent_session is None:

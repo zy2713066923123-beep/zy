@@ -175,6 +175,8 @@ def log_account_header(index: int, total: int, server: str) -> None:
 
 # ============ YYB Server 交互 ============
 
+_persistent_session = None
+
 def get_persistent_session() -> requests.Session:
     global _persistent_session
     if _persistent_session is None:
