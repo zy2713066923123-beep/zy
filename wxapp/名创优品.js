@@ -27,6 +27,34 @@ if (!WECHAT_SERVER && !YYB_SERVER) {
 if (WECHAT_SERVER) process.env.WECHAT_SERVER = WECHAT_SERVER;
 if (YYB_SERVER) process.env.YYB_SERVER = YYB_SERVER;
 
+// ============ 名创优品业务常量 ============
+// 说明：原常量块在某次批量重构中被误删，导致 APPID/AES_KEY_HEX 等全部 ReferenceError。
+// APPID 已从脚本内 referer (servicewechat.com/wx2a212470bade49bf/...) 还原；
+// 加密/签名密钥为逆向所得，工作区无副本，请从原始脚本或抓包数据填入（可直接改下面的值，或用环境变量覆盖）。
+const APPID = 'wx2a212470bade49bf';
+const AES_KEY_HEX = process.env.MINISO_AES_KEY_HEX || '';
+const AES_IV_HEX = process.env.MINISO_AES_IV_HEX || '';
+const SIGN_PREFIX = process.env.MINISO_SIGN_PREFIX || '';
+const LOGIN_URL = process.env.MINISO_LOGIN_URL || '';
+const DEFAULT_STORE_ID = process.env.MINISO_STORE_ID || '';
+const CACHE_FILE = path.join(__dirname, '名创优品_cache.json');
+
+// 启动前校验：缺失则立即清晰提示并退出，避免运行到登录才抛 ReferenceError
+(function checkBusinessConstants() {
+    const missing = [];
+    if (!AES_KEY_HEX) missing.push('AES_KEY_HEX  (env: MINISO_AES_KEY_HEX)');
+    if (!AES_IV_HEX) missing.push('AES_IV_HEX   (env: MINISO_AES_IV_HEX)');
+    if (!SIGN_PREFIX) missing.push('SIGN_PREFIX  (env: MINISO_SIGN_PREFIX)');
+    if (!LOGIN_URL) missing.push('LOGIN_URL    (env: MINISO_LOGIN_URL)');
+    if (!DEFAULT_STORE_ID) missing.push('DEFAULT_STORE_ID (env: MINISO_STORE_ID)');
+    if (missing.length) {
+        console.error('⚠️ 名创优品业务常量缺失（常量块在某次重构中被误删），请填入后重试：');
+        missing.forEach(m => console.error('  - ' + m));
+        console.error('可直接编辑本文件顶部“名创优品业务常量”块填值，或设置同名环境变量。');
+        process.exit(1);
+    }
+})();
+
 console.log(`✅ 读取到 ${WX_IDS.length} 个微信账号，自动路由牛子/YYB 双协议`);
 
 function generateLoginNonce() {

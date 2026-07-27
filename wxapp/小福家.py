@@ -50,14 +50,16 @@ if YYB_SERVER:
 print(f"✅ 读取到 {len(WX_IDS)} 个微信账号，自动路由牛子/YYB 双协议")
 
 
-def xiaofujia_login(code: str, mobile: dict) -> dict | None:
+def xiaofujia_login(code: str, mobile_code: str) -> dict | None:
     print("→ 小福家登录...")
     login_url = f"{API_BASE}/familychat/user/login"
-    
+
+    # yyb 应用宝手机号走新流程（phonenumber.getPhoneNumber）：返回手机号 code，后端用它换手机号。
+    # 旧流程的 encryptedData/iv 在 yyb 下不可用（yyb 服务端已解密，响应里只有 code + 明文 mobile）。
+    # mobile_code 为 get_single_phone_number 返回的手机号授权 code。
     auth_token = json.dumps({
         "code": code,
-        "mobile_encrypt_data": mobile["encryptedData"],
-        "mobile_iv": mobile["iv"]
+        "mobile_code": mobile_code,
     })
     
     body = {

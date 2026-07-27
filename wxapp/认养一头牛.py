@@ -193,13 +193,17 @@ def beijing_today_0am() -> str:
 def refresh_token(openid: str) -> str | None:
     """通过 YYB Go 获取 code + 手机号数据，调用 minilogin 换 token"""
     try:
+        # yyb_go 的 getPhoneNumber 按 ref 精确匹配账号：纯数字按 UIN/ID，否则按 openid 精确匹配。
+        # 传入带 #手机号 后缀的原始串会 404 account not found，这里剥成纯 openid。
+        pure_openid = str(openid).split('#')[0].strip()
+
         # 1. 获取 wx.login code（统一 getCode 模块，按 WX_ID 自动路由牛子/YYB 双协议）
         wx_code = get_single_code(APP_ID, openid)
 
         # 2. 获取手机号数据（应用宝专属能力，走 YYB/WX 取码服务）
         phone_resp = requests.post(
             f"http://{YYB_HOST}/wxapp/getPhoneNumber",
-            json={"ref": openid, "app_id": APP_ID},
+            json={"ref": pure_openid, "app_id": APP_ID},
             timeout=15,
             proxies={"http": None, "https": None},
         )
@@ -522,9 +526,9 @@ def main():
         cached_acc = cache_map.get(openid)
         if cached_acc and cached_acc.get("token"):
             acc = {
-                "ref": ref,
-                "server": server,
-                "nickname": cached_acc.get("nickname", ref),
+                "ref": openid,
+                "server": YYB_HOST,
+                "nickname": cached_acc.get("nickname", openid),
                 "token": cached_acc["token"],
             }
         else:
