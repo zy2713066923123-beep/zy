@@ -1,20 +1,19 @@
 // name: 名创优品
-// cron: 30 8,19 * * *
+// cron: 30 8 * * *
 const axios = require('axios');
 const CryptoJS = require('crypto-js');
 const fs = require('fs');
 const path = require('path');
 
 // ============ 统一取码（WX_ID + getCode，支持牛子/YYB 双协议自动路由）============
-const getCode = require('./getCode.js');
+const { getSingleCode } = require('./getCode.js');
 
 const WX_IDS = (process.env.WX_ID || "")
     .split(/[\r\n|&]+/)
     .map(s => s.trim())
     .filter(Boolean);
-
 if (!WX_IDS.length) {
-    console.error("未配置环境变量 WX_ID，请设置后重试（格式：wxid#备注 或 openid，多行换行）");
+    console.error("未配置环境变量 WX_ID，请设置后重试（格式：wxid#备注 或 openid#手机号，多行换行）");
     process.exit(1);
 }
 
@@ -27,36 +26,18 @@ if (!WECHAT_SERVER && !YYB_SERVER) {
 if (WECHAT_SERVER) process.env.WECHAT_SERVER = WECHAT_SERVER;
 if (YYB_SERVER) process.env.YYB_SERVER = YYB_SERVER;
 
-// ============ 名创优品业务常量 ============
-// 说明：原常量块在某次批量重构中被误删，导致 APPID/AES_KEY_HEX 等全部 ReferenceError。
-// APPID 已从脚本内 referer (servicewechat.com/wx2a212470bade49bf/...) 还原；
-// 加密/签名密钥为逆向所得，工作区无副本，请从原始脚本或抓包数据填入（可直接改下面的值，或用环境变量覆盖）。
-const APPID = 'wx2a212470bade49bf';
-const AES_KEY_HEX = process.env.MINISO_AES_KEY_HEX || '';
-const AES_IV_HEX = process.env.MINISO_AES_IV_HEX || '';
-const SIGN_PREFIX = process.env.MINISO_SIGN_PREFIX || '';
-const LOGIN_URL = process.env.MINISO_LOGIN_URL || '';
-const DEFAULT_STORE_ID = process.env.MINISO_STORE_ID || '';
-const CACHE_FILE = path.join(__dirname, '名创优品_cache.json');
-
-// 启动前校验：缺失则立即清晰提示并退出，避免运行到登录才抛 ReferenceError
-(function checkBusinessConstants() {
-    const missing = [];
-    if (!AES_KEY_HEX) missing.push('AES_KEY_HEX  (env: MINISO_AES_KEY_HEX)');
-    if (!AES_IV_HEX) missing.push('AES_IV_HEX   (env: MINISO_AES_IV_HEX)');
-    if (!SIGN_PREFIX) missing.push('SIGN_PREFIX  (env: MINISO_SIGN_PREFIX)');
-    if (!LOGIN_URL) missing.push('LOGIN_URL    (env: MINISO_LOGIN_URL)');
-    if (!DEFAULT_STORE_ID) missing.push('DEFAULT_STORE_ID (env: MINISO_STORE_ID)');
-    if (missing.length) {
-        console.error('⚠️ 名创优品业务常量缺失（常量块在某次重构中被误删），请填入后重试：');
-        missing.forEach(m => console.error('  - ' + m));
-        console.error('可直接编辑本文件顶部“名创优品业务常量”块填值，或设置同名环境变量。');
-        process.exit(1);
-    }
-})();
-
 console.log(`✅ 读取到 ${WX_IDS.length} 个微信账号，自动路由牛子/YYB 双协议`);
 
+// ====================== 配置常量 ======================
+const APPID = 'wx2a212470bade49bf';
+const AES_KEY_HEX = '0f9f8b1e791f754d2ded9dfb38a4b628';
+const AES_IV_HEX = '31323334353637383930313233343535';
+const SIGN_PREFIX = '#storeexpress1.0#ffe232&t%4df!67sx55eas#';
+const LOGIN_URL = 'https://cdn-storeexpress.miniso.com/wechat/login';
+const CACHE_FILE = path.join(__dirname, 'mcypcookie.json');
+const DEFAULT_STORE_ID = 'Z6XV';
+
+// ====================== 工具函数 ======================
 function generateLoginNonce() {
     const chars = '1234567890qwertyuiopasdfghjklzxc';
     let result = '';
@@ -100,6 +81,11 @@ function saveCache(cache) {
     } catch (e) {
         console.log('写入缓存文件失败:', e.message);
     }
+}
+
+async function getWxCode(identifier) {
+    // 走 getCode.js 统一取码：自动识别 wxid/openid、剥 #手机号、模糊匹配 ref、健康检查
+    return await getSingleCode(APPID, identifier);
 }
 
 async function loginByCode(code) {
@@ -161,8 +147,8 @@ async function loginByCode(code) {
     }
 }
 
-async function refreshAccountToken(ref) {
-    const code = await getCode.getSingleCode(APPID, ref);
+async function refreshAccountToken(identifier) {
+    const code = await getWxCode(identifier);
     if (!code) return null;
     return await loginByCode(code);
 }
@@ -572,26 +558,21 @@ async function main() {
     const cache = loadCache();
 
     for (let i = 0; i < WX_IDS.length; i++) {
-        const ref = WX_IDS[i];
-        if (!ref) {
-            console.log(`✗ WX_ID 第${i + 1}行格式无效，跳过`);
-            continue;
-        }
+        const openid = WX_IDS[i];
+        console.log(`\n┌─ 账号${i + 1} (${openid}) ──────────┐`);
 
-        console.log(`\n┌─ 账号${i + 1} (${ref}) ──────────┐`);
-
-        let userInfo = cache[ref];
+        let userInfo = cache[openid];
         let needRefresh = !userInfo || !userInfo.skey;
 
         if (needRefresh) {
             console.log('→ 无有效缓存，通过code换取token...');
-            userInfo = await refreshAccountToken(ref);
+            userInfo = await refreshAccountToken(openid);
             if (!userInfo) {
                 console.log('✗ 获取token失败，跳过此账号');
                 console.log('└────────────────────────────┘');
                 continue;
             }
-            cache[ref] = { ...userInfo, updateTime: Date.now() };
+            cache[openid] = { ...userInfo, updateTime: Date.now() };
             saveCache(cache);
             console.log('✓ token获取成功，已更新缓存');
         } else {
@@ -603,13 +584,13 @@ async function main() {
 
         if (!testResult) {
             console.log('→ token已失效，重新获取...');
-            userInfo = await refreshAccountToken(ref);
+            userInfo = await refreshAccountToken(openid);
             if (!userInfo) {
                 console.log('✗ token刷新失败，跳过此账号');
                 console.log('└────────────────────────────┘');
                 continue;
             }
-            cache[ref] = { ...userInfo, updateTime: Date.now() };
+            cache[openid] = { ...userInfo, updateTime: Date.now() };
             saveCache(cache);
             console.log('✓ token刷新成功，重新执行');
             const newBot = new MinisoBot(userInfo);

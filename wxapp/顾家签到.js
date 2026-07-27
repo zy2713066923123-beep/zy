@@ -2,27 +2,29 @@
 ------------------------------------------
 @Author: sm
 @Date: 2026.05.31
-@Description: 顾家小程序签到
-cron: 24 10,14 * * *
-变量名：gujiajiaju
+@Description: 顾家小程序签到 + 社区互动赚积分
+cron: 20 8 * * *
+变量名：gujiajiaju / WX_ID
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
 ------------------------------------------
 
 变量：
   WECHAT_SERVER  微信协议服务地址，默认 http://192.168.6.222:8011
   WX_ID         微信账号，多账号支持换行、& 分隔，必须配置
+  GJJJ_COMMUNITY  社区互动开关，=0 关闭（默认开）
 
 WX_ID 格式：
-  wxid#备注  多个换行
+  openid#手机号  或  openid  多个换行
 */
 
 const { getSingleCode } = require('./getCode.js');
+
 class WeChatServer {
   constructor(config) { this.config = config; }
   async getCode(wxid) {
     try {
       const actualWxid = String(wxid).split('#')[0].trim();
-            const code = await getSingleCode(this.config.appid, actualWxid);
+      const code = await getSingleCode(this.config.appid, actualWxid);
       return { data: { status: true, code, data: { code } } };
     } catch (e) {
       return { data: {} };
@@ -41,21 +43,22 @@ class Env {
   async done() { try { const notify = require('./sendNotify'); await notify.sendNotify(this.name, this.logs.join('\n')); } catch(e) { console.log('通知发送失败', e); } }
 }
 
-const $ = new Env("顾家小程序签到");
+const $ = new Env("顾家家居会员俱乐部");
 const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
 
+// ====================== 配置常量 ======================
 const MINI_APP_ID = "wx0770280d160f09fe";
-const PAGE_VERSION = "286";
+const PAGE_VERSION = "293";
 const API_BASE = "https://mc.kukahome.com/club-server";
 const INTEGRAL_BASE = "https://mc.kukahome.com/integral-server";
 const BRAND_CODE = "K001";
 const SMALL_APPLICATION_ID = "667516";
 const SMALL_CRYPTO = "FH3yRrHG2RfexND8";
-const VERSION_NUMBER = "2.8.6";
+const VERSION_NUMBER = "2.0.184";
 const TOKEN_CACHE_FILE = path.join(__dirname, "gujiajiaju_token_cache.json");
 const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) MicroMessenger/3.9.12 MiniProgramEnv/Windows WindowsWechat/WMPF";
 
@@ -67,8 +70,13 @@ const wechat = new WeChatServer({
   WX_ID: process.env.WX_ID || "",
 });
 
+// ====================== 工具函数 ======================
 function md5(input) {
   return crypto.createHash("md5").update(String(input)).digest("hex");
+}
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 function readTokenCache() {
@@ -129,6 +137,7 @@ function buildParameterSign(data, timestamp) {
   return md5(md5(base) + salt);
 }
 
+// ====================== Task ======================
 class Task {
   constructor(openid) {
     this.index = $.userIdx++;
@@ -139,9 +148,7 @@ class Task {
     this.userInfo = {};
   }
 
-  cacheKey() {
-    return this.openid;
-  }
+  cacheKey() { return this.openid; }
 
   getCachedToken() {
     const cache = readTokenCache();
@@ -189,6 +196,8 @@ class Task {
       "X-Customer": this.memberId || "",
       brandCode: BRAND_CODE,
       appid: SMALL_APPLICATION_ID,
+      "E-Opera": "",
+      "xweb_xhr": "1",
       sign,
       timestamp,
       versionNumber: VERSION_NUMBER,
@@ -212,7 +221,9 @@ class Task {
     }
     const result = res.data || {};
     if (result.code !== undefined && ![0, 401, 402, 515].includes(Number(result.code))) {
-      throw new Error(result.message || result.msg || JSON.stringify(result));
+      const err = new Error(result.message || result.msg || JSON.stringify(result));
+      err.rawResponse = result;
+      throw err;
     }
     return result;
   }
@@ -221,7 +232,6 @@ class Task {
   async getWxCode() {
     return getSingleCode(MINI_APP_ID, this.openid);
   }
-
 
   async login() {
     const code = await this.getWxCode();
@@ -267,91 +277,374 @@ class Task {
     if (!info.data) throw new Error("user/info返回为空");
     this.userInfo = info.data;
     this.applyToken(info.data);
-    const name = this.userInfo.nickName || this.userInfo.name || this.memberId || "未知";
-    $.log(`账号[${this.index}] 用户: ${name}`);
+    const openidMask = this.openid.length >= 12
+      ? this.openid.slice(0, 6) + "..." + this.openid.slice(-6)
+      : this.openid;
+    const nick = this.userInfo.nickName || this.userInfo.name || "";
+    const mobile = this.userInfo.mobile || "";
+    let label = `【${openidMask}】`;
+    if (nick) label += `(${nick})`;
+    if (mobile) label += ` 手机：${mobile}`;
+    console.log(`账号[${this.index}] 👤 用户: ${label}`);
   }
 
   async ensureLogin() {
     const cached = this.getCachedToken();
     if (cached) {
       this.applyToken(cached);
-      $.log(`账号[${this.index}] 使用缓存token`);
+      console.log(`账号[${this.index}] 使用缓存token`);
       try {
         await this.getUserInfo();
         return;
       } catch {
         this.clearCachedToken();
-        $.log(`账号[${this.index}] 缓存失效，重新登录`);
+        console.log(`账号[${this.index}] 缓存失效，重新登录`);
       }
     }
-    try { await this.login(); } catch (e) { $.log(`账号[${this.index}] 登录失败: ${e.message || e}`); }
+    await this.login();
     await this.getUserInfo();
     this.saveCachedToken();
-    $.log(`账号[${this.index}] 登录成功 memberId=${this.memberId}`);
+    console.log(`账号[${this.index}] ✅ 登录成功`);
   }
 
-  async checkCalendar() {
-    try {
-      const ret = await this.request({
-        method: "GET",
-        url: `${INTEGRAL_BASE}/user/sign/calendar`,
-        params: {},
-      });
-      $.log(`账号[${this.index}] 日历查询: code=${ret.code}`);
-    } catch (e) {
-      $.log(`账号[${this.index}] 日历查询失败: ${e.message || e}`);
-    }
+  async getPoints() {
+    const ret = await this.request({
+      method: "POST",
+      url: `${API_BASE}/front/member/personalCenter`,
+      data: { t: Date.now() },
+      withAuth: true,
+      withTmpToken: false,
+    });
+    if (!ret || ret.point === undefined) throw new Error("查询积分失败");
+    return Number(ret.point || 0);
+  }
+
+  async getSignCalendar() {
+    const ret = await this.request({
+      method: "GET",
+      url: `${INTEGRAL_BASE}/user/sign/calendar`,
+      params: {},
+      withAuth: true,
+      withTmpToken: false,
+    });
+    if (ret.code !== 0) throw new Error(ret.message || ret.msg || "查询签到日历失败");
+    return ret.data || {};
   }
 
   async sign() {
+    let ret;
     try {
-      const ret = await this.request({
+      ret = await this.request({
         method: "POST",
         url: `${INTEGRAL_BASE}/scenePoint/scene/point`,
         data: {
           scene: "sign",
           brandCode: BRAND_CODE,
         },
+        withAuth: true,
+        withTmpToken: false,
       });
+
       if (ret.code === 0) {
-        $.log(`账号[${this.index}] 签到成功`);
-        return;
+        const gain = typeof ret.data === "number" ? ret.data : null;
+        return { status: "success", ret, gain };
       }
+
       const msg = ret.message || ret.msg || JSON.stringify(ret);
       if (/已签|重复|already|今日/.test(msg)) {
-        $.log(`账号[${this.index}] 今日已签到`);
-        return;
+        return { status: "already", ret, gain: null };
       }
+
       throw new Error(msg);
     } catch (e) {
       const msg = e.message || String(e);
       if (/已签|重复|already|今日/.test(msg)) {
-        $.log(`账号[${this.index}] 今日已签到`);
+        return { status: "already", ret: e.rawResponse, gain: null };
+      }
+      console.log(`账号[${this.index}] ❌ 签到接口返回失败: ${msg}`);
+      throw e;
+    }
+  }
+
+  // ---- 做任务：社区互动（点赞/收藏/分享晒家帖子赚积分）----
+  async getTaskList() {
+    const ret = await this.request({
+      method: "GET",
+      url: `${API_BASE}/front/member/selectPointTask`,
+      params: { brandCode: BRAND_CODE },
+      withAuth: true,
+      withTmpToken: false,
+    });
+    if (ret.code === 0 && Array.isArray(ret.data) && ret.data.length) {
+      const names = ret.data
+        .map((t) => t.taskName || t.name || t.title || JSON.stringify(t))
+        .join("、");
+      console.log(`账号[${this.index}] 📋 可接任务(${ret.data.length}): ${names}`);
+    } else {
+      console.log(`账号[${this.index}] 📋 无可用任务列表或查询失败`);
+    }
+    return ret.data || [];
+  }
+
+  async findPost() {
+    for (let pageNum = 1; pageNum <= 5; pageNum++) {
+      const ret = await this._safe("帖子列表", () =>
+        this.request({
+          method: "POST",
+          url: `${API_BASE}/applet/waterfall/newWaterfall`,
+          data: { source: 1, pageNum, pageSize: 6 },
+          withAuth: true,
+          withTmpToken: false,
+        })
+      );
+      if (!ret || ret.code !== 0) break;
+      const items = Array.isArray(ret.data) ? ret.data : (ret.data && ret.data.list) || [];
+      if (!items.length) break;
+      for (const post of items) {
+        const detail = await this._safe("帖子详情", () =>
+          this.request({
+            method: "POST",
+            url: `${API_BASE}/front/postOrder/postOrderDetail`,
+            data: { id: Number(post.id) },
+            withAuth: true,
+            withTmpToken: false,
+          })
+        );
+        if (detail && detail.code === 0 && detail.data) {
+          const likeStatus = detail.data.likeStatus;
+          const collectStatus = detail.data.collectStatus;
+          const untouched =
+            (likeStatus == null && collectStatus == null) ||
+            (String(likeStatus) === "0" && String(collectStatus) === "0");
+          if (untouched) {
+            const show = (post.title || "").toString().replace(/[\r\n]+/g, " ").trim();
+            console.log(`账号[${this.index}] 🔍 找到可互动帖子: 「${show}」`);
+            return post;
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  async _safe(marker, fn) {
+    try {
+      return await fn();
+    } catch (e) {
+      console.log(`账号[${this.index}] ⚠️ ${marker}: ${e.message || e}`);
+      return null;
+    }
+  }
+
+  async pushEvent(eventId, content, targetId, targetName, businessId, businessName) {
+    return this._safe("事件上报", () =>
+      this.request({
+        method: "POST",
+        url: `${API_BASE}/front/member/pushEvent`,
+        data: { eventId, content, targetId, targetName, businessId, businessName },
+        withAuth: true,
+        withTmpToken: false,
+      })
+    );
+  }
+
+  async insertFootPoint(buriedPointLogo, subordinateTerminal, businessName, businessCode, currentPageLink) {
+    return this._safe("埋点上报", () =>
+      this.request({
+        method: "POST",
+        url: `${API_BASE}/front/foot/point/insertFootPoint`,
+        data: {
+          brandCode: BRAND_CODE,
+          buriedPointLogo,
+          subordinateTerminal,
+          businessName: businessName || "",
+          businessCode: businessCode || "",
+          currentPageLink: currentPageLink || "",
+        },
+        withAuth: true,
+        withTmpToken: false,
+      })
+    );
+  }
+
+  async likeSendPoint(postOrderId, triggerType, content, forwardType) {
+    const data = { postOrderId: Number(postOrderId), triggerType, content };
+    if (forwardType !== undefined) data.forwardType = forwardType;
+    try {
+      const ret = await this.request({
+        method: "POST",
+        url: `${API_BASE}/front/member/likeSendPoint`,
+        data,
+        withAuth: true,
+        withTmpToken: false,
+      });
+      if (Number(ret.code) !== 0) {
+        console.log(`账号[${this.index}] ⚠️ 送积分未成功: ${content} (code=${ret.code}, msg=${ret.message || ret.msg || ""})`);
+      }
+      return ret;
+    } catch (e) {
+      console.log(`账号[${this.index}] ❌ 送积分异常: ${content} (${e.message || e})`);
+      return null;
+    }
+  }
+
+  async likePost(post) {
+    const postId = Number(post.id);
+    const title = (post.title || post.id).toString().replace(/[\r\n]+/g, " ").trim();
+    console.log(`账号[${this.index}] 👍 点赞: 「${title}」`);
+    await this.pushEvent("c_showhome_like", "晒家-点赞", "300001", "晒家-点赞", String(postId), title);
+    const likeRet = await this._safe("点赞", () =>
+      this.request({ method: "POST", url: `${API_BASE}/front/postOrder/like`, data: { id: postId }, withAuth: true, withTmpToken: false })
+    );
+    if (!likeRet || Number(likeRet.code) !== 0) {
+      console.log(`账号[${this.index}] ⚠️ 点赞接口未返回成功: ${JSON.stringify(likeRet && likeRet.data !== undefined ? likeRet.data : likeRet)}`);
+    }
+    await this.insertFootPoint("do_good_btn", "会员小程序", "", "", "");
+    await this.likeSendPoint(postId, 1, "点赞");
+  }
+
+  async collectPost(post) {
+    const postId = Number(post.id);
+    const title = (post.title || post.id).toString().replace(/[\r\n]+/g, " ").trim();
+    console.log(`账号[${this.index}] ⭐ 收藏: 「${title}」`);
+    const collectRet = await this._safe("收藏", () =>
+      this.request({ method: "POST", url: `${API_BASE}/front/postOrder/collect`, data: { id: postId }, withAuth: true, withTmpToken: false })
+    );
+    if (!collectRet || Number(collectRet.code) !== 0) {
+      console.log(`账号[${this.index}] ⚠️ 收藏接口未返回成功: ${JSON.stringify(collectRet && collectRet.data !== undefined ? collectRet.data : collectRet)}`);
+    }
+    await this.insertFootPoint("buriedPointLogo", "会员小程序", "", "", "");
+    await this.likeSendPoint(postId, 2, "收藏");
+  }
+
+  async sharePost(post) {
+    const postId = Number(post.id);
+    const title = (post.title || post.id).toString().replace(/[\r\n]+/g, " ").trim();
+    console.log(`账号[${this.index}] 🔁 分享: 「${title}」`);
+    const shareRet = await this._safe("分享", () =>
+      this.request({ method: "POST", url: `${API_BASE}/front/postOrder/share`, data: { id: postId }, withAuth: true, withTmpToken: false })
+    );
+    if (!shareRet || Number(shareRet.code) !== 0) {
+      console.log(`账号[${this.index}] ⚠️ 分享接口未返回成功: ${JSON.stringify(shareRet && shareRet.data !== undefined ? shareRet.data : shareRet)}`);
+    }
+    await this.insertFootPoint("share_friend_btn", "会员小程序", "", "", "");
+    await this.likeSendPoint(postId, 3, "微信好友转发", 2);
+  }
+
+  async communityTasks() {
+    if (String(process.env.GJJJ_COMMUNITY) === "0") {
+      console.log(`账号[${this.index}] ℹ️ 已关闭社区互动(GJJJ_COMMUNITY=0)`);
+      return;
+    }
+    try {
+      const post = await this.findPost();
+      if (!post) {
+        console.log(`账号[${this.index}] ⚠️ 社区无未互动帖子`);
         return;
       }
-      throw e;
+      const title = (post.title || post.id).toString().replace(/[\r\n]+/g, " ").trim();
+      console.log(`账号[${this.index}] 📝 社区互动帖子: 「${title}」`);
+
+      await this.likePost(post);
+      await this.collectPost(post);
+      await this.sharePost(post);
+
+      console.log(`账号[${this.index}] 🎉 社区互动结束 (赞1/藏1/享1)`);
+    } catch (e) {
+      console.log(`账号[${this.index}] ❌ 社区互动异常: ${e.message || e}`);
     }
   }
 
   async run() {
     try {
       await this.ensureLogin();
-      await this.checkCalendar();
-      await this.sign();
+      const pStart = await this.getPoints().catch(() => null);
+      if (pStart !== null) console.log(`账号[${this.index}] 💰 当前积分: 【${pStart}】`);
+
+      const cal = await this.getSignCalendar().catch(() => null);
+      if (cal === null) {
+        console.log(`账号[${this.index}] ⚠️ 签到日历查询失败，将尝试执行签到`);
+      }
+
+      let signRes = null;
+      let cal2 = cal;
+      const signed = cal ? !!cal.isTodaySigned : null;
+      if (signed !== true) {
+        signRes = await this.sign();
+        cal2 = await this.getSignCalendar().catch(() => null);
+      }
+
+      if ((signRes && signRes.status === "already") || (signed === true && !signRes)) {
+        console.log(`账号[${this.index}] 📝 每日签到： ⚠️ 今日已签到`);
+      } else {
+        const signConfirmed = cal2 ? !!cal2.isTodaySigned : true;
+        if (!signConfirmed) {
+          if (cal2 === null) {
+            console.log(`账号[${this.index}] 📝 每日签到： ⚠️ 签到后日历查询失败，无法确认是否生效`);
+          } else {
+            console.log(`账号[${this.index}] 📝 每日签到： ❌ 签到接口返回成功但日历未确认`);
+          }
+        } else if (signRes && typeof signRes.gain === "number" && signRes.gain > 0) {
+          console.log(`账号[${this.index}] 📝 每日签到： 🎉 签到成功 (+${signRes.gain}积分)`);
+        } else {
+          console.log(`账号[${this.index}] 📝 每日签到： 🎉 签到成功`);
+        }
+      }
+
+      if (cal2 && cal2.signCount !== undefined && cal2.signCount !== null) {
+        console.log(`账号[${this.index}] 📅 累计签到: 【${cal2.signCount}】天`);
+      }
+
+      await this.getTaskList().catch(() => {});
+      await this.communityTasks().catch(() => {});
+
+      let pEnd = pStart;
+      let lastP = pStart;
+      let stable = 0;
+      for (let i = 0; i < 8; i++) {
+        if (i > 0) await sleep(2500);
+        const pTry = await this.getPoints().catch(() => null);
+        if (pTry === null) continue;
+        pEnd = pTry;
+        if (pTry === lastP) {
+          stable++;
+          if (pTry !== pStart && stable >= 2) break;
+          if (stable >= 3) break;
+        } else {
+          stable = 0;
+          lastP = pTry;
+        }
+      }
+      if (pStart !== null) {
+        const delta = pEnd - pStart;
+        const signGain = signRes && typeof signRes.gain === "number" ? signRes.gain : 0;
+        const communityGain = delta - signGain;
+        const parts = [];
+        if (signGain !== 0) parts.push(`签到+${signGain}积分`);
+        if (communityGain !== 0) parts.push(`社区+${communityGain}积分`);
+        const detail = parts.length ? `（${parts.join("，")}）` : "";
+        const arrow = delta === 0 ? `【${pEnd}】` : `【${pStart}】→【${pEnd}】 本次 +${delta}积分${detail}`;
+        console.log(`账号[${this.index}] 💰 积分: ${arrow}`);
+      }
       this.saveCachedToken();
     } catch (e) {
       const msg = e.message || String(e);
-      $.log(`账号[${this.index}] 执行失败: ${msg}`);
+      console.log(`账号[${this.index}] 执行失败: ${msg}`);
       if (/401|token|登录|失效|过期/i.test(msg)) this.clearCachedToken();
     }
   }
 }
 
+// ====================== 主入口 ======================
 !(async () => {
+  console.log(`============ 顾家家居会员俱乐部 ============`);
   $.checkEnv(ckName);
+  console.log(`共 ${$.userList.length} 个账号`);
   for (const openid of $.userList) {
     await new Task(openid).run();
+    if ($.userList.indexOf(openid) < $.userList.length - 1) await sleep(3000);
   }
+  console.log(`============ 顾家家居会员俱乐部 执行结束 ============`);
 })()
   .catch((e) => $.log(e.message || e))
   .finally(() => $.done());
