@@ -139,11 +139,6 @@ async function request(method, url, token, options = {}) {
   return res;
 }
 
-// 使用 getCode.js 统一接口获取微信 login code
-async function getWxCode(wxid, appid) {
-  return getSingleCode(appid, wxid);
-}
-
 async function loginByCode(account) {
   $.log("🔐 正在获取code并登录...");
   const code = await getWxCode(account, MINI_APPID);
