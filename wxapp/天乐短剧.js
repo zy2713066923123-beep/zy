@@ -620,9 +620,12 @@ async function doWatchTask(client, account) {
     return today;
   }
   if (!DO_WATCH) return today;
-  if (hasClaimableEnvelope(today)) {
+  if (hasClaimableEnvelope(today) && account.userKey) {
     log('时长：已有可领取红包，跳过观看上报');
     return today;
+  }
+  if (hasClaimableEnvelope(today) && !account.userKey) {
+    log('时长：已有可领取红包，但缺少加密 key 无法领取，继续观看上报以赚积分');
   }
 
   const contexts = await getDramaContexts(client);
@@ -640,17 +643,19 @@ async function doWatchTask(client, account) {
     return today;
   }
 
-  const maxSeconds = WATCH_UNTIL_UNLOCK ? WATCH_MAX_SECONDS : WATCH_SECONDS;
+  // 缺加密 key 时无法领红包解锁，改用固定时长观看而非"持续解锁"模式
+  const useUnlock = WATCH_UNTIL_UNLOCK && Boolean(account.userKey);
+  const maxSeconds = useUnlock ? WATCH_MAX_SECONDS : WATCH_SECONDS;
   const baseChunks = Math.max(1, Math.ceil(maxSeconds / WATCH_CHUNK_SECONDS));
-  const chunks = WATCH_UNTIL_UNLOCK ? baseChunks * 3 : baseChunks;
+  const chunks = useUnlock ? baseChunks * 3 : baseChunks;
   let contextIndex = 0;
   let context = contexts[contextIndex % contexts.length];
   let positionMs = 0;
   let acceptedTotalMs = 0;
   log(`时长：准备上报，短剧池 ${contexts.length} 个，单段 ${WATCH_CHUNK_SECONDS} 秒，目标解锁=${WATCH_UNTIL_UNLOCK ? '是' : '否'}`);
   for (let index = 1; index <= chunks; index += 1) {
-    if (WATCH_UNTIL_UNLOCK && hasClaimableEnvelope(today)) break;
-    if (WATCH_UNTIL_UNLOCK && acceptedTotalMs >= WATCH_MAX_SECONDS * 1000) break;
+    if (useUnlock && hasClaimableEnvelope(today)) break;
+    if (useUnlock && acceptedTotalMs >= WATCH_MAX_SECONDS * 1000) break;
     const remainingAttemptSeconds = maxSeconds - (index - 1) * WATCH_CHUNK_SECONDS;
     const elapsedSeconds = WATCH_UNTIL_UNLOCK
       ? WATCH_CHUNK_SECONDS
@@ -693,7 +698,7 @@ async function doWatchTask(client, account) {
     } else {
       positionMs = toPositionMs;
     }
-    if (WATCH_UNTIL_UNLOCK && hasClaimableEnvelope(today)) break;
+    if (useUnlock && hasClaimableEnvelope(today)) break;
     if (index < chunks && WATCH_SLEEP_MS > 0) await sleep(WATCH_SLEEP_MS);
   }
   try {
@@ -740,7 +745,8 @@ async function claimWatchEnvelopes(client, account, today) {
 
 async function processWatchEnvelopeRewards(client, account) {
   let today = null;
-  const maxRounds = CLAIM_ALL_ENVELOPES ? ENVELOPE_MAX_ROUNDS : 1;
+  // 缺加密 key 时无法领红包，只观看一轮赚积分即可，避免 20 轮空转
+  const maxRounds = (CLAIM_ALL_ENVELOPES && account.userKey) ? ENVELOPE_MAX_ROUNDS : 1;
   let stoppedReason = '';
   for (let round = 1; round <= maxRounds; round += 1) {
     today = await doWatchTask(client, account);
@@ -759,9 +765,11 @@ async function processWatchEnvelopeRewards(client, account) {
     }
     if (ENVELOPE_ROUND_SLEEP_MS > 0) await sleep(ENVELOPE_ROUND_SLEEP_MS);
   }
-  if (CLAIM_ALL_ENVELOPES && !isAllEnvelopesClaimed(today)) {
+  if (CLAIM_ALL_ENVELOPES && !isAllEnvelopesClaimed(today) && account.userKey) {
     const reason = stoppedReason || `已达到最大轮数 ${maxRounds}`;
     log(`红包：${reason}，仍未全部领取，当前 ${summarizeWatchEnvelope(today)}`);
+  } else if (!account.userKey && !isAllEnvelopesClaimed(today)) {
+    log('红包：缺少用户加密 key，未能领取；观看积分已上报');
   }
   return today;
 }
