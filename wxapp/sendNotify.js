@@ -667,6 +667,10 @@ function do_qywxamNotify(text, desp) {
                 timeout,
             };
             $.post(options_accesstoken, (err, resp, json) => {
+                if (err || !json || json.errcode) {
+                    console.log(`⚠️ 企业微信应用推送获取 access_token 失败：${err || (json && json.errmsg) || '未知错误'}`);
+                    return;
+                }
                 let html = desp.replace(/\n/g, '<br/>');
                 let accesstoken = json.access_token;
                 let options;
