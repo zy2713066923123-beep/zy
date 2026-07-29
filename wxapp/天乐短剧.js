@@ -159,12 +159,38 @@ function isYybOpenid(id) {
   return false;
 }
 
+// 微信自定义号（alias）：字母开头，6-20 位，可含字母/数字/下划线/减号
+// 用于区分「协议账号标识」与「直接填 token」：非 token 形式即视为协议标识
+function isWechatAlias(id) {
+  const raw = String(id || '').split('#')[0].trim();
+  if (!raw) return false;
+  return /^[a-zA-Z][-_a-zA-Z0-9]{5,19}$/.test(raw);
+}
+
 function isProtocolIdentifier(id) {
   const raw = String(id || '');
   return raw.startsWith('wxid_') ||
     raw.startsWith('wx:') ||
     raw.startsWith('yyb:') ||
-    isYybOpenid(raw);
+    isYybOpenid(raw) ||
+    isWechatAlias(raw);
+}
+
+// 协议路由：应用宝 openid/数字 id → yyb；其余（wxid_、wx:、用户自定义微信号）→ wechat（牛子）
+// 与 ./getCode.js 的 _detectProtocolForIdentifier 一致：正向识别应用宝 openid，其余一律当微信号。
+function detectProtocol(id) {
+  const raw = String(id || '').split('#')[0].trim();
+  if (raw.startsWith('yyb:')) return 'yyb';
+  if (raw.startsWith('wx:') || raw.startsWith('wxid_')) return 'wechat';
+  return isYybOpenid(raw) ? 'yyb' : 'wechat';
+}
+
+// 剥离协议前缀，得到传给 getCode 的真实 identifier
+function stripProtocolPrefix(id) {
+  const raw = String(id || '').trim();
+  if (raw.startsWith('yyb:')) return raw.slice('yyb:'.length);
+  if (raw.startsWith('wx:')) return raw.slice('wx:'.length);
+  return raw;
 }
 
 function parseAccountLine(line, index, globalUserKey) {
@@ -173,18 +199,9 @@ function parseAccountLine(line, index, globalUserKey) {
   if (!first) return null;
 
   if (isProtocolIdentifier(first)) {
-    let protocolType;
-    let identifier;
-    if (first.startsWith('yyb:')) {
-      protocolType = 'yyb';
-      identifier = first.slice('yyb:'.length);
-    } else if (isYybOpenid(first)) {
-      protocolType = 'yyb';
-      identifier = first;
-    } else {
-      protocolType = 'wechat';
-      identifier = first;
-    }
+    // 路由判断：应用宝 openid → yyb，其余（含用户自定义微信号）→ wechat
+    const protocolType = detectProtocol(first);
+    const identifier = stripProtocolPrefix(first);
     const remark = parts.slice(1).join('#').trim() || identifier;
     return {
       index,

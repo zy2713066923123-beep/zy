@@ -308,9 +308,21 @@ function isYybOpenid(id) {
   return false;
 }
 
-function isProtocolIdentifier(id) {
-  const raw = String(id || '');
-  return raw.startsWith('wxid_') || raw.startsWith('wx:') || raw.startsWith('yyb:') || isYybOpenid(raw);
+// 协议路由：应用宝 openid/数字 id → yyb；其余（wxid_、wx:、用户自定义微信号等）→ wechat（牛子）
+// 与 ./getCode.js 的 _detectProtocolForIdentifier 一致：正向识别应用宝 openid，其余一律当微信号，不做拒绝。
+function detectProtocol(id) {
+  const raw = String(id || '').split('#')[0].trim();
+  if (raw.startsWith('yyb:')) return 'yyb';
+  if (raw.startsWith('wx:') || raw.startsWith('wxid_')) return 'wechat';
+  return isYybOpenid(raw) ? 'yyb' : 'wechat';
+}
+
+// 剥离协议前缀，得到传给 getCode 的真实 identifier
+function stripProtocolPrefix(id) {
+  const raw = String(id || '').trim();
+  if (raw.startsWith('yyb:')) return raw.slice('yyb:'.length);
+  if (raw.startsWith('wx:')) return raw.slice('wx:'.length);
+  return raw;
 }
 
 function parseAccounts() {
@@ -328,22 +340,9 @@ function parseAccounts() {
       index += 1;
       const first = line.split('#')[0].trim();
       if (!first) return null;
-      if (!isProtocolIdentifier(first)) {
-        log(`账号 ${index} 不是协议账号标识（应形如 wxid_xxx#备注 或 openid#备注），已跳过`);
-        return null;
-      }
-      let protocolType;
-      let identifier;
-      if (first.startsWith('yyb:')) {
-        protocolType = 'yyb';
-        identifier = first.slice('yyb:'.length);
-      } else if (isYybOpenid(first)) {
-        protocolType = 'yyb';
-        identifier = first;
-      } else {
-        protocolType = 'wechat';
-        identifier = first;
-      }
+      // 路由判断：应用宝 openid → yyb，其余（含用户自定义微信号）→ wechat，不再拒绝账号
+      const protocolType = detectProtocol(first);
+      const identifier = stripProtocolPrefix(first);
       const remark = line.split('#').slice(1).join('#').trim() || identifier;
       return {
         index, raw: line, accountId: identifier, cacheKey: identifier,
