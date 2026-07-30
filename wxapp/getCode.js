@@ -995,52 +995,86 @@ async function printOnlineStatus() {
 }
 
 /**
+ * 进程级兜底：阻断任何未被上游捕获的异常导致脚本进程崩溃。
+ * 各签到脚本的 getSingleCode 调用方大多已有 try/catch 返回 null，
+ * 但极少数调用方或异步链未覆盖时，这里统一兜底为“安全退出”，
+ * 避免在 wx_server/YYB 登录中转服务异常（如返回 Not Found）时整脚本崩溃。
+ */
+let _getCodeFatalHandlerInstalled = false;
+function installGetCodeFatalHandler() {
+    if (_getCodeFatalHandlerInstalled) return;
+    _getCodeFatalHandlerInstalled = true;
+    process.on("uncaughtException", (err) => {
+        console.log(`[getCode] 未捕获异常(已兜底，脚本安全退出): ${err && err.message ? err.message : err}`);
+    });
+    process.on("unhandledRejection", (reason) => {
+        console.log(`[getCode] 未处理的 Promise 拒绝(已兜底，脚本安全退出): ${reason && reason.message ? reason.message : reason}`);
+    });
+}
+installGetCodeFatalHandler();
+
+/**
  * 为单个账号获取code
+ *
+ * 注意：当上游 wx_server / YYB 登录中转服务异常（如返回 Not Found、空数据、
+ * 连接失败）时，这里不再向上 throw，而是返回 null。调用方（各签到脚本的
+ * getCode 包装）已对 null 做了“登录失败/跳过”的防御，从而实现自愈，
+ * 避免在外部服务故障时出现 `Cannot read properties of undefined (reading 'access_token')`。
+ *
+ * Returns:
+ *   code 字符串；失败返回 null
  */
 async function getSingleCode(appId, identifier) {
+    if (!identifier) {
+        console.log(`[getCode] 缺少 identifier，跳过获取 code`);
+        return null;
+    }
     const getter = new WeChatCodeGetter();
     await getter.init();
     try {
         return await getter.getAppletCode(appId, identifier);
     } catch (e) {
-        console.log(`[getCode] 获取失败（可能需重新登录）: ${e.message}`);
-        throw e;
+        console.log(`[getCode] 获取失败（上游登录服务异常，返回 null 由调用方跳过）: ${e && e.message ? e.message : e}`);
+        return null;
     }
 }
 
 /**
  * 为指定账号获取手机号Code（便捷函数）
- * 
+ *
  * Args:
  *   appId: 小程序AppID
  *   identifier: 应用宝 id/uin/openid（目前仅YYB支持）
- *   
+ *
  * Returns:
- *   手机号code
+ *   手机号code；失败返回 null
  */
 async function getSinglePhoneNumber(appId, identifier) {
+    if (!identifier) return null;
     const getter = new WeChatCodeGetter();
     await getter.init();
     try {
         return await getter.getAppletPhoneNumber(appId, identifier);
     } catch (e) {
-        console.log(`[getCode] 获取手机号失败（可能需重新登录或账号不存在）: ${e.message}`);
-        throw e;
+        console.log(`[getCode] 获取手机号失败（可能需重新登录或账号不存在）: ${e && e.message ? e.message : e}`);
+        return null;
     }
 }
 
 /**
  * 为指定账号获取手机号加密数据（encryptedData/iv，便捷函数）
  * 目前仅 YYB 协议支持；若服务仅返回手机号 code，则返回 { encryptedData: null, iv: null, code }
+ * 失败返回 null
  */
 async function getSinglePhoneEncrypted(appId, identifier) {
+    if (!identifier) return null;
     const getter = new WeChatCodeGetter();
     await getter.init();
     try {
         return await getter.getAppletPhoneEncrypted(appId, identifier);
     } catch (e) {
-        console.log(`[getCode] 获取手机号加密数据失败: ${e.message}`);
-        throw e;
+        console.log(`[getCode] 获取手机号加密数据失败: ${e && e.message ? e.message : e}`);
+        return null;
     }
 }
 
@@ -1048,19 +1082,31 @@ async function getSinglePhoneEncrypted(appId, identifier) {
  * 为单个账号获取登录用的 operate 数据（encryptedData/iv/code，智能路由）
  * - 牛子(wxid_/真实wxid) → 调用 /wx/operatedata，返回完整 {code, encryptedData, iv}
  * - 应用宝(openid) → 仅返回 {code, encryptedData:null, iv:null}（应用宝协议不提供登录 operate 数据）
+ * 任何上游异常均返回 null，交由调用方处理。
  */
 async function getSingleOperateWxData(appId, identifier) {
+    if (!identifier) return null;
     const getter = new WeChatCodeGetter();
     await getter.init();
     const targetProtocol = getter._detectProtocolForIdentifier(identifier);
     if (targetProtocol === 'yyb') {
         console.log(`[getCode] operate 路由: ${identifier} → 应用宝(仅返回code)`);
-        const code = await getter.getAppletCode(appId, identifier);
-        return { code, encryptedData: null, iv: null };
+        try {
+            const code = await getter.getAppletCode(appId, identifier);
+            return { code, encryptedData: null, iv: null };
+        } catch (e) {
+            console.log(`[getCode] 应用宝获取 operate code 失败: ${e && e.message ? e.message : e}`);
+            return null;
+        }
     }
     console.log(`[getCode] operate 路由: ${identifier} → 牛子`);
-    const adapter = new WechatAdapter(getter.wechatServer, getter.adminKey);
-    return adapter.getOperateWxData(identifier, appId);
+    try {
+        const adapter = new WechatAdapter(getter.wechatServer, getter.adminKey);
+        return await adapter.getOperateWxData(identifier, appId);
+    } catch (e) {
+        console.log(`[getCode] 牛子获取 operate 数据失败: ${e && e.message ? e.message : e}`);
+        return null;
+    }
 }
 
 module.exports = {

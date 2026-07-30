@@ -943,28 +943,27 @@ def print_online_status():
 def get_single_code(app_id: str, identifier: str) -> str:
     """
     为指定账号获取单个code（便捷函数）
-    
+
     Args:
         app_id: 小程序AppID
-        identifier: 
+        identifier:
           - 牛子: wxid
           - 应用宝: id/uin/openid
-          
+
     Returns:
-        str: 登录code
+        str: 登录code；上游 wx_server / YYB 登录中转服务异常（如返回 Not Found、空数据、
+        连接失败）时返回 None，交由调用方按“登录失败/跳过”处理，避免脚本崩溃。
     """
+    if not identifier:
+        print("[getCode] 缺少 identifier，跳过获取 code")
+        return None
     getter = WeChatCodeGetter()
     getter.init()
     try:
         return getter.get_applet_code(app_id, identifier)
     except Exception as e:
-        print(f"[getCode] 获取失败（可能需重新登录）: {e}")
-        raise
-    try:
-        return getter.get_applet_code(app_id, identifier)
-    except Exception as e:
-        print(f"[getCode] 获取失败（可能需重新登录）: {e}")
-        raise
+        print(f"[getCode] 获取失败（上游登录服务异常，返回 None 由调用方跳过）: {e}")
+        return None
 
 
 def get_single_phone_number(app_id: str, identifier: str) -> str:

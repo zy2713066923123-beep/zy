@@ -7,7 +7,14 @@ const timeout = 15000;
 async function request(url, options = {}) {
     const { json, form, body, headers = {}, ...rest } = options;
 
-    const finalHeaders = { ...headers };
+    // 归一化请求头：移除所有大小写形式的 content-type，避免与 json/form
+    // 自动设置的 content-type 同时存在，触发 undici 的
+    // InformationalError: Header field "content-type" must only have a single value
+    const finalHeaders = {};
+    for (const key of Object.keys(headers)) {
+        if (key.toLowerCase() === 'content-type') continue;
+        finalHeaders[key] = headers[key];
+    }
     let finalBody = body;
 
     if (json) {
@@ -15,7 +22,14 @@ async function request(url, options = {}) {
         finalBody = JSON.stringify(json);
     } else if (form) {
         finalBody = form;
-        delete finalHeaders['content-type'];
+    } else {
+        // 非 json/form 时，如调用方原本提供了 content-type 则保留其值
+        for (const key of Object.keys(headers)) {
+            if (key.toLowerCase() === 'content-type') {
+                finalHeaders['content-type'] = headers[key];
+                break;
+            }
+        }
     }
 
     return undiciRequest(url, {
@@ -667,8 +681,9 @@ function do_qywxamNotify(text, desp) {
                 timeout,
             };
             $.post(options_accesstoken, (err, resp, json) => {
-                if (err || !json || json.errcode) {
-                    console.log(`⚠️ 企业微信应用推送获取 access_token 失败：${err || (json && json.errmsg) || '未知错误'}`);
+                if (err || !json || json.errcode || !json.access_token) {
+                    console.log(`⚠️ 企业微信应用推送获取 access_token 失败：${err || (json && json.errmsg) || (json && JSON.stringify(json)) || '未知错误'}`);
+                    resolve();
                     return;
                 }
                 let html = desp.replace(/\n/g, '<br/>');

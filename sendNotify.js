@@ -22,8 +22,22 @@ try {
         return { body: typeof res.data === 'string' ? res.data : JSON.stringify(res.data) };
       },
       post: async (url, options = {}) => {
-        const res = await axios.post(url, options.body, {
-          headers: options.headers,
+        // 兼容 got 的 json/form/body 三种传参方式
+        let data = options.body;
+        const headers = { ...(options.headers || {}) };
+        if (options.json !== undefined) {
+          data = options.json;
+          if (!Object.keys(headers).some((k) => k.toLowerCase() === 'content-type')) {
+            headers['Content-Type'] = 'application/json';
+          }
+        } else if (options.form !== undefined) {
+          data = querystring.stringify(options.form);
+          if (!Object.keys(headers).some((k) => k.toLowerCase() === 'content-type')) {
+            headers['Content-Type'] = 'application/x-www-form-urlencoded';
+          }
+        }
+        const res = await axios.post(url, data, {
+          headers,
           timeout: options.timeout || 15000,
           responseType: 'text'
         });
@@ -139,6 +153,21 @@ for (const key in push_config) {
   }
 }
 
+// 去掉与 json/form 冲突的 content-type 头。
+// got 在使用 json/form 选项时会自动设置 content-type，
+// 若脚本又手动传了 headers['Content-Type']，会出现两个同名头，
+// 触发 got 的 InformationalError: Header field "content-type" must only have a single value
+function stripConflictingContentType(others) {
+  if ((others.json || others.form) && others.headers) {
+    for (const key of Object.keys(others.headers)) {
+      if (key.toLowerCase() === 'content-type') {
+        delete others.headers[key];
+      }
+    }
+  }
+  return others;
+}
+
 const $ = {
   post: (params, callback) => {
     if (!got) {
@@ -146,6 +175,7 @@ const $ = {
       return;
     }
     const { url, ...others } = params;
+    stripConflictingContentType(others);
     got.post(url, others).then(
       (res) => {
         let body = res.body;
@@ -165,6 +195,7 @@ const $ = {
       return;
     }
     const { url, ...others } = params;
+    stripConflictingContentType(others);
     got.get(url, others).then(
       (res) => {
         let body = res.body;
@@ -670,6 +701,14 @@ function do_qywxamNotify(text, desp) {
         timeout,
       };
       $.post(options_accesstoken, (err, resp, json) => {
+        if (err || !json || !json.access_token) {
+          console.log(
+            '企业微信应用推送获取 access_token 失败：',
+            err || (json && JSON.stringify(json)) || '无返回数据',
+          );
+          resolve();
+          return;
+        }
         let html = desp.replace(/\n/g, '<br/>');
         let accesstoken = json.access_token;
         let options;
