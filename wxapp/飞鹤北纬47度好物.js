@@ -73,11 +73,11 @@ const Notify = 1;//0为关闭通知,1为打开通知,默认为1
 const notify = $.isNode() ? (() => {
   try {
     // 尝试加载青龙面板的 sendNotify
-    return require('./sendNotify');
+    return require('../sendNotify');
   } catch (e) {
     try {
       // 如果青龙的不存在，尝试加载本地的
-      return require('./sendNotify');
+      return require('../sendNotify');
     } catch (err) {
       console.log('⚠️ sendNotify 加载失败，通知功能将不可用');
       return null;

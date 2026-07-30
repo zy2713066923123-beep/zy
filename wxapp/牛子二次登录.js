@@ -214,6 +214,8 @@ async function sendNotify(title, message, options = {}) {
 
 function loadNotifyModule() {
   const candidates = [
+    '../sendNotify',
+    '../sendNotify.js',
     './sendNotify',
     './sendNotify.js',
     '/ql/data/scripts/sendNotify',

@@ -21,7 +21,7 @@ class Env {
     }
     async done() {
         try {
-            const notify = require('./sendNotify');
+            const notify = require('../sendNotify');
             await notify.sendNotify(this.name, this.logs.join('\n'));
         } catch (e) {
             console.log('通知发送失败', e);

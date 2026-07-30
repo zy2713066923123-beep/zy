@@ -40,6 +40,11 @@ except Exception as exc:
 
         return decorator
 
+import sys
+
+# 允许从仓库根目录导入统一的通知模块 SendNotify（与根目录 ikuuu.py 共用一份）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import requests
 
 

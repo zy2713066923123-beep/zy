@@ -67,7 +67,7 @@ const sudojia = {
     },
 };
 
-const notify = require('./sendNotify');
+const notify = require('../sendNotify');
 // 原脚本的 checkUpdate 在本项目不适用，置为空操作
 async function checkUpdate() {}
 

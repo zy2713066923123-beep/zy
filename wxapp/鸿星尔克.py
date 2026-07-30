@@ -24,6 +24,8 @@ requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 # 让根目录脚本能 import wxapp/getCode（WX_ID 取 code 用）
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'wxapp'))
+# 允许复用仓库根目录统一的通知模块 SendNotify（与根目录 ikuuu.py 共用一份）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 try:
     from getCode import get_single_code
     print("加载 getCode 成功！")
@@ -38,7 +40,7 @@ if os.path.isfile('DEV_ENV.py'):
 
 # 导入通知功能
 try:
-    from sendNotify import send
+    from SendNotify import send
     print("加载通知服务成功！")
 except:
     print("加载通知服务失败!")
@@ -397,9 +399,9 @@ def random_delay(min_delay=1, max_delay=5):
 def send_notification(title, content):
     """发送通知"""
     try:
-        # 尝试从sendNotify导入send函数
-        from sendNotify import send
-        send(title, content)
+    # 尝试从SendNotify导入send函数
+    from SendNotify import send
+    send(title, content)
         print("通知发送成功！")
     except Exception as e:
         print(f"发送通知失败: {e}")
@@ -485,8 +487,8 @@ if __name__ == '__main__':
     content = summary
 
     try:
-        from sendNotify import send
-        send(title, content)
+    from SendNotify import send
+    send(title, content)
         print("通知发送成功！")
     except Exception as e:
         print(f"发送通知失败: {e}")

@@ -6,7 +6,7 @@ name: 云朵充电
 */
 
 const axios = require('axios');
-const { sendNotify } = require('./sendNotify');
+const { sendNotify } = require('../sendNotify');
 
 const ENV_NAME = 'YUNDUO_TOKEN';
 const DEFAULT_OPENID = 'ob_EJ5WQ_4KSkgjdWIzuPZXRYCa4';

@@ -50,7 +50,7 @@ class Env {
         else console.log('未找到环境变量 WX_ID');
     }
     randomString(len) { let chars = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'; let res = ''; for(let i=0; i<len; i++) res += chars.charAt(Math.floor(Math.random() * chars.length)); return res; }
-    async done() { try { const notify = require('./sendNotify'); await notify.sendNotify(this.name, this.logs.join('\n')); } catch(e) { console.log('通知发送失败', e); } }
+    async done() { try { const notify = require('../sendNotify'); await notify.sendNotify(this.name, this.logs.join('\n')); } catch(e) { console.log('通知发送失败', e); } }
 }
 
 const $ = new Env("海尔智家");

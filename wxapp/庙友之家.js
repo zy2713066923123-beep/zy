@@ -7,7 +7,7 @@
  */
 
 const $ = new Env("wx_庙友之家");
-const notify = $.isNode() ? require('./sendNotify.js') : '';
+const notify = $.isNode() ? require('../sendNotify.js') : '';
 let ckName = "WX_ID";
 let envSplitor = ["@", "\n"]; //多账号分隔符
 let strSplitor = "&"; //多变量分隔符
