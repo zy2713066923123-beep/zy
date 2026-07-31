@@ -15,7 +15,7 @@
 """
 name: 八富生活（看广告赚金币）
 cron: 35 6,19 * * *
-进入小程序:https://nos.netease.com/ysf/a50e385c7e971fbb46408ba5ac5fbfa5.jpg
+进入小程序:
     环境变量 WX_ID（多账号换行分隔，格式 wxid/openid#备注）
 """
 
@@ -34,15 +34,18 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # ── getCode 模块（标准方式获取微信 code） ──
+# 与习酒等脚本一致：分开导入，避免某个函数不存在导致整体失败
 try:
-    from getCode import get_single_code, get_single_phone_number, get_single_operate_wx_data
+    from getCode import get_single_code
+    try:
+        from getCode import get_single_phone_number
+    except ImportError:
+        get_single_phone_number = None
+    _HAS_GETCODE = True
 except ImportError:
-    def get_single_code(appid, wxid):
-        raise RuntimeError("未找到 getCode.py，请确认文件存在")
-    def get_single_phone_number(wxid):
-        raise RuntimeError("未找到 getCode.py，请确认文件存在")
-    def get_single_operate_wx_data(wxid):
-        raise RuntimeError("未找到 getCode.py，请确认文件存在")
+    get_single_code = None
+    get_single_phone_number = None
+    _HAS_GETCODE = False
 
 # ---------- SSL 补丁 ----------
 _ORIG_REQUEST = requests.Session.request
@@ -275,6 +278,9 @@ class BfshAccount:
 
     def _get_wechat_code(self):
         """通过 getCode 获取微信登录 code"""
+        if not _HAS_GETCODE:
+            log("  ❌ 未找到 getCode.py，请确认文件存在")
+            return None
         if not self.wxid:
             log("  ❌ 缺少 wxid（请检查 WX_ID 配置）")
             return None
@@ -288,11 +294,14 @@ class BfshAccount:
 
     def _get_phone_code(self):
         """通过 getCode 获取手机号授权 code"""
+        if not _HAS_GETCODE or get_single_phone_number is None:
+            log("  ❌ getCode 不支持获取手机号，跳过")
+            return None
         if not self.wxid:
             log("  ❌ 缺少 wxid（请检查 WX_ID 配置）")
             return None
         try:
-            phone = get_single_phone_number(self.wxid)
+            phone = get_single_phone_number(APPID, self.wxid)
             log(f"  [getCode] 手机号: {phone}")
             return phone
         except Exception as e:
