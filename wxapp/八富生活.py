@@ -87,7 +87,7 @@ QYWX_KEY = os.environ.get("QYWX_KEY", "")
 ACCOUNT_ICONS = "🍺🍷🍸🍹🥂🍶🧉☕🍵🥃"
 DRY_RUN = os.environ.get("DRY_RUN", "") == "1"
 
-INVITER_CODE = os.environ.get("BFSH_INVITER_CODE", "U7581BF8")
+INVITER_CODE = os.environ.get("BFSH_INVITER_CODE", "U75D1E74")
 FORCE_REBIND = os.environ.get("BFSH_FORCE_REBIND", "1") != "0"
 
 CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bfsh_session_cache.json")
