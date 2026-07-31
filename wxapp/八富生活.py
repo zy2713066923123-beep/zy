@@ -30,6 +30,9 @@ import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+# 将脚本所在目录加入搜索路径（确保能找到 getCode.py 等同目录模块）
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 # ── getCode 模块（标准方式获取微信 code） ──
 try:
     from getCode import get_single_code, get_single_phone_number, get_single_operate_wx_data
@@ -85,7 +88,6 @@ INVITER_CODE = os.environ.get("BFSH_INVITER_CODE", "U7581BF8")
 FORCE_REBIND = os.environ.get("BFSH_FORCE_REBIND", "1") != "0"
 
 CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bfsh_session_cache.json")
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
 def log(msg=""):
