@@ -78,6 +78,32 @@ def send_notify(title, content):
     except Exception as e:
         log.warning(f"推送失败: {e}")
 
+
+# 月度酿酒累计（跨 cron 调用累加本月总升数），存于脚本同目录的 xijiu_monthly.json
+_MONTHLY_FILE = Path(__file__).resolve().parent / "xijiu_monthly.json"
+
+
+def load_monthly():
+    try:
+        return json.loads(_MONTHLY_FILE.read_text(encoding="utf-8") or "{}")
+    except Exception:
+        return {}
+
+
+def add_monthly_brewed(liters):
+    """累加本月酿酒升数，返回 (月份key, 本月累计, 本次累加)。"""
+    key = datetime.now().strftime("%Y-%m")
+    data = load_monthly()
+    # 跨月自动清零：只保留当前月份
+    if key not in data:
+        data = {k: v for k, v in data.items() if k == key}
+    data[key] = round(float(data.get(key, 0)) + float(liters), 2)
+    try:
+        _MONTHLY_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+    return key, data[key], round(float(liters), 2)
+
 # ============================================================
 #  常量配置
 # ============================================================
@@ -817,6 +843,7 @@ def run(client, do_daily=True):
     plot_summary_lines = []
     wine_summary_lines = []
     min_harvest_secs = None
+    session_brewed_l = 0.0  # 本次运行收获的酒量(升)
 
     # ── 会员信息 ──
     log.info("👤 获取会员信息...")
@@ -1009,7 +1036,9 @@ def run(client, do_daily=True):
             if wst in (2, 4) and vol > 0:
                 log.info("   🍶 酒坛 %s [已酿好 %sL] → 收获" % (wid, vol))
                 try:
-                    r = client.harvest_wine({"id": wid}); got = r.get("wine") or r.get("volumn") or ""
+                    r = client.harvest_wine({"id": wid}); got = r.get("wine") or r.get("volumn") or 0
+                    try: session_brewed_l += float(got)
+                    except (TypeError, ValueError): pass
                     log.info("      ✅ 收获成功%s" % ("：+%sL" % got if got else ""))
                     info = client.member_info() or info; sorghum = int(info.get("sorghum") or 0)
                     wine_vol = int(info.get("wine") or 0); wine_yeast = int(info.get("wine_yeast") or 0)
@@ -1027,7 +1056,9 @@ def run(client, do_daily=True):
                 if is_ready(ct):
                     log.info("   🍶 酒坛 %s [酿造完成 %sL] → 收获" % (wid, vol))
                     try:
-                        r = client.harvest_wine({"id": wid}); got = r.get("wine") or r.get("volumn") or ""
+                        r = client.harvest_wine({"id": wid}); got = r.get("wine") or r.get("volumn") or 0
+                        try: session_brewed_l += float(got)
+                        except (TypeError, ValueError): pass
                         log.info("      ✅ 收获成功%s" % ("：+%sL" % got if got else ""))
                         info = client.member_info() or info; sorghum = int(info.get("sorghum") or 0)
                         wine_vol = int(info.get("wine") or 0); wine_yeast = int(info.get("wine_yeast") or 0)
@@ -1150,13 +1181,19 @@ def run(client, do_daily=True):
         log.info("✅ 任务完成 │ " + summary)
         if plot_summary_lines: summary += "\n\n📋 地块状态:\n" + "\n".join(plot_summary_lines)
         if wine_summary_lines: summary += "\n\n🍶 酒坛状态:\n" + "\n".join(wine_summary_lines)
-        return summary, min_harvest_secs
+        # 本月酿酒累计
+        if session_brewed_l > 0:
+            mkey, month_total, sess_add = add_monthly_brewed(session_brewed_l)
+            mlabel = "%d月" % datetime.now().month
+            summary += "\n\n📅 %s酿酒共计 %.2f L（本次 +%.2f L）" % (mlabel, month_total, sess_add)
+            log.info("📅 %s酿酒共计 %.2f L（本次 +%.2f L）" % (mlabel, month_total, sess_add))
+        return summary, min_harvest_secs, session_brewed_l
     except Exception:
         log.info("✅ 今日任务完成")
         if plot_summary_lines: result = "今日任务完成\n\n📋 地块状态:\n" + "\n".join(plot_summary_lines)
         else: result = "今日任务完成"
         if wine_summary_lines: result += "\n\n🍶 酒坛状态:\n" + "\n".join(wine_summary_lines)
-        return result, min_harvest_secs
+        return result, min_harvest_secs, session_brewed_l
 
 
 # ============================================================
@@ -1380,7 +1417,7 @@ if __name__ == "__main__":
 
         try:
             today = datetime.now().strftime("%Y-%m-%d"); do_daily = cache.get(wxid + "_daily") != today
-            summary, min_harvest = run(client, do_daily=do_daily)
+            summary, min_harvest, _brewed = run(client, do_daily=do_daily)
             notify_lines.append("👤 %s\n%s" % (mask, summary))
             if do_daily: cache[wxid + "_daily"] = today; save_cache(cache)
             if min_harvest is not None: all_min_harvests.append((remark, min_harvest))
@@ -1400,7 +1437,7 @@ if __name__ == "__main__":
                     if result.get("token"):
                         cache[wxid] = client.token; save_cache(cache)
                         today = datetime.now().strftime("%Y-%m-%d"); do_daily = cache.get(wxid + "_daily") != today
-                        summary, min_harvest = run(client, do_daily=do_daily)
+                        summary, min_harvest, _brewed = run(client, do_daily=do_daily)
                         notify_lines.append("👤 %s\n%s" % (mask, summary))
                         if do_daily: cache[wxid + "_daily"] = today; save_cache(cache)
                         if min_harvest is not None: all_min_harvests.append((remark, min_harvest))
