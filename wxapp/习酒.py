@@ -81,6 +81,8 @@ def send_notify(title, content):
 
 # 月度酿酒累计（跨 cron 调用累加本月总升数），存于脚本同目录的 xijiu_monthly.json
 _MONTHLY_FILE = Path(__file__).resolve().parent / "xijiu_monthly.json"
+# 本月起点升数:服务端不返回历史月产量,可用 GARDEN_MONTH_BASE_L 填入本月已酿数量作为基准
+MONTH_BASE_L = float(os.environ.get("GARDEN_MONTH_BASE_L", "0") or 0)
 
 
 def load_monthly():
@@ -91,7 +93,7 @@ def load_monthly():
 
 
 def add_monthly_brewed(liters):
-    """累加本月酿酒升数，返回 (月份key, 本月累计, 本次累加)。"""
+    """累加本月酿酒升数，返回 (月份key, 本月累计=起点+累计收获, 本次累加)。"""
     key = datetime.now().strftime("%Y-%m")
     data = load_monthly()
     # 跨月自动清零：只保留当前月份
@@ -102,7 +104,8 @@ def add_monthly_brewed(liters):
         _MONTHLY_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
         pass
-    return key, data[key], round(float(liters), 2)
+    total = round(MONTH_BASE_L + data[key], 2)
+    return key, total, round(float(liters), 2)
 
 # ============================================================
 #  常量配置
@@ -839,6 +842,21 @@ def parse_accounts(raw):
 # ============================================================
 #  主业务逻辑 run()
 # ============================================================
+# 浇水有效窗口:地块距成熟不足此秒数时浇水意义不大,留水给更需要地块。
+# 可通过环境变量 GARDEN_WATER_WINDOW(秒)覆盖,默认 2 小时。
+WATER_EFFECTIVE_SECS = int(os.environ.get("GARDEN_WATER_WINDOW", "7200") or 7200)
+
+
+def _plot_remaining(ct):
+    """地块距成熟剩余秒数;无时间信息返回 None(视为新种/长期作物,值得浇)。"""
+    if not ct:
+        return None
+    try:
+        return max(0, int((datetime.strptime(ct, "%Y-%m-%d %H:%M:%S") - datetime.now()).total_seconds()))
+    except Exception:
+        return None
+
+
 def run(client, do_daily=True):
     plot_summary_lines = []
     wine_summary_lines = []
@@ -900,14 +918,16 @@ def run(client, do_daily=True):
     )
     log.info("   🌾 种植策略: %s（酒曲 %s 块，已解锁 %d 块地）" % (CROP_TYPE.get(seed_type), info.get("wine_yest"), len(active)))
 
+    water = int(info.get("water") or 0); manure = int(info.get("manure") or 0)
     for plot in plots:
         pid = plot.get("id"); status = plot.get("status", -1)
         if status == -1 or not pid: continue
         crop = CROP_TYPE.get(plot.get("type", 1), "作物")
         sn = plot.get("serial_number", "?"); ct = plot.get("crop_time", "")
         wn, mn = plot.get("water_num", 0), plot.get("manure_num", 0)
-        water = int(info.get("water") or 0); manure = int(info.get("manure") or 0)
-        allow_water = (sn == 1)
+        # 精准浇水:仅当仍有水滴、且地块距成熟仍超过有效窗口(浇水有意义)时浇;临近成熟不浇以节水
+        rem = _plot_remaining(ct)
+        allow_water = water > 0 and (rem is None or rem > WATER_EFFECTIVE_SECS)
 
         # 收获分支
         if (status in (10, 11) and is_ready(ct)) or (status == 2 and is_ready(ct)):
@@ -930,11 +950,12 @@ def run(client, do_daily=True):
                 log.info("      🌱 自动播种：%s" % CROP_TYPE.get(seed_type))
                 try:
                     client.seeds({"id": pid, "type": seed_type}); log.info("      ✅ 播种成功"); time.sleep(1)
+                    allow_water = water > 0  # 重新播种后为新苗,距成熟远,必浇
                     if allow_water and water > 0:
                         try: client.watering({"id": pid}); log.info("      💧 浇水成功"); water -= 1
                         except RuntimeError as e: log.warning("      ⚠️  浇水失败：%s" % e)
                         time.sleep(1)
-                    elif not allow_water: log.info("      💧 非第一块土地，跳过浇水")
+                    elif not allow_water: log.info("      💧 临近成熟,跳过浇水以节水")
                     else: log.info("      💧 水滴不足，跳过浇水")
                     if manure > 0:
                         try: client.manuring({"id": pid}); log.info("      🌿 施肥成功"); manure -= 1
@@ -953,10 +974,11 @@ def run(client, do_daily=True):
                     log.info("      ✅ 等待后收获成功：+%s 斤" % got)
                     plot_summary_lines.append("🌾 地块%s(%s): 等待后收获+%s斤并重新播种" % (sn, crop, got)); time.sleep(1)
                     client.seeds({"id": pid, "type": seed_type}); log.info("      ✅ 播种成功"); time.sleep(1)
+                    allow_water = water > 0  # 重新播种后为新苗,距成熟远,必浇
                     if allow_water and water > 0:
                         try: client.watering({"id": pid}); log.info("      💧 浇水成功"); water -= 1
                         except RuntimeError as e: log.warning("      ⚠️  浇水失败：%s" % e)
-                    elif not allow_water: log.info("      💧 非第一块土地，跳过浇水")
+                    elif not allow_water: log.info("      💧 临近成熟,跳过浇水以节水")
                     if manure > 0:
                         try: client.manuring({"id": pid}); log.info("      🌿 施肥成功"); manure -= 1
                         except RuntimeError as e: log.warning("      ⚠️  施肥失败：%s" % e)
@@ -967,7 +989,7 @@ def run(client, do_daily=True):
             if allow_water and water > 0:
                 try: client.watering({"id": pid}); log.info("      💧 浇水成功"); water -= 1
                 except RuntimeError as e: log.warning("      ⚠️  浇水失败：%s" % e)
-            elif not allow_water: log.info("      💧 非第一块土地，跳过浇水")
+            elif not allow_water: log.info("      💧 临近成熟,跳过浇水以节水")
             else: log.info("      💧 水滴不足，跳过浇水")
             time.sleep(1)
             if manure > 0:
@@ -983,7 +1005,7 @@ def run(client, do_daily=True):
                 if allow_water and water > 0:
                     try: client.watering({"id": pid}); log.info("      💧 浇水成功"); water -= 1
                     except RuntimeError as e: log.warning("      ⚠️  浇水失败：%s" % e)
-                elif not allow_water: log.info("      💧 非第一块土地，跳过浇水")
+                elif not allow_water: log.info("      💧 临近成熟,跳过浇水以节水")
                 else: log.info("      💧 水滴不足，跳过浇水")
                 time.sleep(1)
                 if manure > 0:
@@ -1181,10 +1203,15 @@ def run(client, do_daily=True):
         log.info("✅ 任务完成 │ " + summary)
         if plot_summary_lines: summary += "\n\n📋 地块状态:\n" + "\n".join(plot_summary_lines)
         if wine_summary_lines: summary += "\n\n🍶 酒坛状态:\n" + "\n".join(wine_summary_lines)
-        # 本月酿酒累计
-        if session_brewed_l > 0:
-            mkey, month_total, sess_add = add_monthly_brewed(session_brewed_l)
-            mlabel = "%d月" % datetime.now().month
+        # 本月酿酒累计(跨账号合并,始终展示,无论本次是否收获)
+        mkey, month_total, sess_add = add_monthly_brewed(session_brewed_l)
+        mlabel = "%d月" % datetime.now().month
+        if MONTH_BASE_L > 0:
+            summary += "\n\n📅 %s酿酒共计 %.2f L（起点 %.2f + 累计 %.2f）" % (
+                mlabel, month_total, MONTH_BASE_L, month_total - MONTH_BASE_L)
+            log.info("📅 %s酿酒共计 %.2f L（起点 %.2f + 累计 %.2f）" % (
+                mlabel, month_total, MONTH_BASE_L, month_total - MONTH_BASE_L))
+        else:
             summary += "\n\n📅 %s酿酒共计 %.2f L（本次 +%.2f L）" % (mlabel, month_total, sess_add)
             log.info("📅 %s酿酒共计 %.2f L（本次 +%.2f L）" % (mlabel, month_total, sess_add))
         return summary, min_harvest_secs, session_brewed_l
@@ -1453,7 +1480,21 @@ if __name__ == "__main__":
                 notify_lines.append("👤 %s\n❌ 执行异常: %s" % (mask, e))
         time.sleep(random.randint(2, 5))
 
-    if notify_lines: send_notify("习酒花园", "作者：\n\n" + "\n\n".join(notify_lines))
+    if notify_lines:
+        content = "作者：\n\n" + "\n\n".join(notify_lines)
+        # 全账号本月酿酒合计(一行汇总)
+        try:
+            _mdata = load_monthly(); _mkey = datetime.now().strftime("%Y-%m")
+            if _mkey in _mdata or MONTH_BASE_L > 0:
+                brewed = _mdata.get(_mkey, 0)
+                if MONTH_BASE_L > 0:
+                    content += "\n\n📅 %d月全账号酿酒共计 %.2f L（起点 %.2f + 累计收获 %.2f）" % (
+                        datetime.now().month, MONTH_BASE_L + brewed, MONTH_BASE_L, brewed)
+                else:
+                    content += "\n\n📅 %d月全账号酿酒共计 %.2f L" % (datetime.now().month, brewed)
+        except Exception:
+            pass
+        send_notify("习酒花园", content)
 
     # ── 计算下次执行时间 ──
     log.info("═" * 50)
