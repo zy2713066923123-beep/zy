@@ -487,8 +487,8 @@ if __name__ == '__main__':
     content = summary
 
     try:
-    from SendNotify import send
-    send(title, content)
+        from SendNotify import send
+        send(title, content)
         print("通知发送成功！")
     except Exception as e:
         print(f"发送通知失败: {e}")
