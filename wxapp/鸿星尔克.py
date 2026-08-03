@@ -399,9 +399,9 @@ def random_delay(min_delay=1, max_delay=5):
 def send_notification(title, content):
     """发送通知"""
     try:
-    # 尝试从SendNotify导入send函数
-    from SendNotify import send
-    send(title, content)
+        # 尝试从SendNotify导入send函数
+        from SendNotify import send
+        send(title, content)
         print("通知发送成功！")
     except Exception as e:
         print(f"发送通知失败: {e}")
