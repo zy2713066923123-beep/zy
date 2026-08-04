@@ -243,9 +243,14 @@ COURSE_RESULT_LIMIT = "limit"       # 达每日上限
 COURSE_RESULT_FAILED = "failed"     # 失败/跳过
 
 # -------------------------- 【请求特征配置】 --------------------------
-REQUEST_CONNECT_TIMEOUT = 3
-REQUEST_READ_TIMEOUT = 5
-MAX_RETRIES = 2
+REQUEST_CONNECT_TIMEOUT = 5
+REQUEST_READ_TIMEOUT = 12          # 轻接口读超时（原 5，过短导致大面积 Read timed out）
+REQUEST_READ_TIMEOUT_HEAVY = 20    # 重接口(课程/用户余额)读超时，避免 5~7s 就放弃
+MAX_RETRIES = 3                    # 重试次数（原 2，失败后多给一次机会）
+# 全局并发信号量：最多允许 N 个账号同时对外发请求，给单一后端 api.cdwjyyh.com 减压，
+# 避免 8 账号全速并发互相拖垮（雪崩）。None 表示不限制（保持原行为）。
+GLOBAL_MAX_CONCURRENT_REQUESTS = 2
+REQUEST_SEM = threading.Semaphore(GLOBAL_MAX_CONCURRENT_REQUESTS) if GLOBAL_MAX_CONCURRENT_REQUESTS else None
 USER_AGENT_POOL = [
        "Mozilla/5.0 (Linux; Android 16; 2509FPN0BC Build/BP2A.250605.031.A3; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/140.0.7339.207 Mobile Safari/537.36 (Immersed/48.0) Html5Plus/1.0",
     "Mozilla/5.0 (Linux; Android 16; 24117RN2BC Build/BP2A.250610.002; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/141.0.7355.116 Mobile Safari/537.36 (Immersed/48.0) Html5Plus/1.0",
@@ -338,29 +343,25 @@ def force_exit(signum, frame):
     global global_exit_flag
     
     with print_lock:
-        print("\n\n🛑 收到停止信号，正在强制终止所有线程...")
+        print("\n\n🛑 收到停止信号，正在优雅终止所有线程...")
     
-    # 设置全局退出标志
+    # 设置全局退出标志：让各子线程在下一个安全点自行收尾（线程为 daemon，主线程 join 等待）
     global_exit_flag = True
-    
-    # 等待10秒让所有线程完成数据收集
-    time.sleep(10)
-    
-    with data_lock:
-        results = list(all_accounts_data)
 
-    with print_lock:
-        print("📤 正在推送青龙运行简报...")
+    # 线程均为 daemon，主线程会在 run_all_accounts 末尾的 thread.join() 处等待它们自然退出，
+    # 这里不再暴力自毁，避免任务被 Killed 导致数据/简报丢失。仅做兜底：若 30 秒仍未退出再强杀。
+    def _watchdog():
+        time.sleep(30)
+        with print_lock:
+            print("⚠️ 30秒后仍有线程未退出，执行兜底强杀")
+        os.kill(os.getpid(), signal.SIGKILL)
 
-    send_notify("芳华未来运行简报（已停止）", build_notify_content(results))
-    
-    # 等待3秒让推送完全完成
-    time.sleep(3)
-    
-    # 终极杀招：暴力自毁
-    with print_lock:
-        print("💥 执行进程自毁，确保无任何残留")
-    os.kill(os.getpid(), signal.SIGKILL)
+    threading.Thread(target=_watchdog, daemon=True).start()
+
+    # 阻止 force_exit 返回（从而阻止主线程在信号处理器里返回后继续往下走），
+    # 让主流程 run_all_accounts 通过 join 等待线程结束并自然推送简报。
+    while global_exit_flag:
+        time.sleep(1)
 
 # 注册所有退出信号
 signal.signal(signal.SIGTERM, force_exit)  # 青龙面板停止信号
@@ -546,13 +547,17 @@ def is_auth_expired_response(response):
     return any(keyword in message for keyword in AUTH_EXPIRED_KEYWORDS)
 
 # ============================== 【基础请求与接口模块（独立随机）】 ==============================
-def request_with_retry(session, method, url, random_instance, **kwargs):
-    """带随机超时和重试的请求函数（独立随机，自动 apiSecurity 加密+响应解密）"""
+def request_with_retry(session, method, url, random_instance, heavy=False, **kwargs):
+    """带随机超时和重试的请求函数（独立随机，自动 apiSecurity 加密+响应解密）。
+    heavy=True 时使用更宽松的读超时（课程/用户余额等重接口）。"""
     # 提取业务明文：json(POST) 或 params(GET)，统一交给加密层
     biz_json = kwargs.pop("json", None)
     biz_params = kwargs.pop("params", None)
     biz_payload = biz_json if biz_json is not None else (biz_params if biz_params is not None else {})
     caller_headers = dict(kwargs.pop("headers", {}) or {})
+
+    read_base = REQUEST_READ_TIMEOUT_HEAVY if heavy else REQUEST_READ_TIMEOUT
+    read_span = 4 if heavy else 2
 
     for attempt in range(MAX_RETRIES):
         if global_exit_flag:
@@ -574,9 +579,16 @@ def request_with_retry(session, method, url, random_instance, **kwargs):
 
                 timeout = (
                     REQUEST_CONNECT_TIMEOUT,
-                    random_instance.uniform(REQUEST_READ_TIMEOUT, REQUEST_READ_TIMEOUT + 2)
+                    random_instance.uniform(read_base, read_base + read_span)
                 )
-                response = session.request(method, url, timeout=timeout, **send_kwargs)
+                # 全局并发信号量：限制同时对外发请求的账号数，给单一后端减压
+                if REQUEST_SEM is not None:
+                    REQUEST_SEM.acquire()
+                try:
+                    response = session.request(method, url, timeout=timeout, **send_kwargs)
+                finally:
+                    if REQUEST_SEM is not None:
+                        REQUEST_SEM.release()
 
                 decrypt_secure_response(response)  # 信封响应原地解密为明文
 
@@ -703,7 +715,7 @@ def add_integral(session, phone, video_id, random_instance):
 
 def get_user_integral(session, random_instance):
     try:
-        response = request_with_retry(session, "GET", f"{BASE_URL}/app/user/getUserInfo", random_instance)
+        response = request_with_retry(session, "GET", f"{BASE_URL}/app/user/getUserInfo", random_instance, heavy=True)
         if response and response.status_code == 200:
             result = response.json()
             if result.get("code") == 200:
@@ -794,7 +806,7 @@ def get_course_list(session, random_instance, page_num=1, cate_id=""):
     """拉取课程列表：返回 (课程数组, 总数)；isIntegral==1 的课程可领分。"""
     try:
         response = request_with_retry(
-            session, "GET", f"{BASE_URL}/app/course/getCourseList", random_instance,
+            session, "GET", f"{BASE_URL}/app/course/getCourseList", random_instance, heavy=True,
             params={"cateId": cate_id, "pageSize": COURSE_LIST_PAGE_SIZE, "pageNum": page_num}
         )
         if response and response.status_code == 200:
@@ -813,7 +825,7 @@ def get_course_video_list(session, course_id, random_instance):
     """拉取某课程下的视频小节数组（含 videoId、seconds 时长）。"""
     try:
         response = request_with_retry(
-            session, "GET", f"{BASE_URL}/app/course/getCourseVideoList", random_instance,
+            session, "GET", f"{BASE_URL}/app/course/getCourseVideoList", random_instance, heavy=True,
             params={"pageSize": 50, "courseId": str(course_id), "pageNum": 1}
         )
         if response and response.status_code == 200:
@@ -835,7 +847,7 @@ def bind_invite_code(session, random_instance, phone, code):
         return False
     try:
         response = request_with_retry(
-            session, "POST", f"{BASE_URL}{INVITE_BIND_ENDPOINT}", random_instance,
+            session, "POST", f"{BASE_URL}{INVITE_BIND_ENDPOINT}", random_instance, heavy=True,
             json={INVITE_BIND_FIELD: code}
         )
         if response and response.status_code == 200:
@@ -860,7 +872,7 @@ def get_invited_reward(session, random_instance, phone):
     """领取邀请有礼奖励(POST /app/invited/getReward)。失败仅记日志，不中断主流程。"""
     try:
         response = request_with_retry(
-            session, "POST", f"{BASE_URL}/app/invited/getReward", random_instance, json={}
+            session, "POST", f"{BASE_URL}/app/invited/getReward", random_instance, heavy=True, json={}
         )
         if response and response.status_code == 200:
             result = response.json()
@@ -959,7 +971,7 @@ def get_course_price(session, course_id, random_instance):
     """读取课程芳华币兑换价：返回 integral（None 视为 0/免费，用于 <100 过滤）。"""
     try:
         response = request_with_retry(
-            session, "GET", f"{BASE_URL}/app/course/getCourseById?courseId={course_id}", random_instance,
+            session, "GET", f"{BASE_URL}/app/course/getCourseById?courseId={course_id}", random_instance, heavy=True,
             params={}
         )
         if response and response.status_code == 200:
@@ -975,7 +987,7 @@ def buy_course_video(session, course_id, video_id, random_instance):
     """用芳华币兑换(购买)单个课程视频以解锁。返回 (是否成功, 消息)。"""
     try:
         response = request_with_retry(
-            session, "POST", f"{BASE_URL}/app/courseOrder/createIntegralOrder", random_instance,
+            session, "POST", f"{BASE_URL}/app/courseOrder/createIntegralOrder", random_instance, heavy=True,
             json={"videoId": int(video_id), "courseId": str(course_id)}
         )
         if response is None:
@@ -992,7 +1004,7 @@ def add_study_course(session, course_id, video_id, duration, random_instance):
     """上报学习进度/注册学习会话（getIntegral 领分前置，缺失会报"您还未看课"）。"""
     try:
         response = request_with_retry(
-            session, "POST", f"{BASE_URL}/app/course/addStudyCourse", random_instance,
+            session, "POST", f"{BASE_URL}/app/course/addStudyCourse", random_instance, heavy=True,
             json={"duration": int(duration), "videoId": int(video_id), "courseId": int(course_id)}
         )
         return bool(response and response.status_code == 200 and response.json().get("code") == 200)
@@ -1015,7 +1027,7 @@ def claim_course_integral(session, video_id, duration, random_instance):
     """领取某视频小节的课程积分(+50)。返回 (结果码, 消息)。"""
     try:
         response = request_with_retry(
-            session, "POST", f"{BASE_URL}/app/course/getIntegral", random_instance,
+            session, "POST", f"{BASE_URL}/app/course/getIntegral", random_instance, heavy=True,
             json={"duration": int(duration), "videoId": int(video_id)}
         )
         if response is None:
