@@ -36,10 +36,11 @@ const { checkForUpdates } = require('./updater')
 async function sendNotify(title, content) {
     if (!content) content = ''
 
-    // 1. 优先兼容青龙常见的 sendNotify.js
+    // 仅走项目外部 Node 版 sendNotify.js（支持企业微信/pushplus/Bark/TG 等），
+    // 不再回退调用青龙 Python notify.py，避免同一渠道双推。
     const jsNotifyPaths = [
+        path.join(__dirname, '..', 'sendNotify.js'),
         path.join(__dirname, 'sendNotify.js'),
-        path.join(__dirname, 'utils', 'sendNotify.js'),
         '/ql/data/scripts/sendNotify.js'
     ]
 
@@ -60,54 +61,7 @@ async function sendNotify(title, content) {
         }
     }
 
-    // 2. 回退兼容青龙 Python 版 notify.py
-    const pyNotifyPaths = [
-        path.join(__dirname, 'notify.py'),
-        '/ql/data/scripts/notify.py'
-    ]
-    const notifyPy = pyNotifyPaths.find(p => fs.existsSync(p))
-
-    if (!notifyPy) {
-        console.log(`${LogTag.SYSTEM} 未找到 sendNotify.js 或 notify.py，跳过推送`)
-        return false
-    }
-
-    const pyCode = [
-        'import os, sys',
-        `sys.path.insert(0, ${JSON.stringify(path.dirname(notifyPy))})`,
-        'from notify import send',
-        'send(os.environ.get("NOTIFY_TITLE", ""), os.environ.get("NOTIFY_CONTENT", ""))'
-    ].join('\n')
-
-    for (const pyCmd of ['python3', 'python']) {
-        try {
-            const ret = spawnSync(pyCmd, ['-c', pyCode], {
-                encoding: 'utf8',
-                timeout: 30000,
-                env: {
-                    ...process.env,
-                    NOTIFY_TITLE: title,
-                    NOTIFY_CONTENT: content
-                }
-            })
-
-            if (ret.error) {
-                continue
-            }
-
-            if (ret.status === 0) {
-                console.log(`${LogTag.SYSTEM} 推送完成: ${notifyPy}`)
-                return true
-            }
-
-            const errText = (ret.stderr || ret.stdout || '').trim()
-            console.log(`${LogTag.SYSTEM} Python推送失败(${pyCmd}): ${errText || '未知错误'}`)
-        } catch (err) {
-            console.log(`${LogTag.SYSTEM} Python推送异常(${pyCmd}): ${err.message}`)
-        }
-    }
-
-    console.log(`${LogTag.SYSTEM} 推送失败，已跳过`)
+    console.log(`${LogTag.SYSTEM} 未找到外部 sendNotify.js，跳过推送`)
     return false
 }
 
