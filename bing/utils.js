@@ -1,4 +1,3 @@
-﻿// name: Bing - 工具类
 /**
  * Utils - 常量、日志、工具函数和 HotWordsManager
  */

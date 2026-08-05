@@ -1,4 +1,3 @@
-﻿// name: Bing - 积分模块
 /**
  * Points - 积分管理器（包含 PointsManager 和 PointsPageManager）
  */

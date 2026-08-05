@@ -1,7 +1,8 @@
 [
- {
-    "username": "zy@outlook.com",
-    "password": "zy",
-    "otpauth": "otpauth://totp/xxx1"
-  }
+    {
+        "username": "",
+        "password": "",
+        "otpauth": "otpauth://totp/xxx1",
+        "remark": ""
+    }
 ]

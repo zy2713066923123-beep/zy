@@ -1,4 +1,3 @@
-﻿// name: Bing - APP任务模块
 /**
  * AppTask - APP任务管理器（签到、阅读）
  */

@@ -2,8 +2,7 @@
  * Bing Rewards
  *
  * 功能：自动完成 Bing 搜索任务、积分任务、APP签到等
- * cron: 5 5 12,13 * * *
- * name: Bing Rewards
+ * Cron：5 5 12,13 * * *
  * Linux 依赖：chromium、chromium-chromedriver、xvfb
  * Node 依赖：fs-extra、playwright
  * by zgcwkj
