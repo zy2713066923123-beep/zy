@@ -2,6 +2,7 @@
 ------------------------------------------
 @Author: sm
 @Date: 2026.05.31
+@Update: 2026.08.06 (merge v1.1.3 社区互动重做逻辑)
 @Description: 顾家小程序签到 + 社区互动赚积分
 cron: 20 8 * * *
 变量名：gujiajiaju / WX_ID
@@ -9,9 +10,11 @@ cron: 20 8 * * *
 ------------------------------------------
 
 变量：
-  WECHAT_SERVER  微信协议服务地址，默认 http://192.168.6.222:8011
-  WX_ID         微信账号，多账号支持换行、& 分隔，必须配置
-  GJJJ_COMMUNITY  社区互动开关，=0 关闭（默认开）
+  WECHAT_SERVER      微信协议服务地址，默认 http://192.168.6.222:8011
+  WX_ID             微信账号，多账号支持换行、& 分隔，必须配置
+  GJJJ_COMMUNITY    社区互动开关，=0 关闭（默认开）
+  GJJJ_COMMUNITY_FORCE  社区互动强制重做开关，=1 跳过"找未互动帖子"，
+                       直接取列表首条做取消重做（每天多次执行均计新分，默认关）
 
 WX_ID 格式：
   openid#手机号  或  openid  多个换行
@@ -488,9 +491,19 @@ class Task {
     }
   }
 
+  // 点赞流程：先查当前点赞态，已赞则先取消（toggle 成 0），确保后续点赞能重新计新分；
+  // 未点赞则直接点赞。送分接口对点赞不做按天去重，故重复执行会重复计分（符合每天多次执行预期）。
   async likePost(post) {
     const postId = Number(post.id);
     const title = (post.title || post.id).toString().replace(/[\r\n]+/g, " ").trim();
+    const cur = await this._safe("帖子详情", () =>
+      this.request({ method: "POST", url: `${API_BASE}/front/postOrder/postOrderDetail`, data: { id: postId }, withAuth: true, withTmpToken: false })
+    );
+    if (cur && cur.data && String(cur.data.likeStatus) === "1") {
+      await this._safe("取消点赞", () =>
+        this.request({ method: "POST", url: `${API_BASE}/front/postOrder/like`, data: { id: postId }, withAuth: true, withTmpToken: false })
+      );
+    }
     console.log(`账号[${this.index}] 👍 点赞: 「${title}」`);
     await this.pushEvent("c_showhome_like", "晒家-点赞", "300001", "晒家-点赞", String(postId), title);
     const likeRet = await this._safe("点赞", () =>
@@ -503,9 +516,18 @@ class Task {
     await this.likeSendPoint(postId, 1, "点赞");
   }
 
+  // 收藏流程：已藏则先取消（toggle 成 0）再重做，保证本次仍能计新分。
   async collectPost(post) {
     const postId = Number(post.id);
     const title = (post.title || post.id).toString().replace(/[\r\n]+/g, " ").trim();
+    const cur = await this._safe("帖子详情", () =>
+      this.request({ method: "POST", url: `${API_BASE}/front/postOrder/postOrderDetail`, data: { id: postId }, withAuth: true, withTmpToken: false })
+    );
+    if (cur && cur.data && String(cur.data.collectStatus) === "1") {
+      await this._safe("取消收藏", () =>
+        this.request({ method: "POST", url: `${API_BASE}/front/postOrder/collect`, data: { id: postId }, withAuth: true, withTmpToken: false })
+      );
+    }
     console.log(`账号[${this.index}] ⭐ 收藏: 「${title}」`);
     const collectRet = await this._safe("收藏", () =>
       this.request({ method: "POST", url: `${API_BASE}/front/postOrder/collect`, data: { id: postId }, withAuth: true, withTmpToken: false })
@@ -536,14 +558,29 @@ class Task {
       console.log(`账号[${this.index}] ℹ️ 已关闭社区互动(GJJJ_COMMUNITY=0)`);
       return;
     }
+    // GJJJ_COMMUNITY_FORCE=1：跳过"找未互动帖子"逻辑，直接取列表第一条做取消重做（每天多次执行都计新分）
+    const force = String(process.env.GJJJ_COMMUNITY_FORCE) === "1";
     try {
-      const post = await this.findPost();
+      let post = null;
+      if (!force) {
+        post = await this.findPost(); // 优先取未点赞/未收藏的自然帖子
+      }
       if (!post) {
-        console.log(`账号[${this.index}] ⚠️ 社区无未互动帖子`);
+        // 找不到未互动帖子（或全部已互动）→ 取 newWaterfall 第一条，由 likePost/collectPost 内部
+        // 先做"取消"再重做，保证本次仍能计新分；分享由服务端按天去重天然幂等。
+        const ret = await this._safe("帖子列表", () =>
+          this.request({ method: "POST", url: `${API_BASE}/applet/waterfall/newWaterfall`, data: { source: 1, pageNum: 1, pageSize: 6 }, withAuth: true, withTmpToken: false })
+        );
+        const items = ret && ret.code === 0 ? (Array.isArray(ret.data) ? ret.data : (ret.data && ret.data.list) || []) : [];
+        post = items[0] || null;
+        if (post) console.log(`账号[${this.index}] 📝 无未互动帖子，取首条做取消重做: 「${(post.title || post.id).toString().slice(0, 30)}」`);
+      }
+      if (!post) {
+        console.log(`账号[${this.index}] ⚠️ 社区无可用帖子`);
         return;
       }
       const title = (post.title || post.id).toString().replace(/[\r\n]+/g, " ").trim();
-      console.log(`账号[${this.index}] 📝 社区互动帖子: 「${title}」`);
+      if (!force && post.__fromFind) console.log(`账号[${this.index}] 📝 社区互动帖子: 「${title}」`);
 
       await this.likePost(post);
       await this.collectPost(post);
