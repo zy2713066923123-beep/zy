@@ -18,7 +18,9 @@ import json
 import os
 import random
 import re
+import sys
 import time
+import xml.etree.ElementTree as ET
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
