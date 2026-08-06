@@ -26,6 +26,7 @@ import json
 import os
 import random
 import time
+import re
 from datetime import datetime, timezone, timedelta
 from getCode import get_single_code
 
@@ -56,20 +57,26 @@ ACCOUNT_FILE = "token_caches/ryytncookie.json"
 ANSWER_CACHE = {}
 
 
-# ============ YYB Go 解析 ============
-
 # ============ 统一取码（WX_ID + getCode，支持牛子/YYB 双协议自动路由）============
 # 环境变量：
-#   WX_ID       微信账号标识（wxid 或 openid），多账号换行或 & 分隔
-#   YYB_SERVER  应用宝取码服务地址（仅手机号获取需要，可选）
+#   WX_ID         微信账号标识（wxid 或 openid），多账号换行或 & 分隔。
+#                 不配置时，自动从 YYB 服务拉取全部在线账号。
+#   YYB_SERVER    应用宝取码服务地址（手机号获取 + 自动拉取账号需要）
 #   WECHAT_SERVER 牛子取码服务地址（可选）
+#   WXAPP_SERVICE_URL  兼容别名，等价于 YYB_SERVER
 WX_IDS = [s.strip() for s in os.getenv("WX_ID", "").replace("&", "\n").splitlines() if s.strip()]
-YYB_HOST = (os.getenv("YYB_SERVER", "").strip() or os.getenv("WECHAT_SERVER", "").strip())
+YYB_HOST = (
+    os.getenv("YYB_SERVER", "").strip()
+    or os.getenv("WXAPP_SERVICE_URL", "").strip()
+    or os.getenv("WECHAT_SERVER", "").strip()
+)
 if YYB_HOST:
     YYB_HOST = YYB_HOST.replace("http://", "").replace("https://", "").rstrip("/")
 if not WX_IDS:
-    print("❌ 未配置环境变量 WX_ID")
-    print("格式：wxid#备注 或 openid，多账号换行或 & 分隔")
+    print("ℹ️  未配置环境变量 WX_ID，将尝试从 YYB 服务自动拉取全部在线账号")
+    if not YYB_HOST:
+        print("❌ 未配置 WX_ID，也未配置 YYB_SERVER，无法获取账号")
+        print("格式：wxid#备注 或 openid，多账号换行或 & 分隔")
 
 
 def mask_token(token: str) -> str:
@@ -319,12 +326,12 @@ def run_once(account: dict) -> bool:
     point = checkin_data.get("point", 0)
     print(f"手机号: {mask_phone(phone)}  当前积分: {point}")
 
-    # 签到
+    # 签到（check_checkin_status 已完成 checkin/save 签到动作，这里读取签到规则确认状态）
     ok, msg, _ = get_checkin_rule(token)
     if ok:
-        print("✅ 签到成功")
+        print("✅ 签到成功（已领取今日签到）")
     else:
-        print(f"❌ 签到失败: {msg}")
+        print(f"❌ 签到状态查询失败: {msg}")
 
     # 收货地址
     ok, msg, addr = get_address_list(token)
@@ -510,44 +517,54 @@ def run_community_post(token: str):
 
 @capture_output("认养一头牛签到运行结果")
 def main():
-    servers = WX_IDS
-    if not servers:
-        print("❌ 未配置环境变量 WX_ID")
-        print("格式：wxid#备注 或 openid，多账号换行或 & 分隔")
-        return
-
-    print(f"✅ 读取到 {len(servers)} 个微信账号，自动路由牛子/YYB 双协议")
-
-    # 加载缓存
+    # 1. 加载本地缓存
     cached = load_accounts()
     cache_map = {item["ref"]: item for item in cached}
 
+    # 2. 收集待处理账号
     accounts = []
-    for openid in servers:
-        if not openid:
-            print(f"[SKIP] 格式无效: {openid}")
-            continue
 
-        cached_acc = cache_map.get(openid)
-        if cached_acc and cached_acc.get("token"):
-            acc = {
-                "ref": openid,
-                "server": YYB_HOST,
-                "nickname": cached_acc.get("nickname", openid),
-                "token": cached_acc["token"],
-            }
-        else:
-            print(f"[LOGIN] 正在为 {openid} 获取 token...")
-            token = refresh_token(openid)
-            if token:
-                acc = {"ref": openid, "server": YYB_HOST, "nickname": openid, "token": token}
-                print(f"[LOGIN] token 获取成功: {mask_token(token)}")
-            else:
-                print(f"[LOGIN] {openid} token 获取失败，跳过")
+    if WX_IDS:
+        print(f"✅ 读取到 {len(WX_IDS)} 个微信账号（WX_ID），自动路由牛子/YYB 双协议")
+        for openid in WX_IDS:
+            if not openid:
+                print(f"[SKIP] 格式无效: {openid}")
                 continue
-            time.sleep(1.5)
 
-        accounts.append(acc)
+            cached_acc = cache_map.get(openid)
+            if cached_acc and cached_acc.get("token"):
+                acc = {
+                    "ref": openid,
+                    "server": YYB_HOST,
+                    "nickname": cached_acc.get("nickname", openid),
+                    "token": cached_acc["token"],
+                }
+            else:
+                print(f"[LOGIN] 正在为 {openid} 获取 token...")
+                token = refresh_token(openid)
+                if token:
+                    acc = {"ref": openid, "server": YYB_HOST, "nickname": openid, "token": token}
+                    print(f"[LOGIN] token 获取成功: {mask_token(token)}")
+                else:
+                    print(f"[LOGIN] {openid} token 获取失败，跳过")
+                    continue
+                time.sleep(1.5)
+
+            accounts.append(acc)
+    else:
+        # 无 WX_ID：从 YYB 服务自动拉取全部在线账号并登录（用户版能力）
+        fetched = fetch_all_accounts_from_service()
+        for acc in fetched:
+            cached_acc = cache_map.get(acc["ref"])
+            if cached_acc and cached_acc.get("token"):
+                accounts.append({
+                    "ref": acc["ref"],
+                    "server": acc.get("server", YYB_HOST),
+                    "nickname": cached_acc.get("nickname", acc.get("nickname", acc["ref"])),
+                    "token": cached_acc["token"],
+                })
+            else:
+                accounts.append(acc)
 
     if not accounts:
         print("[MAIN] 无可用账号，退出")
@@ -565,6 +582,68 @@ def main():
 
     save_accounts(accounts)
     print("\n所有账号处理完成，缓存已更新")
+
+
+def fetch_all_accounts_from_service() -> list:
+    """无 WX_ID 时，从 YYB 服务拉取全部在线账号并登录生成 token。
+    返回 [{"ref", "server", "nickname", "token"}]
+    """
+    if not YYB_HOST:
+        print("[ACCOUNT] 未配置 YYB_SERVER，无法自动拉取账号")
+        return []
+
+    accounts = []
+    print(f"[ACCOUNT] 从 YYB 服务获取账号列表: {YYB_HOST}")
+    try:
+        resp = requests.get(f"http://{YYB_HOST}/accounts", timeout=15)
+        if resp.status_code != 200:
+            raise Exception(f"HTTP {resp.status_code}")
+        data = resp.json()
+        if data.get("code") != 0:
+            raise Exception(f"API 返回错误: {data}")
+        raw_accounts = data.get("data", [])
+        if not raw_accounts:
+            raise Exception("账号列表为空")
+        print(f"[ACCOUNT] 获取到 {len(raw_accounts)} 个账号")
+    except Exception as e:
+        print(f"[ACCOUNT] 获取账号列表失败: {e}")
+        return accounts
+
+    for acc in raw_accounts:
+        acc_id = acc.get("id")
+        nickname = acc.get("nickname", "未知")
+        status = acc.get("status", "")
+        if status and status != "alive":
+            print(f"[SKIP] 账号 {acc_id} ({nickname}) 状态非 alive: {status}")
+            continue
+
+        ref = str(acc_id)
+        print(f"[LOGIN] 正在为 {nickname} 获取 token...")
+
+        # 登录前先校验 YYB 在线状态
+        try:
+            state_resp = requests.get(f"http://{YYB_HOST}/state?id={ref}", timeout=10)
+            state_data = state_resp.json()
+            if state_data.get("code") != 0 or not state_data.get("data"):
+                print(f"  [SKIP] 账号 {nickname} 在 YYB 服务中未在线，跳过")
+                continue
+        except Exception:
+            pass  # 服务不支持 state 接口时直接尝试登录
+
+        token = refresh_token(ref)
+        if token:
+            accounts.append({
+                "ref": ref,
+                "server": YYB_HOST,
+                "nickname": nickname,
+                "token": token,
+            })
+            print(f"[LOGIN] {nickname} token 获取成功: {mask_token(token)}")
+        else:
+            print(f"[LOGIN] {nickname} token 获取失败，跳过")
+        time.sleep(1.5)
+
+    return accounts
 
 
 if __name__ == "__main__":

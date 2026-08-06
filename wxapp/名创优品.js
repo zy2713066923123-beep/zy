@@ -459,7 +459,8 @@ class MinisoBot {
             console.log('✗ 无法获取签到任务详情');
             return;
         }
-        if (taskDetail.todaySignInFinishFlag === 1) {
+        // 兼容接口返回 1 / true 两种类型，避免误判导致重复签到
+        if (taskDetail.todaySignInFinishFlag === 1 || taskDetail.todaySignInFinishFlag === true) {
             console.log(`✓ 今日签到已完成，连续签到 ${taskDetail.signInFinishDays} 天`);
             await this.recordTaskUV(18, taskDetail.taskId);
             return;
@@ -616,6 +617,13 @@ async function main() {
 }
 
 module.exports = main;
+
+if (require.main === module) {
+    main().catch(err => {
+        console.log('✗ 脚本执行出错:', err && err.message ? err.message : err);
+        process.exit(1);
+    });
+}
 
 if (require.main === module) {
     main().catch(err => {
