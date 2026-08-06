@@ -1,12 +1,14 @@
-﻿# cron: 59 10,13 * * *
+﻿# cron: 59 10,13 * * *
+
 # name: 顺丰速运积分任务
 
 
 """
 顺丰速运日常积分任务
 Author: 广哥哥整合
-Version: 1.3.1
-Date: 2026-05-06
+Version: 1.3.2
+Date: 2026-08-06 (merge v1.3.0 by 爱学习的呆子)
+Desc: 新增 XML 兼容解析、红包大派送抽奖、优惠券查询、会员日活动、等宽汇总表
 WECHAT_SERVER=端口变量
 wxsf=账号变量
 """
@@ -41,6 +43,47 @@ requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 PROXY_TIMEOUT = 15  # 代理超时时间（秒）
 MAX_PROXY_RETRIES = 5  # 最大代理重试次数
 REQUEST_RETRY_COUNT = 3  # 请求重试次数
+
+# ==================== 顺丰 XML 兼容解析（merge v1.3.0）====================
+def xml_to_dict(element):
+    """把 ElementTree 元素递归转成 dict；重复子标签自动聚为 list（兼容顺丰 XML 响应）。"""
+    children = list(element)
+    if not children:
+        text = (element.text or "").strip()
+        return text
+    result = {}
+    for child in children:
+        val = xml_to_dict(child)
+        tag = child.tag
+        if tag in result:
+            if not isinstance(result[tag], list):
+                result[tag] = [result[tag]]
+            result[tag].append(val)
+        else:
+            result[tag] = val
+    return result
+
+
+def parse_response_body(text: str):
+    """顺丰部分老接口返回 XML（如 coupon/available/list），统一在此兼容：
+    JSON 优先，失败且内容像 XML 时解析为 dict，并把 <obj> 单券包成 list 以兼容下游逻辑。
+    """
+    text = (text or "").strip()
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        pass
+    if text.startswith("<"):
+        try:
+            root = ET.fromstring(text)
+            d = xml_to_dict(root)
+            if isinstance(d, dict) and "obj" in d and not isinstance(d["obj"], list):
+                d["obj"] = [d["obj"]]
+            return d
+        except ET.ParseError:
+            return None
+    return None
+
 
 # ==================== 并发配置常量 ====================
 CONCURRENT_NUM = int(os.getenv('SFBF', '1'))  # 并发数量，默认为1（串行），最大20
@@ -84,7 +127,7 @@ UCMP_BASE = "https://ucmp.sf-express.com"
 class Config:
     """全局配置"""
     APP_NAME: str = "顺丰速运"
-    VERSION: str = "1.3.1"
+    VERSION: str = "1.3.2"
     ENV_NAME: str = "sfsyUrl"
     PROXY_API_URL: str = os.getenv('SF_PROXY_API_URL', '')
     
@@ -96,7 +139,18 @@ class Config:
     # API签名配置
     TOKEN: str = 'wwesldfs29aniversaryvdld29'
     SYS_CODE: str = 'MCS-MIMP-CORE'
-    
+
+    # 功能开关（merge v1.3.0）
+    ENABLE_RED_PACKET: bool = True      # 顺丰红包大派送（每天免费抽奖一次）
+    ENABLE_COUPON_QUERY: bool = True    # 我的优惠券查询
+    ENABLE_MEMBER_DAY: bool = True      # 会员日活动（每月26-28号自动执行）
+
+    # 活动 API 域名（merge v1.3.0）
+    REDPACKET_API: str = "https://mcs-mimp-web.sf-express.com"
+    REDPACKET_ACTIVITY_CODE: str = "RED_PACKET_GAME_00001"
+    COUPON_API: str = "https://mcs-mimp-web.sf-express.com"
+    MEMBER_DAY_API: str = "https://mcs-mimp-web.sf-express.com"
+
     # 任务跳过列表
     SKIP_TASKS: List[str] = None
     
@@ -738,7 +792,8 @@ class SFHttpClient:
         url: str, 
         method: str = 'POST', 
         data: Optional[Dict] = None,
-        max_retries: int = REQUEST_RETRY_COUNT
+        max_retries: int = REQUEST_RETRY_COUNT,
+        extra_headers: Optional[Dict[str, str]] = None
     ) -> Optional[Dict[str, Any]]:
         """发送HTTP请求，带双层重试机制
         
@@ -747,13 +802,19 @@ class SFHttpClient:
             method: 请求方法 GET/POST
             data: 请求数据
             max_retries: 最大重试次数
+            extra_headers: 额外请求头（如活动专属 channel/sysCode/referer 等）
             
         Returns:
-            响应JSON数据或None
+            响应JSON数据或None（兼容 XML 响应）
         """
         # 更新签名
         sign_data = self._generate_sign()
         self.headers.update(sign_data)
+        
+        # 合并额外请求头
+        req_headers = dict(self.headers)
+        if extra_headers:
+            req_headers.update({k: str(v) for k, v in extra_headers.items()})
         
         retry_count = 0
         proxy_retry_count = 0
@@ -772,9 +833,9 @@ class SFHttpClient:
                 
                 try:
                     if method.upper() == 'GET':
-                        response = self.session.get(url, headers=self.headers, timeout=PROXY_TIMEOUT)
+                        response = self.session.get(url, headers=req_headers, timeout=PROXY_TIMEOUT)
                     elif method.upper() == 'POST':
-                        response = self.session.post(url, headers=self.headers, json=data or {}, timeout=PROXY_TIMEOUT)
+                        response = self.session.post(url, headers=req_headers, json=data or {}, timeout=PROXY_TIMEOUT)
                     else:
                         raise ValueError(f'不支持的请求方法: {method}')
                     
@@ -782,15 +843,15 @@ class SFHttpClient:
                     response.raise_for_status()
                     
                     try:
-                        res = response.json()
+                        res = parse_response_body(response.text)
                         if res is None:
-                            print(f'响应内容为空，正在重试 ({retry_count + 1}/{max_retries})')
+                            print(f'响应内容解析失败，正在重试 ({retry_count + 1}/{max_retries})')
                             retry_count += 1
                             time.sleep(2)
                             continue
                         return res
                     except (json.JSONDecodeError, ValueError) as e:
-                        print(f'JSON解析失败: {str(e)}, 响应内容: {response.text[:200]}')
+                        print(f'响应解析失败: {str(e)}, 响应内容: {response.text[:200]}')
                         retry_count += 1
                         if retry_count < max_retries:
                             print(f'正在进行第{retry_count + 1}次重试...')
@@ -945,6 +1006,21 @@ class TaskExecutor:
                 self.taskCode = extracted_task_id
                 self.logger.info(f'从buttonRedirect中提取到taskId: {self.taskCode}')
     
+    def query_total_points(self) -> int:
+        """查询当前总积分（签到前基准用）"""
+        try:
+            url = 'https://mcs-mimp-web.sf-express.com/mcs-mimp/commonPost/~memberNonactivity~integralTaskStrategyService~queryPointTaskAndSignFromES'
+            data = {
+                'channelType': '1',
+                'deviceId': self.generate_device_id(),
+            }
+            response = self.http.request(url, data=data)
+            if response and response.get('success') and response.get('obj'):
+                return response['obj'].get('totalPoint', 0)
+        except Exception as e:
+            self.logger.error(f'查询积分失败: {e}')
+        return 0
+
     def app_sign_in(self) -> tuple[bool, str]:
         """APP每日签到（使用getUnFetchPointAndDiscount接口触发签到+领取）
         
@@ -1381,6 +1457,286 @@ class TaskExecutor:
         return (points_before, points_after)
 
 
+# ==================== 顺丰红包大派送（抽奖）执行器（merge v1.3.0）====================
+class RedPacketExecutor:
+    """顺丰红包大派送 (mid-platform, activityType=MID_JGGCJ)，官方每天免费抽奖一次。
+
+    端点：
+      - getUserAcRuleInfo : 查询活动规则 / 剩余抽奖次数 surplusLotteryNum / ruleCode
+      - lotteryPrize      : 抽奖发放接口，点击"抽奖"按钮调用，服务端随机发券
+    lotteryPrize 必须带 body: {acId, ruleCode, secendChannel, md5Sign}，且 Referer 为
+    nineBlockDraw 抽奖页（含 acId 与 token）。md5Sign 为固定常量。
+    必须先查 getUserAcRuleInfo 的 surplusLotteryNum，为 0 时直接跳过。
+    """
+
+    BASE_URL = 'https://mcs-mimp-web.sf-express.com/mcs-mimp'
+    AC_ID = '1D2532575D49438FA3D63842BF53F6EB'
+    SECEND_CHANNEL = 'MBHD_BASIC20260409160224813'
+    RULE_CODE = 'SFGZ20260409160224757'
+    MD5_SIGN = 'f196f7a1db74f90f84bf03b8d54fc006'
+    RULE_INFO_PATH = '/commonNoLoginPost/~actMiddlePlat~midActivity~getUserAcRuleInfo'
+    LOTTERY_PATH = '/commonPost/~actMiddlePlat~midActivity~lotteryPrize'
+    DRAW_REFERER_TPL = (
+        'https://mcs-mimp-web.sf-express.com/origin/g/mid-platform/main-active/'
+        'nineBlockDraw'
+        '?redirectUri=/origin/g/mid-platform/main-active/activityCenterEntry'
+        '&mobile={mobile_mask}&userId={user_id}&scene=676&memberType=0&token={session_id}'
+        '&acId={ac_id}&from={secend_channel}'
+        '&activityType=MID_JGGCJ&source=CX&isFinishActivity=true'
+    )
+    DRAW_ORIGIN = 'https://mcs-mimp-web.sf-express.com'
+    ACT_HEADERS = {
+        'channel': SECEND_CHANNEL,
+        'sysCode': 'MCS-MIMP-CORE',
+        'platform': 'MINI_PROGRAM',
+    }
+
+    def __init__(self, http: SFHttpClient, logger: Logger):
+        self.http = http
+        self.logger = logger
+
+    def _rule_info(self):
+        url = f'{self.BASE_URL}{self.RULE_INFO_PATH}'
+        return self.http.request(
+            url,
+            data={'acId': self.AC_ID, 'empNum': '', 'shareUserId': '',
+                  'shareRuleCode': '', 'shareTaskId': ''},
+            extra_headers=self.ACT_HEADERS,
+        )
+
+    def _draw(self):
+        url = f'{self.BASE_URL}{self.LOTTERY_PATH}'
+        body = {
+            'acId': self.AC_ID,
+            'ruleCode': self.RULE_CODE,
+            'secendChannel': self.SECEND_CHANNEL,
+            'md5Sign': self.MD5_SIGN,
+        }
+        sid = uid = phone = ''
+        try:
+            ck = self.http.session.cookies.get_dict()
+            sid = ck.get('sessionId', '')
+            uid = ck.get('_login_user_id_', '')
+            phone = ck.get('_login_mobile_', '')
+        except Exception:
+            pass
+        mask = f"{phone[:3]}****{phone[-4:]}" if len(phone) >= 7 else phone
+        referer = self.DRAW_REFERER_TPL.format(
+            mobile_mask=mask, user_id=uid, session_id=sid,
+            ac_id=self.AC_ID, secend_channel=self.SECEND_CHANNEL,
+        )
+        draw_headers = dict(self.ACT_HEADERS)
+        draw_headers['referer'] = referer
+        draw_headers['origin'] = self.DRAW_ORIGIN
+        return self.http.request(url, data=body, extra_headers=draw_headers)
+
+    def run(self):
+        prizes = []
+        rule = None
+        surplus = None
+        try:
+            rule = self._rule_info()
+            if rule and rule.get('success'):
+                obj = rule.get('obj') or {}
+                rule_name = obj.get('acName') or obj.get('name') or '顺丰红包大派送'
+                self.logger.raw(f'📝 [顺丰红包大派送] 活动: {rule_name}')
+                if 'surplusLotteryNum' in obj:
+                    try:
+                        surplus = int(obj.get('surplusLotteryNum'))
+                    except (TypeError, ValueError):
+                        surplus = None
+                if surplus is not None:
+                    self.logger.raw(f'📝 [顺丰红包大派送] 剩余免费抽奖次数: {surplus}（每天限1次）')
+            else:
+                self.logger.raw('📝 [顺丰红包大派送] 查询活动规则未返回成功，仍尝试抽奖')
+        except Exception:
+            pass
+
+        if surplus == 0:
+            self.logger.raw('📝 [顺丰红包大派送] 今日免费抽奖次数已用完（暂无抽奖次数），跳过抽奖。')
+        else:
+            try:
+                resp = self._draw()
+            except Exception as e:
+                self.logger.error(f'[顺丰红包大派送] 抽奖请求异常: {str(e)[:80]}')
+                resp = None
+
+            if resp and resp.get('success'):
+                obj = resp.get('obj') or {}
+                draw_records = obj.get('userWinPrizeList')
+                if not isinstance(draw_records, list):
+                    draw_records = obj.get('midAcAwardRecords')
+                if not isinstance(draw_records, list):
+                    draw_records = []
+
+                if draw_records:
+                    for rec in draw_records:
+                        if not isinstance(rec, dict):
+                            continue
+                        name = (rec.get('prizeName') or rec.get('packetName')
+                                or rec.get('couponName') or rec.get('commodityName')
+                                or rec.get('productName') or '未解析奖品')
+                        amount = rec.get('prizeAmount') or rec.get('couponAmount') or ''
+                        eff = rec.get('effectTm') or ''
+                        inv = rec.get('invalidTm') or ''
+                        extra = ''
+                        if amount:
+                            extra += f' 面额={amount}元'
+                        if eff and inv:
+                            extra += f' 有效期={eff}~{inv}'
+                        self.logger.raw(f'🎉 [顺丰红包大派送] 免费抽奖成功 ➔ 获得: {name}{extra}')
+                        prizes.append(name)
+                else:
+                    self.logger.raw('📝 [顺丰红包大派送] 抽奖受理成功，但本次未抽中奖品。')
+            else:
+                code = resp.get('errorCode') if resp else None
+                msg = (resp or {}).get('errorMsg') or (resp or {}).get('msg') or '未知错误'
+                if any(k in str(msg) for k in ('已', '次数', '今日', '重复', 'limit', 'Limit', '暂无')):
+                    self.logger.raw('📝 [顺丰红包大派送] 今日免费抽奖已完成或次数不足，跳过抽奖。')
+                else:
+                    self.logger.error(f'[顺丰红包大派送] 抽奖失败: code={code} msg={msg}')
+
+        return prizes
+
+
+# ==================== 我的优惠券查询执行器（merge v1.3.0）====================
+class CouponQueryExecutor:
+    """查询当前账户【已持有】的优惠券列表（"我的优惠券"页 = couponCollection）。
+
+    接口：
+        POST https://mcs-mimp-web.sf-express.com/mcs-mimp/coupon/available/list
+    该接口顺丰实际返回 XML，统一由 parse_response_body 兼容处理。
+    """
+
+    DEFAULT_URL = 'https://mcs-mimp-web.sf-express.com/mcs-mimp/coupon/available/list'
+    REQ_BODY = {
+        "type": "1",
+        "pageSize": 50,
+        "pageNum": 1,
+        "couponType": "",
+        "labelCode": "0",
+        "channel": "SFAPP",
+    }
+    ACT_HEADERS = {
+        'channel': 'HOME_COUPON',
+        'syscode': 'MCS-MIMP-CORE',
+        'platform': 'SFAPP',
+        'content-type': 'application/json',
+        'referer': (
+            'https://mcs-mimp-web.sf-express.com/home'
+            '?redirectUri=/couponCollection&from=HOME_COUPON'
+        ),
+    }
+
+    def __init__(self, http: SFHttpClient, logger: Logger):
+        self.http = http
+        self.logger = logger
+        self.force_url = os.environ.get('COUPON_QUERY_URL', '').strip() or None
+
+    @staticmethod
+    def _fmt_coupon(c):
+        name = c.get('couponName') or '未命名券'
+        amt = c.get('pledgeAmt')
+        try:
+            amt_s = f"¥{float(amt):.2f}" if amt is not None else ''
+        except (TypeError, ValueError):
+            amt_s = f"¥{amt}" if amt is not None else ''
+        eff = c.get('effectTm', '')
+        inv = c.get('invalidTm', '')
+        status = c.get('status', '')
+        status_s = '有效' if status == 'EFFE' else (status or '未知')
+        return f"{name}({amt_s})[{status_s} {eff}~{inv}]"
+
+    def run(self):
+        url = self.force_url or self.DEFAULT_URL
+        try:
+            resp = self.http.request(url, data=self.REQ_BODY,
+                                     extra_headers=self.ACT_HEADERS)
+        except Exception as e:
+            self.logger.error(f"优惠券查询请求异常: {str(e)[:80]}")
+            return []
+
+        if not resp:
+            self.logger.error("优惠券查询无响应（接口可能已下线）")
+            return []
+
+        if not resp.get('success'):
+            self.logger.error(f"优惠券查询失败: {resp.get('msg') or resp.get('message') or resp}")
+            return []
+
+        obj = resp.get('obj')
+        if not isinstance(obj, list):
+            self.logger.raw("📝 [优惠券查询] 优惠券列表为空")
+            return []
+
+        coupons = [self._fmt_coupon(c) for c in obj if isinstance(c, dict)]
+        self.logger.raw(f"📝 [优惠券查询] 查询到 {len(coupons)} 张优惠券")
+        for c in coupons:
+            self.logger.raw(f"🎟️ {c}")
+        return coupons
+
+
+# ==================== 会员日活动执行器（merge v1.3.0）====================
+class MemberDayExecutor:
+    """会员日活动执行器（每月26-28号自动执行）"""
+
+    def __init__(self, logger: Logger, http_client: SFHttpClient, config: Config):
+        self.logger = logger
+        self.http = http_client
+        self.config = config
+
+    def execute(self) -> Dict:
+        success = False
+        tasks_done: List[str] = []
+        error = None
+        try:
+            self.logger.info('开始执行会员日活动...')
+            url = f'{self.config.MEMBER_DAY_API}/mcs-mimp/commonPost/~memberNonactivity~memberDayActivity~getActivityInfo'
+            data = {'channelType': '1'}
+            response = self.http.request(url, data=data)
+
+            if not (response and response.get('success')):
+                error = response.get('errorMessage', '未知错误') if response else '请求失败'
+                self.logger.warn(f'获取会员日活动失败: {error}')
+                return {'success': success, 'tasks_done': tasks_done, 'error': error}
+
+            obj = response.get('obj', {})
+            task_list = obj.get('taskList', [])
+            if not task_list:
+                self.logger.info('会员日暂无可执行任务')
+                return {'success': True, 'tasks_done': tasks_done, 'error': None}
+
+            for task in task_list:
+                task_code = task.get('taskCode', '')
+                task_name = task.get('taskName', '未知任务')
+                if not task_code:
+                    continue
+
+                finish_url = f'{self.config.MEMBER_DAY_API}/mcs-mimp/commonPost/~memberNonactivity~memberDayActivity~finishTask'
+                finish_data = {'taskCode': task_code, 'channelType': '1'}
+                finish_resp = self.http.request(finish_url, data=finish_data)
+
+                if finish_resp and finish_resp.get('success'):
+                    self.logger.success(f'会员日任务完成: {task_name}')
+                    tasks_done.append(task_name)
+
+                    fetch_url = f'{self.config.MEMBER_DAY_API}/mcs-mimp/commonPost/~memberNonactivity~memberDayActivity~fetchPrize'
+                    fetch_data = {'taskCode': task_code, 'channelType': '1'}
+                    fetch_resp = self.http.request(fetch_url, data=fetch_data)
+                    if fetch_resp and fetch_resp.get('success'):
+                        self.logger.success(f'会员日奖励领取: {task_name}')
+                    else:
+                        self.logger.info(f'会员日奖励领取失败(可能已领): {task_name}')
+                else:
+                    self.logger.info(f'会员日任务跳过: {task_name}')
+
+            success = True
+            return {'success': success, 'tasks_done': tasks_done, 'error': None}
+        except Exception as e:
+            self.logger.error(f'会员日活动异常: {e}')
+            return {'success': False, 'tasks_done': tasks_done, 'error': str(e)}
+
+
 # ==================== 账号管理器 ====================
 class AccountManager:
     """账号管理器"""
@@ -1446,15 +1802,19 @@ class AccountManager:
         
         # 初始化任务执行器
         executor = TaskExecutor(self.http_client, self.logger, self.config, self.user_id)
-        
+
+        # 签到前先查一次积分基准，避免把签到奖励算进"执行前积分"
+        points_base = executor.query_total_points()
+        self.logger.points_info(points_base, "执行前积分")
+
         # 先执行APP签到
         app_sign_success, app_error_msg = executor.app_sign_in()
         time.sleep(1)
-        
+
         # 执行新签到
         new_sign_success, new_sign_error = executor.new_sign_in()
         time.sleep(1)
-        
+
         # 再执行小程序签到
         sign_success, error_msg = executor.sign_in()
         
@@ -1493,9 +1853,45 @@ class AccountManager:
                     if retry == max_retries - 1:
                         self.logger.error(f'重新登录异常: {str(e)[:100]}，已重试{max_retries}次')
         
-        # 执行其他任务
+        # 执行其他任务（run_all_tasks 第一步会再查一次积分，作为 points_before=签到后积分）
         points_before, points_after = executor.run_all_tasks()
         points_earned = points_after - points_before
+        
+        # 顺丰红包大派送
+        redpacket_result = None
+        if self.config.ENABLE_RED_PACKET:
+            try:
+                self.logger.raw("🎯 开始执行顺丰红包大派送（每天免费抽奖一次）")
+                rp_executor = RedPacketExecutor(self.http_client, self.logger)
+                redpacket_result = rp_executor.run()
+            except Exception as e:
+                self.logger.error(f"顺丰红包大派送失败: {e}")
+        
+        # 我的优惠券查询
+        coupons_result = None
+        if self.config.ENABLE_COUPON_QUERY:
+            try:
+                self.logger.raw("🎟️ 开始查询我的优惠券")
+                coupon_executor = CouponQueryExecutor(self.http_client, self.logger)
+                coupons_result = coupon_executor.run()
+            except Exception as e:
+                self.logger.error(f"优惠券查询失败: {e}")
+        
+        # 会员日活动（每月26-28号自动执行）
+        member_day_result = None
+        if self.config.ENABLE_MEMBER_DAY:
+            try:
+                from datetime import datetime
+                now = datetime.now()
+                if now.day in (26, 27, 28):
+                    self.logger.section(f"账号 {self.user_id} - 会员日活动（{now.month}月{now.day}日）")
+                    member_executor = MemberDayExecutor(self.logger, self.http_client, self.config)
+                    member_day_result = member_executor.execute()
+            except Exception as e:
+                self.logger.error(f"会员日活动失败: {e}")
+        
+        # 本次执行总获得积分 = 最终积分 - 签到前基准（含签到+任务+大派送）
+        total_earned = (points_after or 0) - (points_base or 0)
         
         # 返回统计信息
         return {
@@ -1503,7 +1899,12 @@ class AccountManager:
             'phone': self.phone,
             'points_before': points_before,
             'points_after': points_after,
-            'points_earned': points_earned
+            'points_earned': points_earned,
+            'points_base': points_base,
+            'total_earned': total_earned,
+            'redpacket': redpacket_result,
+            'coupons': coupons_result,
+            'member_day': member_day_result
         }
 
 
@@ -1551,9 +1952,43 @@ def run_single_account(account_info: str, index: int, config: Config) -> Dict[st
         }
 
 
+# ==================== 等宽表格辅助（merge v1.3.0）====================
+def _disp_width(s: str) -> int:
+    """计算字符串显示宽度（中文等宽字符按2计）"""
+    w = 0
+    for ch in s:
+        w += 2 if ord(ch) > 0x2E7F else 1
+    return w
+
+
+def _pad(s: str, width: int) -> str:
+    """右侧补空格到指定显示宽度"""
+    return s + ' ' * max(0, width - _disp_width(s))
+
+
+def _table_border(widths, left: str = '+', mid: str = '+', right: str = '+') -> str:
+    """生成表格分隔线（+---+---+），纯 ASCII 字符，渲染宽度确定。"""
+    segs = ['-' * (w + 2) for w in widths]
+    return left + mid.join(segs) + right
+
+
+def _table_row(cells, widths) -> str:
+    """生成表格数据行（| 内容 | 内容 |），纯 ASCII 竖线。"""
+    segs = [f' {_pad(c, w)} ' for c, w in zip(cells, widths)]
+    return '|' + '|'.join(segs) + '|'
+
+
 # ==================== 主程序 ====================
 def main():
     """主函数"""
+    # Windows 控制台默认 GBK，emoji 会触发 UnicodeEncodeError，强制 UTF-8 输出
+    if sys.stdout.encoding and sys.stdout.encoding.lower() not in ('utf-8', 'utf8', 'utf_8'):
+        try:
+            sys.stdout.reconfigure(encoding='utf-8')
+            sys.stderr.reconfigure(encoding='utf-8')
+        except Exception:
+            pass
+
     config = Config()
 
     env_value = os.getenv(config.ENV_NAME)
@@ -1622,27 +2057,86 @@ def main():
     success_count = sum(1 for r in all_results if r['success'])
     fail_count = len(all_results) - success_count
     total_earned = sum(r['points_earned'] for r in all_results if r['success'])
-    
-    # 显示汇总统计表格
-    print(f"\n" + "=" * 80)
-    print(f"📊 积分统计汇总")
-    print("=" * 80)
-    print(f"{'序号':<6} {'手机号':<15} {'今日获得积分':<15} {'总积分':<15} {'状态':<10}")
-    print("-" * 80)
-    
+    total_all_earned = sum(r.get('total_earned', 0) for r in all_results if r['success'])
+
+    # 显示汇总统计表格（纯 ASCII 表头 + 等宽表格，避开中文宽度在青龙面板不对齐）
+    # 列宽（字符数，全 ASCII 故每个字符严格 1 列，等宽日志下必然对齐）
+    # No / Phone / Total(含签到获得) / Task(任务获得) / After(总积分) / Status
+    widths = [4, 13, 12, 8, 9, 7]
+
+    top = _table_border(widths)
+    mid = _table_border(widths)
+    bottom = _table_border(widths)
+
+    print()
+    print("📊 积分统计汇总")
+    print(top)
+    print(_table_row(['No', 'Phone', 'Total', 'Task', 'After', 'Status'], widths))
+    print(mid)
+
     for result in all_results:
         index = result['index'] + 1
-        phone = result['phone'][:3] + "****" + result['phone'][7:] if result['phone'] else "未登录"
+        phone = result['phone'][:3] + "****" + result['phone'][7:] if result['phone'] else "N/A"
+        all_earned = result.get('total_earned', result['points_earned'])
         earned = result['points_earned']
         total = result['points_after']
-        status = "✅成功" if result['success'] else "❌失败"
-        
-        print(f"{index:<6} {phone:<15} {earned:<15} {total:<15} {status:<10}")
-    
-    print("-" * 80)
-    print(f"{'汇总':<6} {'账号总数: ' + str(len(all_results)):<15} {'今日总获得: ' + str(total_earned):<15} {'':<15} {'成功: ' + str(success_count):<10}")
-    print("=" * 80)
-    
+        status = "OK" if result['success'] else "FAIL"
+
+        print(_table_row(
+            [str(index), phone, str(all_earned), str(earned), str(total), status],
+            widths,
+        ))
+
+    print(mid)
+    print(_table_row(
+        ['SUM', 'Accounts: ' + str(len(all_results)),
+         'Total: ' + str(total_all_earned), 'Task: ' + str(total_earned),
+         '', 'OK: ' + str(success_count)],
+        widths,
+    ))
+    print(bottom)
+
+    # 顺丰红包大派送 / 优惠券 汇总
+    any_rp = False
+    any_cp = False
+    for result in all_results:
+        if result.get('redpacket'):
+            any_rp = True
+        if result.get('coupons'):
+            any_cp = True
+    if any_rp:
+        print("\n🧧 顺丰红包大派送中奖汇总")
+        for result in all_results:
+            rp_prizes = result.get('redpacket') or []
+            if rp_prizes:
+                phone = result['phone'][:3] + "****" + result['phone'][7:] if result['phone'] else "N/A"
+                print(f"  🧧 {phone}: {', '.join(str(p) for p in rp_prizes)}")
+    if any_cp:
+        print("\n🎟️ 优惠券统计汇总")
+        first_block = True
+        for result in all_results:
+            coupons = result.get('coupons') or []
+            if not coupons:
+                continue
+            if not first_block:
+                print()  # 账号块之间空行分隔
+            first_block = False
+            phone = result['phone'][:3] + "****" + result['phone'][7:] if result['phone'] else "N/A"
+            print(f"  👤 {phone}（{len(coupons)}张优惠券）")
+            # 拆分「名称(¥金额)」与「[有效 ...]」，按最大显示宽度对齐列
+            parsed = []
+            max_w = 0
+            for c in coupons:
+                m = re.match(r'(.*?)(\s*\[.*)$', c)
+                if m:
+                    prefix, suffix = m.group(1), m.group(2)
+                else:
+                    prefix, suffix = c, ''
+                parsed.append((prefix, suffix))
+                max_w = max(max_w, _disp_width(prefix))
+            for prefix, suffix in parsed:
+                print(f"     🎟️ {_pad(prefix, max_w)}{suffix}")
+
     print("\n🎊 所有账号任务执行完成!")
 
 
