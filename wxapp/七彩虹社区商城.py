@@ -51,6 +51,7 @@ except ImportError:
     "启用自动评论": False,
     "启用自动点赞": True,
     "点赞次数": 5,
+    "点赞最大翻页": 5,
     "评论次数": 3,
     "启用抽奖": False,
     "抽奖积分上限": 200,
@@ -775,27 +776,59 @@ class 七彩虹商城客户端:
             return None
         self.已执行点赞 = True
 
-        帖子结果 = self.获取帖子列表()
-        帖子列表 = ((帖子结果.get("Data") or {}).get("DataList") or []) if isinstance(帖子结果, dict) else []
-        if not 帖子列表:
-            self.打印("没有可点赞的帖子，跳过自动点赞。")
-            return None
-
+        目标次数 = int(点赞次数)
+        最大翻页 = int(self.配置.get("点赞最大翻页", 5))
         成功次数 = 0
-        for 索引 in range(int(点赞次数)):
-            帖子 = random.choice(帖子列表)
-            payload = {
-                "postId": 帖子.get("Id", ""),
-                "postReplyId": "0",
-            }
-            结果 = self.请求接口("POST", "/Bbs/Like", body=payload)
-            if self.结果码(结果) == 0:
-                成功次数 += 1
-                self.打印(f"第 {索引 + 1}/{点赞次数} 次点赞成功")
-            else:
-                self.打印(f"第 {索引 + 1}/{点赞次数} 次点赞失败: {结果}")
-            if 索引 != int(点赞次数) - 1:
-                self.随机等待()
+        已尝试帖子 = set()
+        当前页 = 1
+
+        while 成功次数 < 目标次数 and 当前页 <= 最大翻页:
+            帖子结果 = self.获取帖子列表(page=当前页)
+            帖子列表 = ((帖子结果.get("Data") or {}).get("DataList") or []) if isinstance(帖子结果, dict) else []
+            if not 帖子列表:
+                if 当前页 == 1:
+                    self.打印("没有可点赞的帖子，跳过自动点赞。")
+                else:
+                    self.打印(f"第 {当前页} 页无更多帖子，结束点赞。")
+                break
+
+            for 帖子 in 帖子列表:
+                if 成功次数 >= 目标次数:
+                    break
+
+                帖子ID = 帖子.get("Id") or ""
+                if not 帖子ID or 帖子ID in 已尝试帖子:
+                    continue
+                # 已点赞过的帖子直接跳过，避免浪费请求
+                if 帖子.get("IsLike") is True:
+                    continue
+                已尝试帖子.add(帖子ID)
+
+                if 成功次数:
+                    self.随机等待()
+
+                标题 = str(帖子.get("Title") or "无标题")[:20]
+                结果 = self.请求接口("POST", "/Bbs/Like", body={
+                    "postId": 帖子ID,
+                    "postReplyId": "0",
+                })
+                if self.结果码(结果) == 0:
+                    成功次数 += 1
+                    self.打印(f"第 {成功次数}/{目标次数} 次点赞成功: {标题}")
+                    continue
+
+                消息 = str(self.结果消息(结果) or 结果)
+                # 重复点赞不计入失败，换下一个帖子继续
+                if re.search(r"已点赞|已经|重复|不能", 消息):
+                    continue
+                self.打印(f"点赞失败: {消息}")
+
+            当前页 += 1
+
+        if 成功次数 >= 目标次数:
+            self.打印(f"今日点赞已达上限 {目标次数} 次，获得 {目标次数 * 2} 积分")
+        else:
+            self.打印(f"本轮共点赞 {成功次数} 次，获得 {成功次数 * 2} 积分")
 
         return 成功次数
 
