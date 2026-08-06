@@ -217,6 +217,73 @@ async function main() {
 
     // 打印总结
     printSummary(browserResults)
+
+    // 推送通知：仅走项目根目录外部 Node 版 sendNotify.js（企业微信/pushplus/Bark/TG 等），
+    // 不回退 Python notify.py，避免同一渠道双推。
+    try {
+        await pushNotify(browserResults)
+    } catch (err) {
+        console.log(`${LogTag.SYSTEM} 推送通知异常: ${err.message}`)
+    }
+}
+
+// 构造与 printSummary 一致的通知正文，并通过外部 sendNotify.js 推送
+async function pushNotify(items) {
+    const lines = []
+    lines.push('📊 Bing Rewards 任务总结')
+    lines.push('==================================================')
+    for (const r of items) {
+        if (!r.result) {
+            lines.push(`账号${r.index} (${emailMask(r.username)}): 未登录或流程中断`)
+            continue
+        }
+        const res = r.result
+        const pts = res.points ?? '?'
+        const today = res.today_points ?? 0
+        const search = res.search || {}
+        const readPts = res.read_progress ?? 0
+        const daily = res.daily_stats || {}
+        const activity = res.activity_stats || {}
+        const punch = res.punch_stats || {}
+        const claimed = res.claimed_points || 0
+        const claimStr = claimed > 0 ? `+${claimed}分` : '无'
+        const appSign = res.app_sign_in ?? -1
+        const appStr = appSign === 0 ? '今日已签到' : (appSign > 0 ? `+${appSign}分` : '失败')
+
+        lines.push(`账号${r.index} (${emailMask(r.username)})`)
+        lines.push(`   ├── 总积分: ${pts}`)
+        lines.push(`   ├── 今日积分: +${today}`)
+        lines.push(`   ├── 积分领取: ${claimStr}`)
+        lines.push(`   ├── 搜索进度: ${search.progress ?? '?'}/${search.max ?? '?'}`)
+        lines.push(`   ├── 每日活动: ${daily.done ?? 0}/${daily.total ?? 0}`)
+        lines.push(`   ├── 活动任务: ${activity.done ?? 0}/${activity.total ?? 0}`)
+        lines.push(`   ├── 打卡任务: ${punch.done ?? 0}/${punch.total ?? 0}`)
+        lines.push(`   ├── APP签到: ${appStr}`)
+        lines.push(`   └── APP阅读: +${readPts}分`)
+    }
+
+    const content = lines.join('\n')
+
+    const jsNotifyPaths = [
+        path.join(__dirname, '..', 'sendNotify.js'),
+        path.join(__dirname, 'sendNotify.js'),
+        '/ql/data/scripts/sendNotify.js'
+    ]
+    for (const notifyPath of jsNotifyPaths) {
+        try {
+            if (!fs.existsSync(notifyPath)) continue
+            const notifyModule = require(notifyPath)
+            const notifyFn = notifyModule.sendNotify || notifyModule.send || notifyModule
+            if (typeof notifyFn === 'function') {
+                await notifyFn('Bing Rewards 运行简报', content)
+                console.log(`${LogTag.SYSTEM} 推送完成: ${notifyPath}`)
+                return
+            }
+        } catch (err) {
+            console.log(`${LogTag.SYSTEM} JS推送失败(${notifyPath}): ${err.message}`)
+        }
+    }
+    console.log(`${LogTag.SYSTEM} 未找到外部 sendNotify.js，跳过推送`)
 }
 
 // 启动主程序
