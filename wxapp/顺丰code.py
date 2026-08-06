@@ -690,6 +690,26 @@ class Logger:
             self.current_account_msg.append(msg)
             self.messages.append(msg)
     
+    def raw(self, content: str):
+        """原样输出（调用方自带图标，不再追加前缀）"""
+        msg = str(content)
+        self._safe_print(msg)
+        with self.lock:
+            self.current_account_msg.append(msg)
+            self.messages.append(msg)
+
+    def warn(self, content: str):
+        """warning 的别名（兼容 merge v1.3.0 的调用）"""
+        self.warning(content)
+
+    def section(self, title: str):
+        """分节标题"""
+        msg = f"{'=' * 50}\n{title}"
+        self._safe_print(msg)
+        with self.lock:
+            self.current_account_msg.append(msg)
+            self.messages.append(msg)
+
     def reset_account_msg(self):
         """重置当前账号消息"""
         self.current_account_msg = []
