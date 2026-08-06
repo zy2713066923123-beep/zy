@@ -19,8 +19,8 @@ setGlobalDispatcher(new Agent({
 }));
 
 //////////////////////
-let scriptVersion = "1.0.2";  // 版本号更新
-let scriptVersionLatest = '1.0.2';
+let scriptVersion = "1.0.7";  // 合并 1.0.7: 自动获取签到ID + 新版活动任务 finish 接口
+let scriptVersionLatest = '1.0.7';
 let S_qmsdCk = ($.isNode() ? process.env.WX_ID : $.getdata("WX_ID")) || ""
 let S_qmsdCkArr = [];
 let msg = '';
@@ -36,6 +36,7 @@ let scriptPhone = "";
 let scriptSessionKey = "";
 let scriptSign = "";
 let scriptCode = "b8fe166f-8641-460c-9f79-edd6489a8d62";
+let scriptSignId = ($.isNode() ? process.env.QMSD_SIGN_ID : $.getdata("QMSD_SIGN_ID")) || "QD26060001";
 let factoryInfo = [];
 
 // 空的GetRewrite函数，避免未定义错误
@@ -83,6 +84,11 @@ async function GetRewrite() {
                     log(`\n==== 账号【${num}】登入失败 ====\n`);
                     continue;
                 }
+
+                scriptSignId = await fetchSignId();
+                await $.wait(1000);
+                log(`${accountTips}当前签到ID：${scriptSignId}`);
+
                 log(`\n==== 全棉时代每日签到 ====\n`)
                 let signFlag = await signDetail();
                 await $.wait(2000);
@@ -92,59 +98,9 @@ async function GetRewrite() {
                     await doSignIn();
                     await $.wait(2000);
                 }
-                log(`\n==== 全棉时代每日任务 ====\n`)
-                let taskData = await taskList();
+                log(`\n==== 全棉时代每日任务(新) ====\n`)
+                await runActivityTasks();
                 await $.wait(2000);
-                if (taskData.length > 0) {
-                    let taskFlag = false;
-                    for (let i in taskData) {
-                        let id = taskData[i]["id"];
-                        let reward = taskData[i]["reward"];
-                        let standingTime = taskData[i]["standingTime"];
-                        let status = parseInt(taskData[i]["status"]);
-                        let pageName = taskData[i]["pageName"];
-                        let type = taskData[i]["type"];
-                        if (status == 2) {
-                            log(`任务【${type}】已经完成且领取奖励`);
-                        } else if (status == 1) {
-                            log(`任务已经完成未领取奖励`);
-                            await doReward(id);
-                            await $.wait(2000);
-                        } else {
-                            switch (type) {
-                                case 'visitPage':
-                                    //访问页面任务
-                                    taskFlag = await doStart(id);
-                                    if (taskFlag) {
-                                        await $.wait(standingTime * 1000);
-                                        taskFlag = await doFinish(id);
-                                        await $.wait(2000);
-                                    }
-                                    if (taskFlag) {
-                                        await doReward(id);
-                                        await $.wait(2000);
-                                    }
-                                    break;
-                                case 'addApplet':
-                                case 'playGame':
-                                    taskFlag = await doStart(id);
-                                    if (taskFlag) {
-                                        await $.wait(3 * 1000);
-                                        taskFlag = await doFinish(id);
-                                        await $.wait(2000);
-                                    }
-                                    if (taskFlag) {
-                                        await doReward(id);
-                                        await $.wait(2000);
-                                    }
-                                    break;
-                                default:
-                                    log(`任务类型【${type}】不支持`);
-                                    break;
-                            }
-                        }
-                    }
-                }
                 log(`\n==== 全棉时代工厂任务 ====\n`)
                 await factoryGame();
                 await $.wait(5000);
@@ -229,7 +185,7 @@ async function signDetail() {
     return new Promise((resolve) => {
         var options = {
             method: 'GET',
-            url: 'https://nmp.pureh2b.com/api/new/member/sign/index?signId=QD26040001',   // 修改 signId
+            url: `https://nmp.pureh2b.com/api/new/member/sign/index?signId=${scriptSignId}`,
             headers: {
                 'host': 'nmp.pureh2b.com',
                 'connection': 'keep-alive',
@@ -283,7 +239,7 @@ async function doSignIn() {
                 'user-agent': userAgent,
                 'referer': 'https://servicewechat.com/wxdfcaa44b1aa891a7/1372/page-frame.html'
             },
-            data: { signType: 1, signInId: 'QD26040001' }   // 修改 signInId
+            data: { signType: 1, signInId: scriptSignId }
         };
         axios.request(options).then(async function (response) {
             try {
@@ -309,6 +265,207 @@ async function doSignIn() {
     });
 }
 // ==================== 签到接口修复结束 ====================
+
+function v3Headers(refererVer = '1376') {
+    return {
+        'host': 'nmp.pureh2b.com',
+        'connection': 'keep-alive',
+        'tag': 'v3.0',
+        'token': scriptToken,
+        'content-type': 'application/json;charset=UTF-8',
+        'code': scriptCode,
+        'accept': '*/*',
+        'user-agent': userAgent,
+        'referer': `https://servicewechat.com/${scriptAppId}/${refererVer}/page-frame.html`
+    };
+}
+
+function parseSignIdFromInfo(info) {
+    if (!info || typeof info !== 'string') return '';
+    const m = info.match(/[?&]id=([^&]+)/i) || info.match(/(QD\d+)/i);
+    return m ? decodeURIComponent(m[1]) : '';
+}
+
+function findSignIdInObject(obj) {
+    if (!obj) return '';
+    if (typeof obj === 'string') return parseSignIdFromInfo(obj);
+    if (Array.isArray(obj)) {
+        for (const item of obj) {
+            const id = findSignIdInObject(item);
+            if (id) return id;
+        }
+        return '';
+    }
+    if (typeof obj === 'object') {
+        if (obj.redirectInfo && obj.redirectInfo.info) {
+            const id = parseSignIdFromInfo(obj.redirectInfo.info);
+            if (id) return id;
+        }
+        for (const k of Object.keys(obj)) {
+            const id = findSignIdInObject(obj[k]);
+            if (id) return id;
+        }
+    }
+    return '';
+}
+
+async function fetchSignId(timeout = 5000) {
+    const fallback = scriptSignId || 'QD26060001';
+    const headers = v3Headers('1376');
+    try {
+        const catResp = await axios.request({
+            method: 'POST',
+            url: 'https://nmp.pureh2b.com/api/new/navigation/category/query',
+            data: { pageNum: 1, pageSize: 10, venueType: 'MAIN', categoryId: '010002' },
+            headers,
+            timeout
+        });
+        const catData = catResp && catResp.data ? catResp.data : {};
+        if (catData.code == 200 && catData.data) {
+            let signId = findSignIdInObject(catData.data.componentList);
+            if (signId) {
+                log(`${accountTips}自动获取签到ID✅ ${signId}（首页组件）`);
+                return signId;
+            }
+            let navId = '';
+            try {
+                const pageConfig = JSON.parse(catData.data.pageConfig || '{}');
+                navId = pageConfig.topNavigationId || '';
+            } catch (e) {}
+            if (navId) {
+                const navResp = await axios.request({
+                    method: 'GET',
+                    url: 'https://nmp.pureh2b.com/api/new/navigation/nav/query',
+                    params: { navigationId: navId },
+                    headers,
+                    timeout
+                });
+                const navData = navResp && navResp.data ? navResp.data : {};
+                if (navData.code == 200) {
+                    signId = findSignIdInObject(navData.data);
+                    if (signId) {
+                        log(`${accountTips}自动获取签到ID✅ ${signId}（顶部导航）`);
+                        return signId;
+                    }
+                }
+            }
+        } else {
+            log(`${accountTips}自动获取签到ID❌ category/query：${JSON.stringify(catData)}`);
+        }
+    } catch (e) {
+        log(`${accountTips}自动获取签到ID异常：${e.message || e}`);
+    }
+    log(`${accountTips}自动获取签到ID失败，使用默认：${fallback}`);
+    return fallback;
+}
+
+// ==================== 新版活动任务(finish 即完成+发奖) ====================
+
+function parseActivityTaskList(respData) {
+    if (Array.isArray(respData)) return respData;
+    if (respData && Array.isArray(respData.data)) return respData.data;
+    if (respData && respData.code == 200 && Array.isArray(respData.data)) return respData.data;
+    return [];
+}
+
+async function fetchActivityTaskList(type = 1) {
+    try {
+        const resp = await axios.request({
+            method: 'GET',
+            url: 'https://nmp.pureh2b.com/api/new/member/sign/activityTask/list',
+            params: { activityId: scriptSignId, type },
+            headers: v3Headers('1376'),
+            timeout: 5000
+        });
+        return parseActivityTaskList(resp.data);
+    } catch (e) {
+        log(`${accountTips}获取活动任务type=${type}异常：${e.message || e}`);
+        return [];
+    }
+}
+
+async function taskListNew() {
+    const type1 = await fetchActivityTaskList(1);
+    const type2 = await fetchActivityTaskList(2);
+    const all = type1.concat(type2);
+    log(`${accountTips}签到活动任务✅ 日常${type1.length}个 其他${type2.length}个 activityId=${scriptSignId}`, true);
+    return all;
+}
+
+function isActivityTaskDone(task) {
+    const count = parseInt(task.count || 0);
+    const limit = parseInt(task.giveRewardNum || task.limitTotalCount || 1);
+    return count >= limit && limit > 0;
+}
+
+function parseActivityTaskResult(result) {
+    if (result == null) return { ok: false, msg: 'empty response' };
+    if (Array.isArray(result)) return { ok: true, data: result, raw: result };
+    if (result.code == 200 || result.success === true) {
+        return { ok: true, data: result.data, msg: result.message || result.msg, raw: result };
+    }
+    if (result.taskId || result.taskName || result.id) {
+        const finish = parseInt(result.finish);
+        const status = parseInt(result.status);
+        const ok = finish === 1 || status >= 1;
+        const reward = result.reward ? `+${result.reward}积分` : '';
+        return {
+            ok,
+            data: result,
+            msg: `${result.taskName || result.taskId || ''} finish=${result.finish} status=${result.status}${reward ? ' ' + reward : ''}`,
+            raw: result
+        };
+    }
+    if (result.message && /已|成功/.test(result.message)) return { ok: true, msg: result.message, raw: result };
+    return { ok: false, msg: result.message || result.msg || JSON.stringify(result), raw: result };
+}
+
+async function activityTaskFinish(taskId) {
+    try {
+        const resp = await axios.request({
+            method: 'POST',
+            url: 'https://nmp.pureh2b.com/api/new/member/sign/activityTask/finish',
+            headers: v3Headers('1376'),
+            data: { activityId: scriptSignId, taskId },
+            timeout: 5000
+        });
+        const res = parseActivityTaskResult(resp.data);
+        if (res.ok) {
+            log(`${accountTips}完成任务[${taskId}]✅ ${res.msg || ''}`);
+            if (res.data && res.data.reward) addNotifyStr(`${accountTips}活动任务[${taskId}]完成✅ +${res.data.reward}积分`, true);
+        } else log(`${accountTips}完成任务[${taskId}]❌ ${res.msg}`);
+        return res;
+    } catch (e) {
+        log(`${accountTips}完成任务[${taskId}]❌ ${e.message || e}`);
+        return { ok: false, msg: e.message || String(e) };
+    }
+}
+
+async function runActivityTasks() {
+    const taskData = await taskListNew();
+    if (!taskData.length) return;
+    for (const task of taskData) {
+        const taskId = task.taskId;
+        const taskType = String(task.taskType || '');
+        const name = task.name || taskId;
+        const reward = task.reward || '';
+        if (!taskId) continue;
+        if (isActivityTaskDone(task)) {
+            log(`${accountTips}任务【${name}】已完成(${task.count}/${task.giveRewardNum})`);
+            continue;
+        }
+        if (taskType === '4' || taskType === '7') {
+            log(`${accountTips}任务【${name}】类型${taskType}已排除，跳过`);
+            continue;
+        }
+        log(`${accountTips}准备做任务【${name}】类型${taskType} +${reward}积分 taskId=${taskId}`);
+        const waitSec = parseInt(task.standingTime || (taskType === '3' ? 30 : 3));
+        if (waitSec > 0) await $.wait(waitSec * 1000);
+        const fin = await activityTaskFinish(taskId);
+        if (!fin.ok) continue;
+        await $.wait(1500);
+    }
+}
 
 async function taskList() {
     let taskData = [];
