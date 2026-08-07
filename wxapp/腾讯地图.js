@@ -95,7 +95,16 @@ function removeCachedLoginInfo(ref) {
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 let userIdx = 1;
 
-const APP = { name: "腾讯地图", appid: "wx7643d5f831302ab0", version: 545 };
+const APP = {
+    name: "腾讯地图",
+    appid: "wx7643d5f831302ab0",
+    version: 545,
+    withdrawGameId: 4,
+    withdrawRuleId: "tencent_map_withdraw",
+    checkinGameId: 1,
+    checkinRuleId: "tencent_map_checkin",
+    defaultMinWithdrawThreshold: 1500, // 默认满15元(分)自动提现
+};
 
 const MINI_LOGIN_BASE = "https://miniapp.map.qq.com";
 const MAP_BASE = "https://mmapgwh.map.qq.com";
@@ -156,11 +165,29 @@ function parseAccount(raw) {
     const text = String(raw || "").trim();
     if (!text) return {};
     if (text.startsWith("{")) {
-        const data = JSON.parse(text);
-        return { raw: text, openid: data.openid || data.openId || "", remark: data.remark || data.name || "" };
+        try {
+            const data = JSON.parse(text);
+            return {
+                raw: text,
+                openid: data.openid || data.openId || "",
+                remark: data.remark || data.name || "",
+                auto_withdraw: data.auto_withdraw !== false, // JSON不写false即默认开启提现
+                min_withdraw_amount: Number(data.min_withdraw_amount || APP.defaultMinWithdrawThreshold),
+            };
+        } catch (err) {
+            console.log(`账号JSON解析失败 ${raw}：${err.message}`);
+            return {};
+        }
     }
+    // 普通 openid#备注 格式默认开启自动提现
     const [openid, remark] = text.split("#").map((item) => item.trim());
-    return { raw: text, openid, remark };
+    return {
+        raw: text,
+        openid,
+        remark: remark || "未备注账号",
+        auto_withdraw: true,
+        min_withdraw_amount: APP.defaultMinWithdrawThreshold,
+    };
 }
 
 async function request(options) {
@@ -338,8 +365,8 @@ class TencentMap {
     async queryBalance(prefix = "现金余额") {
         const data = await this.mapApi("/activity/v1/withdraw/home", {
             activity_id: ACTIVITY_ID,
-            game_id: 4,
-            rule_id: "tencent_map_withdraw",
+            game_id: APP.withdrawGameId,
+            rule_id: APP.withdrawRuleId,
         });
         console.log(
             `${prefix}：金币=${formatCoin(data.coins)}，可提现=${formatCoin(data.withdrawable_amount)}，门槛=${formatCoin(data.current_withdraw_threshold)}，奖池=${formatCoin(data.jackpot_amount)}`
@@ -366,8 +393,8 @@ class TencentMap {
     async queryCalendar(prefix = "签到状态") {
         const data = await this.mapApi("/activity/v1/checkin/calendar", {
             activity_id: ACTIVITY_ID,
-            game_id: 1,
-            rule_id: "tencent_map_checkin",
+            game_id: APP.checkinGameId,
+            rule_id: APP.checkinRuleId,
         });
         const today = data.calendar?.[this.todayKey()] || {};
         const prizes = Array.isArray(today.prizes)
@@ -385,14 +412,48 @@ class TencentMap {
         }
         const data = await this.mapApi("/activity/v1/checkin", {
             activity_id: ACTIVITY_ID,
-            game_id: 1,
-            rule_id: "tencent_map_checkin",
+            game_id: APP.checkinGameId,
+            rule_id: APP.checkinRuleId,
             nick: this.userInfo.nickname || "微信用户",
         });
         const prizes = Array.isArray(data.prizes)
             ? data.prizes.map((item) => `${item.name || item.type || "奖励"}:${item.amount ?? ""}`).join("，")
             : short(data);
         console.log(`签到：成功${prizes ? `，${prizes}` : ""}`);
+    }
+
+    async autoWithdraw() {
+        if (!this.account.auto_withdraw) {
+            console.log("提现：该账号已关闭自动提现，跳过");
+            return;
+        }
+        console.log("提现：开始校验可提现余额");
+        const balanceData = await this.queryBalance("提现前余额校验");
+        const withdrawable = Number(balanceData.withdrawable_amount || 0);
+        const currentThreshold = Number(balanceData.current_withdraw_threshold || APP.defaultMinWithdrawThreshold);
+        const triggerAmount = Math.max(this.account.min_withdraw_amount, currentThreshold);
+        if (withdrawable < triggerAmount) {
+            console.log(`提现：可提现${formatCoin(withdrawable)}未达${formatCoin(triggerAmount)}阈值，暂不提现`);
+            return;
+        }
+        const validItems = (balanceData.withdraw_items || []).filter((item) => Number(item.amount) > 0 && item.status === 0);
+        if (!validItems.length) {
+            console.log("提现：未找到可发起的有效档位，跳过");
+            return;
+        }
+        let targetItem = validItems.find((i) => Number(i.amount) === triggerAmount);
+        if (!targetItem) {
+            targetItem = validItems.sort((a, b) => Number(a.amount) - Number(b.amount))[0];
+        }
+        const withdrawRes = await this.mapApi("/activity/v1/withdraw/apply", {
+            activity_id: ACTIVITY_ID,
+            game_id: APP.withdrawGameId,
+            rule_id: APP.withdrawRuleId,
+            amount: targetItem.amount,
+            withdraw_item_id: targetItem.id,
+            pay_channel: 1,
+        });
+        console.log(`提现：申请提交成功，金额${formatCoin(targetItem.amount)}，单号${withdrawRes.order_id || "无"}`);
     }
 
     get cacheKey() {
@@ -435,6 +496,7 @@ class TencentMap {
         await this.queryBalance("签到前现金余额");
         await this.queryAssets();
         await this.checkin();
+        await this.autoWithdraw();
         await this.queryBalance("签到后现金余额");
         await this.queryCalendar("签到后");
     }
