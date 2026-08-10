@@ -220,6 +220,18 @@ INTEGRAL_LIMIT_MESSAGE = "今天的浏览短视频获得芳华币领取已达到
 INTEGRAL_RESULT_SUCCESS = "success"
 INTEGRAL_RESULT_LIMIT = "limit"
 INTEGRAL_RESULT_FAILED = "failed"
+
+# —— 多 integralType 反复领取（参考 fhb_每日2000币 的成熟机制）——
+# 短视频领币必须带 videoId（type=2）；其他类型(1)用于通用/直播兜底重试。
+INTEGRAL_RETRY_TYPES = (2, 1)   # 优先 type=2（带 videoId 的短视频领币），失败/已领则换 type=1 兜底
+INTEGRAL_RETRY_MAX = 3         # 单个视频最多尝试的 integralType 数量
+INTEGRAL_BUSY_KEYWORDS = ("访问过于频繁", "操作频繁", "请求过快", "busy", "网络繁忙", "稍后重试")
+INTEGRAL_BUSY_BACKOFF = 10      # 命中“繁忙”后额外退避(秒)，配合 MIN_CLAIM_INTERVAL
+INTEGRAL_RETRY_GAP = 3          # 多 type 间切换重试的间隔(秒)
+INTEGRAL_ALREADY_KEYWORDS = ("已经领取", "已领取", "今日已领", "重复领取", "领取过")
+# 每日目标：达到该芳华币增量即停止观看（None 表示不限制，仅靠上限/时长停止）
+DAILY_TARGET_INTEGRAL = 2000    # 与 fhb 对齐：每日目标 2000 芳华币
+
 AUTH_EXPIRED_KEYWORDS = ("AppToken退出", "请重新登录")
 SESSION_AUTH_REFRESH_ATTR = "fhb_refresh_auth"
 SESSION_AUTH_FAILED_ATTR = "fhb_auth_failed"
@@ -691,27 +703,52 @@ def report_video_event(session, video_id, event, random_instance):
         return False
 
 def add_integral(session, phone, video_id, random_instance):
-    try:
-        response = request_with_retry(
-            session, "POST", f"{BASE_URL}/app/integral/addIntegral", random_instance,
-            json={"videoId": str(video_id), "type": INTEGRAL_TYPE}
-        )
-        if response and response.status_code == 200:
+    """多 integralType 反复领取（参考 fhb_每日2000币）。
+
+    短视频领币必须带 videoId（type=2）；若 type=2 返回已领取/繁忙，则依次
+    尝试 INTEGRAL_RETRY_TYPES 中的其他类型(兜底)。命中“繁忙”关键字则额外退避。
+    返回 INTEGRAL_RESULT_SUCCESS / INTEGRAL_RESULT_LIMIT / INTEGRAL_RESULT_FAILED。
+    """
+    tried = 0
+    for integral_type in INTEGRAL_RETRY_TYPES:
+        tried += 1
+        if tried > INTEGRAL_RETRY_MAX:
+            break
+        try:
+            payload = {"videoId": str(video_id), "type": integral_type} if video_id else {"type": integral_type}
+            response = request_with_retry(
+                session, "POST", f"{BASE_URL}/app/integral/addIntegral", random_instance,
+                json=payload
+            )
+            if not (response and response.status_code == 200):
+                return INTEGRAL_RESULT_FAILED
             result = response.json()
+            message = str(result.get("msg") or "未知错误")
             if result.get("code") == 200:
                 with print_lock:
-                    print(f"   ├─ 💰 账号 {phone} {result.get('msg', '领取成功')}")
+                    print(f"   ├─ 💰 账号 {phone} 领取成功(type={integral_type}): {message}")
                 return INTEGRAL_RESULT_SUCCESS
-            message = str(result.get("msg") or "未知错误")
-            with print_lock:
-                print(f"   ├─ ⚠️  账号 {phone} 领取失败: {message}")
+            # 已领取：换下一个 type 兜底重试（fhb 思路）
+            if any(kw in message for kw in INTEGRAL_ALREADY_KEYWORDS):
+                with print_lock:
+                    print(f"   ├─ ℹ️  账号 {phone} type={integral_type} 已领取，尝试其他类型…")
+                time.sleep(INTEGRAL_RETRY_GAP)
+                continue
+            # 繁忙：退避后换 type 兜底
+            if any(kw in message for kw in INTEGRAL_BUSY_KEYWORDS):
+                with print_lock:
+                    print(f"   ├─ ⏳ 账号 {phone} 繁忙({message})，退避{INTEGRAL_BUSY_BACKOFF}s…")
+                time.sleep(INTEGRAL_BUSY_BACKOFF)
+                continue
             if INTEGRAL_LIMIT_MESSAGE in message:
                 return INTEGRAL_RESULT_LIMIT
-        return INTEGRAL_RESULT_FAILED
-    except Exception as e:
-        with print_lock:
-            print(f"   ├─ ❌ 账号 {phone} 领取请求失败: {e}")
-        return INTEGRAL_RESULT_FAILED
+            with print_lock:
+                print(f"   ├─ ⚠️  账号 {phone} 领取失败(type={integral_type}): {message}")
+        except Exception as e:
+            with print_lock:
+                print(f"   ├─ ❌ 账号 {phone} 领取请求失败: {e}")
+            return INTEGRAL_RESULT_FAILED
+    return INTEGRAL_RESULT_FAILED
 
 def get_user_integral(session, random_instance):
     try:
@@ -1367,6 +1404,13 @@ def run_single_account(phone, password, jpush_id, random_instance, all_accounts,
                 last_claim_time = time.time()
                 if integral_result == INTEGRAL_RESULT_SUCCESS:
                     total_integral += 1
+                    # 每日目标达到即停止（参考 fhb_每日2000币）
+                    if DAILY_TARGET_INTEGRAL and total_integral >= DAILY_TARGET_INTEGRAL:
+                        integral_limit_reached = True
+                        with print_lock:
+                            print(f"\n🎯 账号 {phone} 已达每日目标 {DAILY_TARGET_INTEGRAL} 芳华币，停止观看视频")
+                        send_final_report(session, phone, total_videos, total_integral, initial_integral, account_start, "已达每日目标芳华币", random_instance, all_accounts)
+                        break
                 elif integral_result == INTEGRAL_RESULT_LIMIT:
                     integral_limit_reached = True
                     with print_lock:
