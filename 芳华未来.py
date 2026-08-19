@@ -1,5 +1,5 @@
 # name:芳华未来
-# cron:10 1,10 * * *
+# cron:10 2 * * *
 
 import requests
 import time
@@ -9,7 +9,6 @@ import os
 import json
 import threading
 import base64
-import hashlib
 import signal
 import string
 from datetime import datetime, timedelta
@@ -120,12 +119,6 @@ def _new_device_id():
     return "".join(random.choice("0123456789abcdef") for _ in range(32))
 
 
-def derive_jpush_id(phone):
-    """从手机号确定性派生极光推送ID（同账号固定，模拟真实设备注册ID）。"""
-    raw = hashlib.md5(f"fhwl_jpush_{phone}".encode()).hexdigest()
-    return raw[:16] + "0100"
-
-
 def build_secure_request(method, biz_payload):
     """按 apiSecurity 生成加密请求要素：返回 (加密头dict, POST的data字节或None, GET的params或None)。"""
     ts = str(int(time.time() * 1000))
@@ -188,18 +181,7 @@ def secure_request(method, url, biz_payload, base_headers, device_id, timeout=No
 BASE_URL = "https://api.cdwjyyh.com"
 
 # -------------------------- 【多账号登录配置】 --------------------------
-TOKEN_CACHE_FILE = "fhb_tokens.json"
 ENV_VAR_NAME = "fhb"
-LOGIN_TYPE = 1
-LOGIN_SOURCE = "yyb"
-
-# -------------------------- 【邀请码配置】 --------------------------
-# 默认邀请码：新账号先绑定才能建立邀请关系、解锁邀请奖励。
-# 子账号可在环境变量中用「手机号#密码#邀请码」单独覆盖。
-DEFAULT_INVITE_CODE = "4057266249"
-# 绑定邀请人接口（逆向推测路径/字段；不同版本可能不同，失败仅记日志不中断主流程）
-INVITE_BIND_ENDPOINT = "/app/invited/bind"
-INVITE_BIND_FIELD = "inviteCode"   # 部分接口用 inviteCode / code，可按需调整
 
 # -------------------------- 【观看节奏配置（坐实真实抓包，中心值+随机抖动）】 --------------------------
 # 真实链路：每个视频 track PLAY -> PLAY_3S ->(COMPLETE)-> addIntegral 领一次（非“10秒一领”）。
@@ -210,8 +192,6 @@ WATCH_AFTER_3S_SECONDS = 8  # PLAY_3S -> 领币 的等待中心值（抓包最�
 NEXT_VIDEO_DELAY = 3        # 两个视频之间的间隔中心值（秒）
 TIMING_JITTER = 2.0         # 各观看等待的随机抖动幅度（±秒）；设 0 则固定不抖动
 SEND_COMPLETE = True        # 领币前发送 COMPLETE（表示完整看完，抓包约 3/5 会发）
-VIDEO_HEARTBEAT_INTERVAL_BASE = 600   # 刷短视频阶段保活心跳基准间隔(秒)，对齐芳华7月26真实链路
-VIDEO_HEARTBEAT_INTERVAL_JITTER = 120 # 心跳间隔抖动(±秒)
 
 # -------------------------- 【芳华币领取配置】 --------------------------
 INTEGRAL_TYPE = 2
@@ -220,18 +200,6 @@ INTEGRAL_LIMIT_MESSAGE = "今天的浏览短视频获得芳华币领取已达到
 INTEGRAL_RESULT_SUCCESS = "success"
 INTEGRAL_RESULT_LIMIT = "limit"
 INTEGRAL_RESULT_FAILED = "failed"
-
-# —— 多 integralType 反复领取（参考 fhb_每日2000币 的成熟机制）——
-# 短视频领币必须带 videoId（type=2）；其他类型(1)用于通用/直播兜底重试。
-INTEGRAL_RETRY_TYPES = (2, 1)   # 优先 type=2（带 videoId 的短视频领币），失败/已领则换 type=1 兜底
-INTEGRAL_RETRY_MAX = 3         # 单个视频最多尝试的 integralType 数量
-INTEGRAL_BUSY_KEYWORDS = ("访问过于频繁", "操作频繁", "请求过快", "busy", "网络繁忙", "稍后重试")
-INTEGRAL_BUSY_BACKOFF = 10      # 命中“繁忙”后额外退避(秒)，配合 MIN_CLAIM_INTERVAL
-INTEGRAL_RETRY_GAP = 3          # 多 type 间切换重试的间隔(秒)
-INTEGRAL_ALREADY_KEYWORDS = ("已经领取", "已领取", "今日已领", "重复领取", "领取过")
-# 每日目标：达到该芳华币增量即停止观看（None 表示不限制，仅靠上限/时长停止）
-DAILY_TARGET_INTEGRAL = 2000    # 与 fhb 对齐：每日目标 2000 芳华币
-
 AUTH_EXPIRED_KEYWORDS = ("AppToken退出", "请重新登录")
 SESSION_AUTH_REFRESH_ATTR = "fhb_refresh_auth"
 SESSION_AUTH_FAILED_ATTR = "fhb_auth_failed"
@@ -255,14 +223,9 @@ COURSE_RESULT_LIMIT = "limit"       # 达每日上限
 COURSE_RESULT_FAILED = "failed"     # 失败/跳过
 
 # -------------------------- 【请求特征配置】 --------------------------
-REQUEST_CONNECT_TIMEOUT = 5
-REQUEST_READ_TIMEOUT = 12          # 轻接口读超时（原 5，过短导致大面积 Read timed out）
-REQUEST_READ_TIMEOUT_HEAVY = 20    # 重接口(课程/用户余额)读超时，避免 5~7s 就放弃
-MAX_RETRIES = 3                    # 重试次数（原 2，失败后多给一次机会）
-# 全局并发信号量：最多允许 N 个账号同时对外发请求，给单一后端 api.cdwjyyh.com 减压，
-# 避免 8 账号全速并发互相拖垮（雪崩）。None 表示不限制（保持原行为）。
-GLOBAL_MAX_CONCURRENT_REQUESTS = 2
-REQUEST_SEM = threading.Semaphore(GLOBAL_MAX_CONCURRENT_REQUESTS) if GLOBAL_MAX_CONCURRENT_REQUESTS else None
+REQUEST_CONNECT_TIMEOUT = 3
+REQUEST_READ_TIMEOUT = 5
+MAX_RETRIES = 2
 USER_AGENT_POOL = [
        "Mozilla/5.0 (Linux; Android 16; 2509FPN0BC Build/BP2A.250605.031.A3; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/140.0.7339.207 Mobile Safari/537.36 (Immersed/48.0) Html5Plus/1.0",
     "Mozilla/5.0 (Linux; Android 16; 24117RN2BC Build/BP2A.250610.002; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/141.0.7355.116 Mobile Safari/537.36 (Immersed/48.0) Html5Plus/1.0",
@@ -329,22 +292,23 @@ def build_notify_content(results):
 
 
 def send_notify(title, content):
-    """发送运行简报：优先使用仓库统一的 SendNotify 桥接（兼容青龙 notify / 本地降级打印）。"""
+    """使用青龙面板 notify 模块发送通知。"""
     if not content:
         return
     try:
         if "/ql/data/scripts" not in sys.path:
             sys.path.insert(0, "/ql/data/scripts")
-        try:
-            from SendNotify import send as _send
-        except ImportError:
-            from notify import send as _send
-        _send(title, content)
+        from notify import send
+
+        send(title, content)
         with print_lock:
-            print("✅ 运行简报推送成功")
+            print("✅ 青龙简报推送成功")
+    except ImportError:
+        with print_lock:
+            print("ℹ️ 未找到青龙 notify 模块，跳过推送")
     except Exception as e:
         with print_lock:
-            print(f"⚠️ 运行简报推送失败: {e}")
+            print(f"⚠️ 青龙简报推送失败: {e}")
 
 # ============================== 【终极强制退出函数（核心修复）】 ==============================
 def force_exit(signum, frame):
@@ -355,25 +319,29 @@ def force_exit(signum, frame):
     global global_exit_flag
     
     with print_lock:
-        print("\n\n🛑 收到停止信号，正在优雅终止所有线程...")
+        print("\n\n🛑 收到停止信号，正在强制终止所有线程...")
     
-    # 设置全局退出标志：让各子线程在下一个安全点自行收尾（线程为 daemon，主线程 join 等待）
+    # 设置全局退出标志
     global_exit_flag = True
+    
+    # 等待10秒让所有线程完成数据收集
+    time.sleep(10)
+    
+    with data_lock:
+        results = list(all_accounts_data)
 
-    # 线程均为 daemon，主线程会在 run_all_accounts 末尾的 thread.join() 处等待它们自然退出，
-    # 这里不再暴力自毁，避免任务被 Killed 导致数据/简报丢失。仅做兜底：若 30 秒仍未退出再强杀。
-    def _watchdog():
-        time.sleep(30)
-        with print_lock:
-            print("⚠️ 30秒后仍有线程未退出，执行兜底强杀")
-        os.kill(os.getpid(), signal.SIGKILL)
+    with print_lock:
+        print("📤 正在推送青龙运行简报...")
 
-    threading.Thread(target=_watchdog, daemon=True).start()
-
-    # 阻止 force_exit 返回（从而阻止主线程在信号处理器里返回后继续往下走），
-    # 让主流程 run_all_accounts 通过 join 等待线程结束并自然推送简报。
-    while global_exit_flag:
-        time.sleep(1)
+    send_notify("芳华未来运行简报（已停止）", build_notify_content(results))
+    
+    # 等待3秒让推送完全完成
+    time.sleep(3)
+    
+    # 终极杀招：暴力自毁
+    with print_lock:
+        print("💥 执行进程自毁，确保无任何残留")
+    os.kill(os.getpid(), signal.SIGKILL)
 
 # 注册所有退出信号
 signal.signal(signal.SIGTERM, force_exit)  # 青龙面板停止信号
@@ -545,6 +513,38 @@ def refresh_session_auth(session, phone, password, jpush_id, random_instance):
     return True
 
 
+def get_token_identity(token, device_id, random_instance):
+    """验证环境变量中的 Token，并返回 (user_id, phone)。"""
+    try:
+        headers = {
+            "User-Agent": random_instance.choice(USER_AGENT_POOL),
+            "AppToken": token,
+            "Accept-Encoding": "gzip, deflate",
+            "Connection": "keep-alive",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"
+        }
+        response = secure_request(
+            "GET", f"{BASE_URL}/app/user/getUserInfo", {}, headers, device_id, timeout=10
+        )
+        if response.status_code != 200:
+            return None, None
+        result = response.json()
+        if result.get("code") != 200:
+            return None, None
+        user = result.get("user") or result.get("data") or {}
+        return user.get("userId"), user.get("phone") or user.get("mobile")
+    except Exception:
+        return None, None
+
+
+def token_expired(session, account_label):
+    """Token 模式无法自动续期；标记账号停止并提示重新配置。"""
+    setattr(session, SESSION_AUTH_FAILED_ATTR, True)
+    with print_lock:
+        print(f"\n❌ {account_label} 的 Token 已失效，请更新环境变量 {ENV_VAR_NAME}")
+    return False
+
+
 def is_auth_expired_response(response):
     """判断HTTP成功响应是否表示AppToken已退出。"""
     if response is None or response.status_code != 200:
@@ -559,17 +559,13 @@ def is_auth_expired_response(response):
     return any(keyword in message for keyword in AUTH_EXPIRED_KEYWORDS)
 
 # ============================== 【基础请求与接口模块（独立随机）】 ==============================
-def request_with_retry(session, method, url, random_instance, heavy=False, **kwargs):
-    """带随机超时和重试的请求函数（独立随机，自动 apiSecurity 加密+响应解密）。
-    heavy=True 时使用更宽松的读超时（课程/用户余额等重接口）。"""
+def request_with_retry(session, method, url, random_instance, **kwargs):
+    """带随机超时和重试的请求函数（独立随机，自动 apiSecurity 加密+响应解密）"""
     # 提取业务明文：json(POST) 或 params(GET)，统一交给加密层
     biz_json = kwargs.pop("json", None)
     biz_params = kwargs.pop("params", None)
     biz_payload = biz_json if biz_json is not None else (biz_params if biz_params is not None else {})
     caller_headers = dict(kwargs.pop("headers", {}) or {})
-
-    read_base = REQUEST_READ_TIMEOUT_HEAVY if heavy else REQUEST_READ_TIMEOUT
-    read_span = 4 if heavy else 2
 
     for attempt in range(MAX_RETRIES):
         if global_exit_flag:
@@ -591,16 +587,9 @@ def request_with_retry(session, method, url, random_instance, heavy=False, **kwa
 
                 timeout = (
                     REQUEST_CONNECT_TIMEOUT,
-                    random_instance.uniform(read_base, read_base + read_span)
+                    random_instance.uniform(REQUEST_READ_TIMEOUT, REQUEST_READ_TIMEOUT + 2)
                 )
-                # 全局并发信号量：限制同时对外发请求的账号数，给单一后端减压
-                if REQUEST_SEM is not None:
-                    REQUEST_SEM.acquire()
-                try:
-                    response = session.request(method, url, timeout=timeout, **send_kwargs)
-                finally:
-                    if REQUEST_SEM is not None:
-                        REQUEST_SEM.release()
+                response = session.request(method, url, timeout=timeout, **send_kwargs)
 
                 decrypt_secure_response(response)  # 信封响应原地解密为明文
 
@@ -640,39 +629,6 @@ def daily_sign(session, random_instance):
             print(f"❌ 签到请求失败: {e}")
         return False
 
-def create_log(session, user_id, random_instance):
-    """日志上报(POST /app/common/createLogs)，对齐芳华真实链路初始化动作。"""
-    try:
-        response = request_with_retry(
-            session, "POST", f"{BASE_URL}/app/common/createLogs", random_instance,
-            json={"userId": str(user_id)}
-        )
-        if response and response.status_code == 200:
-            with print_lock:
-                print("✅ 日志上报(createLogs)成功")
-            return True
-        return False
-    except Exception as e:
-        with print_lock:
-            print(f"⚠️  日志上报(createLogs)失败: {e}")
-        return False
-
-def get_app_page_config(session, random_instance):
-    """获取页面配置(GET /app/common/getAppPageConfig)，对齐芳华真实链路初始化动作。"""
-    try:
-        response = request_with_retry(
-            session, "GET", f"{BASE_URL}/app/common/getAppPageConfig", random_instance
-        )
-        if response and response.status_code == 200:
-            with print_lock:
-                print("✅ 页面配置(getAppPageConfig)获取成功")
-            return True
-        return False
-    except Exception as e:
-        with print_lock:
-            print(f"⚠️  页面配置(getAppPageConfig)获取失败: {e}")
-        return False
-
 def get_video_list(session, random_instance, page_num=1, page_size=10):
     try:
         params = {"isRandom": 1, "pageSize": page_size, "keyword": "", "pageNum": page_num}
@@ -703,56 +659,31 @@ def report_video_event(session, video_id, event, random_instance):
         return False
 
 def add_integral(session, phone, video_id, random_instance):
-    """多 integralType 反复领取（参考 fhb_每日2000币）。
-
-    短视频领币必须带 videoId（type=2）；若 type=2 返回已领取/繁忙，则依次
-    尝试 INTEGRAL_RETRY_TYPES 中的其他类型(兜底)。命中“繁忙”关键字则额外退避。
-    返回 INTEGRAL_RESULT_SUCCESS / INTEGRAL_RESULT_LIMIT / INTEGRAL_RESULT_FAILED。
-    """
-    tried = 0
-    for integral_type in INTEGRAL_RETRY_TYPES:
-        tried += 1
-        if tried > INTEGRAL_RETRY_MAX:
-            break
-        try:
-            payload = {"videoId": str(video_id), "type": integral_type} if video_id else {"type": integral_type}
-            response = request_with_retry(
-                session, "POST", f"{BASE_URL}/app/integral/addIntegral", random_instance,
-                json=payload
-            )
-            if not (response and response.status_code == 200):
-                return INTEGRAL_RESULT_FAILED
+    try:
+        response = request_with_retry(
+            session, "POST", f"{BASE_URL}/app/integral/addIntegral", random_instance,
+            json={"videoId": str(video_id), "type": INTEGRAL_TYPE}
+        )
+        if response and response.status_code == 200:
             result = response.json()
-            message = str(result.get("msg") or "未知错误")
             if result.get("code") == 200:
                 with print_lock:
-                    print(f"   ├─ 💰 账号 {phone} 领取成功(type={integral_type}): {message}")
+                    print(f"   ├─ 💰 账号 {phone} {result.get('msg', '领取成功')}")
                 return INTEGRAL_RESULT_SUCCESS
-            # 已领取：换下一个 type 兜底重试（fhb 思路）
-            if any(kw in message for kw in INTEGRAL_ALREADY_KEYWORDS):
-                with print_lock:
-                    print(f"   ├─ ℹ️  账号 {phone} type={integral_type} 已领取，尝试其他类型…")
-                time.sleep(INTEGRAL_RETRY_GAP)
-                continue
-            # 繁忙：退避后换 type 兜底
-            if any(kw in message for kw in INTEGRAL_BUSY_KEYWORDS):
-                with print_lock:
-                    print(f"   ├─ ⏳ 账号 {phone} 繁忙({message})，退避{INTEGRAL_BUSY_BACKOFF}s…")
-                time.sleep(INTEGRAL_BUSY_BACKOFF)
-                continue
+            message = str(result.get("msg") or "未知错误")
+            with print_lock:
+                print(f"   ├─ ⚠️  账号 {phone} 领取失败: {message}")
             if INTEGRAL_LIMIT_MESSAGE in message:
                 return INTEGRAL_RESULT_LIMIT
-            with print_lock:
-                print(f"   ├─ ⚠️  账号 {phone} 领取失败(type={integral_type}): {message}")
-        except Exception as e:
-            with print_lock:
-                print(f"   ├─ ❌ 账号 {phone} 领取请求失败: {e}")
-            return INTEGRAL_RESULT_FAILED
-    return INTEGRAL_RESULT_FAILED
+        return INTEGRAL_RESULT_FAILED
+    except Exception as e:
+        with print_lock:
+            print(f"   ├─ ❌ 账号 {phone} 领取请求失败: {e}")
+        return INTEGRAL_RESULT_FAILED
 
 def get_user_integral(session, random_instance):
     try:
-        response = request_with_retry(session, "GET", f"{BASE_URL}/app/user/getUserInfo", random_instance, heavy=True)
+        response = request_with_retry(session, "GET", f"{BASE_URL}/app/user/getUserInfo", random_instance)
         if response and response.status_code == 200:
             result = response.json()
             if result.get("code") == 200:
@@ -792,10 +723,6 @@ def send_final_report(session, phone, total_videos, total_integral, initial_inte
         else get_user_integral(session, random_instance)
     )
     course_claimed = getattr(session, "course_claimed", 0)  # 课程学习领分小节数
-    interact = getattr(session, "interact", {}) or {}
-    like_n = interact.get("like", 0)
-    fav_n = interact.get("fav", 0)
-    follow_n = interact.get("follow", 0)
     run_time = round((time.time() - start_time) / 3600, 2)
     actual_gain = (
         current_integral - initial_integral
@@ -808,7 +735,6 @@ def send_final_report(session, phone, total_videos, total_integral, initial_inte
 👤 账号: {phone}
 ⏰ 运行时长: {run_time} 小时
 📚 课程领分: {course_claimed} 小节 (+{course_claimed * COURSE_INTEGRAL_PER_SECTION} 芳华币)
-🤝 互动: 点赞{like_n} 收藏{fav_n} 关注{follow_n}
 🎬 完成视频: {total_videos} 个
 💰 领币次数: {total_integral} 次
 💵 初始余额: {initial_integral if initial_integral is not None else '查询失败'} 芳华币
@@ -831,7 +757,6 @@ def send_final_report(session, phone, total_videos, total_integral, initial_inte
             "total_videos": total_videos,
             "total_integral": total_integral,
             "course_claimed": course_claimed,
-            "interact": interact,
             "initial_integral": initial_integral,
             "current_integral": current_integral,
             "actual_gain": actual_gain,
@@ -843,7 +768,7 @@ def get_course_list(session, random_instance, page_num=1, cate_id=""):
     """拉取课程列表：返回 (课程数组, 总数)；isIntegral==1 的课程可领分。"""
     try:
         response = request_with_retry(
-            session, "GET", f"{BASE_URL}/app/course/getCourseList", random_instance, heavy=True,
+            session, "GET", f"{BASE_URL}/app/course/getCourseList", random_instance,
             params={"cateId": cate_id, "pageSize": COURSE_LIST_PAGE_SIZE, "pageNum": page_num}
         )
         if response and response.status_code == 200:
@@ -862,7 +787,7 @@ def get_course_video_list(session, course_id, random_instance):
     """拉取某课程下的视频小节数组（含 videoId、seconds 时长）。"""
     try:
         response = request_with_retry(
-            session, "GET", f"{BASE_URL}/app/course/getCourseVideoList", random_instance, heavy=True,
+            session, "GET", f"{BASE_URL}/app/course/getCourseVideoList", random_instance,
             params={"pageSize": 50, "courseId": str(course_id), "pageNum": 1}
         )
         if response and response.status_code == 200:
@@ -876,139 +801,11 @@ def get_course_video_list(session, course_id, random_instance):
         return []
 
 
-# ============================== 【互动任务：邀请奖励 + 点赞/收藏/关注达人】 ==============================
-def bind_invite_code(session, random_instance, phone, code):
-    """绑定邀请码(默认 POST /app/invited/bind)，建立邀请关系以解锁邀请奖励。
-    失败仅记日志，不中断主流程（接口路径/字段为逆向推测，异常即跳过）。"""
-    if not code:
-        return False
-    try:
-        response = request_with_retry(
-            session, "POST", f"{BASE_URL}{INVITE_BIND_ENDPOINT}", random_instance, heavy=True,
-            json={INVITE_BIND_FIELD: code}
-        )
-        if response and response.status_code == 200:
-            result = response.json()
-            if result.get("code") == 200:
-                with print_lock:
-                    print(f"✅ 账号 {phone} 邀请码[{code}]绑定成功")
-                return True
-            with print_lock:
-                print(f"⚠️  账号 {phone} 邀请码绑定: {result.get('msg', '已绑定或无需绑定')}")
-        else:
-            with print_lock:
-                print(f"⚠️  账号 {phone} 邀请码绑定接口无响应(已跳过)")
-        return False
-    except Exception as e:
-        with print_lock:
-            print(f"❌ 账号 {phone} 邀请码绑定失败: {e}")
-        return False
-
-
-def get_invited_reward(session, random_instance, phone):
-    """领取邀请有礼奖励(POST /app/invited/getReward)。失败仅记日志，不中断主流程。"""
-    try:
-        response = request_with_retry(
-            session, "POST", f"{BASE_URL}/app/invited/getReward", random_instance, heavy=True, json={}
-        )
-        if response and response.status_code == 200:
-            result = response.json()
-            if result.get("code") == 200:
-                with print_lock:
-                    print(f"✅ 账号 {phone} 邀请奖励领取成功")
-                return True
-            with print_lock:
-                print(f"⚠️  账号 {phone} 邀请奖励: {result.get('msg', '暂无可领奖励')}")
-        return False
-    except Exception as e:
-        with print_lock:
-            print(f"❌ 账号 {phone} 邀请奖励领取失败: {e}")
-        return False
-
-
-def check_favorite(session, random_instance, course_id):
-    try:
-        response = request_with_retry(
-            session, "GET", f"{BASE_URL}/app/course/checkFavorite", random_instance,
-            params={"courseId": str(course_id)}
-        )
-        if response and response.status_code == 200:
-            result = response.json()
-            if result.get("code") == 200:
-                return result.get("isFavorite") == 1
-        return False
-    except Exception:
-        return False
-
-
-def favorite_course(session, random_instance, course_id):
-    try:
-        response = request_with_retry(
-            session, "POST", f"{BASE_URL}/app/course/favorite", random_instance,
-            json={"courseId": str(course_id)}
-        )
-        return bool(response and response.status_code == 200 and response.json().get("code") == 200)
-    except Exception:
-        return False
-
-
-def check_like(session, random_instance, course_id):
-    try:
-        response = request_with_retry(
-            session, "GET", f"{BASE_URL}/app/course/checkLike", random_instance,
-            params={"courseId": str(course_id)}
-        )
-        if response and response.status_code == 200:
-            result = response.json()
-            if result.get("code") == 200:
-                return result.get("isLike") == 1
-        return False
-    except Exception:
-        return False
-
-
-def like_course(session, random_instance, course_id):
-    try:
-        response = request_with_retry(
-            session, "POST", f"{BASE_URL}/app/course/like", random_instance,
-            json={"courseId": str(course_id)}
-        )
-        return bool(response and response.status_code == 200 and response.json().get("code") == 200)
-    except Exception:
-        return False
-
-
-def check_follow(session, random_instance, talent_id):
-    try:
-        response = request_with_retry(
-            session, "GET", f"{BASE_URL}/app/talent/checkFollow", random_instance,
-            params={"talentId": str(talent_id)}
-        )
-        if response and response.status_code == 200:
-            result = response.json()
-            if result.get("code") == 200:
-                return result.get("isFollow") == 1
-        return False
-    except Exception:
-        return False
-
-
-def follow_talent(session, random_instance, talent_id):
-    try:
-        response = request_with_retry(
-            session, "POST", f"{BASE_URL}/app/talent/follow", random_instance,
-            json={"talentId": str(talent_id)}
-        )
-        return bool(response and response.status_code == 200 and response.json().get("code") == 200)
-    except Exception:
-        return False
-
-
 def get_course_price(session, course_id, random_instance):
     """读取课程芳华币兑换价：返回 integral（None 视为 0/免费，用于 <100 过滤）。"""
     try:
         response = request_with_retry(
-            session, "GET", f"{BASE_URL}/app/course/getCourseById?courseId={course_id}", random_instance, heavy=True,
+            session, "GET", f"{BASE_URL}/app/course/getCourseById?courseId={course_id}", random_instance,
             params={}
         )
         if response and response.status_code == 200:
@@ -1024,7 +821,7 @@ def buy_course_video(session, course_id, video_id, random_instance):
     """用芳华币兑换(购买)单个课程视频以解锁。返回 (是否成功, 消息)。"""
     try:
         response = request_with_retry(
-            session, "POST", f"{BASE_URL}/app/courseOrder/createIntegralOrder", random_instance, heavy=True,
+            session, "POST", f"{BASE_URL}/app/courseOrder/createIntegralOrder", random_instance,
             json={"videoId": int(video_id), "courseId": str(course_id)}
         )
         if response is None:
@@ -1041,7 +838,7 @@ def add_study_course(session, course_id, video_id, duration, random_instance):
     """上报学习进度/注册学习会话（getIntegral 领分前置，缺失会报"您还未看课"）。"""
     try:
         response = request_with_retry(
-            session, "POST", f"{BASE_URL}/app/course/addStudyCourse", random_instance, heavy=True,
+            session, "POST", f"{BASE_URL}/app/course/addStudyCourse", random_instance,
             json={"duration": int(duration), "videoId": int(video_id), "courseId": int(course_id)}
         )
         return bool(response and response.status_code == 200 and response.json().get("code") == 200)
@@ -1064,7 +861,7 @@ def claim_course_integral(session, video_id, duration, random_instance):
     """领取某视频小节的课程积分(+50)。返回 (结果码, 消息)。"""
     try:
         response = request_with_retry(
-            session, "POST", f"{BASE_URL}/app/course/getIntegral", random_instance, heavy=True,
+            session, "POST", f"{BASE_URL}/app/course/getIntegral", random_instance,
             json={"duration": int(duration), "videoId": int(video_id)}
         )
         if response is None:
@@ -1228,17 +1025,18 @@ def study_courses(session, phone, account_start, random_instance):
 
 
 # ============================== 【单账号独立运行逻辑】 ==============================
-def run_single_account(phone, password, jpush_id, random_instance, all_accounts, invite_code=DEFAULT_INVITE_CODE):
-    """单个账号：登录 -> 签到 -> 刷视频（每视频 PLAY/PLAY_3S/COMPLETE + 领币一次）"""
+def run_single_account(account_label, token, device_id, random_instance, all_accounts):
+    """单个账号：验证 Token -> 签到 -> 执行业务任务。"""
+    user_id, phone = get_token_identity(token, device_id, random_instance)
+    phone = mask_phone(phone) if phone else account_label
     with print_lock:
         print(f"\n{'='*60}")
         print(f"🚀 账号 {phone} 已启动")
         print(f"{'='*60}\n")
 
-    token, user_id, used_jpush_id, device_id = get_valid_credentials(phone, password, jpush_id, random_instance)
-    if not token or not user_id:
+    if not user_id:
         with print_lock:
-            print(f"❌ 账号 {phone} 获取身份凭证失败，跳过")
+            print(f"❌ {account_label} 的 Token 无效或已过期，跳过")
         return
 
     session = requests.Session()
@@ -1260,7 +1058,7 @@ def run_single_account(phone, password, jpush_id, random_instance, all_accounts,
     setattr(
         session,
         SESSION_AUTH_REFRESH_ATTR,
-        lambda: refresh_session_auth(session, phone, password, used_jpush_id, random_instance)
+        lambda: token_expired(session, account_label)
     )
 
     account_start = time.time()
@@ -1268,8 +1066,6 @@ def run_single_account(phone, password, jpush_id, random_instance, all_accounts,
     total_integral = 0
     last_claim_time = 0.0  # 上次领币时间，用于控制最短领币间隔
     integral_limit_reached = False
-    last_hb_time = time.time()  # 上次保活心跳时间，用于短视频阶段对齐芳华7月26
-    hb_gap = VIDEO_HEARTBEAT_INTERVAL_BASE + random_instance.uniform(-VIDEO_HEARTBEAT_INTERVAL_JITTER, VIDEO_HEARTBEAT_INTERVAL_JITTER)
 
     with print_lock:
         print(f"🔍 账号 {phone} 正在查询初始芳华币余额...")
@@ -1281,49 +1077,9 @@ def run_single_account(phone, password, jpush_id, random_instance, all_accounts,
         with print_lock:
             print(f"⚠️  账号 {phone} 初始芳华币查询失败\n")
 
-    # 初始化上报：日志上报 + 页面配置（对齐芳华7月26真实链路，签到前的初始化动作）
-    interruptible_sleep(random_instance.uniform(1, 3))
-    create_log(session, user_id, random_instance)
-    get_app_page_config(session, random_instance)
-
     # 每日签到（保留，接口沿用现有）
     interruptible_sleep(random_instance.uniform(1, 3))
     daily_sign(session, random_instance)
-
-    # ========== 阶段一补：邀请奖励 + 课程/达人互动（点赞/收藏/关注，额外芳华币）==========
-    if not getattr(session, SESSION_AUTH_FAILED_ATTR, False):
-        with print_lock:
-            print(f"📋 账号 {phone} 开始互动任务(邀请码绑定/邀请奖励/点赞/收藏/关注达人)...")
-        # 先绑定邀请码建立邀请关系，再领邀请奖励（绑定失败不中断）
-        bind_invite_code(session, random_instance, phone, invite_code)
-        get_invited_reward(session, random_instance, phone)
-
-        courses, _ = get_course_list(session, random_instance, page_num=1)
-        like_n = fav_n = follow_n = 0
-        for course in courses[:8]:
-            if global_exit_flag or getattr(session, SESSION_AUTH_FAILED_ATTR, False):
-                break
-            course_id = course.get("courseId")
-            if not course_id:
-                continue
-            if not check_favorite(session, random_instance, course_id):
-                if favorite_course(session, random_instance, course_id):
-                    fav_n += 1
-            if not check_like(session, random_instance, course_id):
-                if like_course(session, random_instance, course_id):
-                    like_n += 1
-            # 关注该课程视频的发布达人（每个课程只关注一个，避免关注过猛触发风控）
-            for v in get_course_video_list(session, course_id, random_instance)[:1]:
-                talent_id = v.get("talentId")
-                if talent_id and not check_follow(session, random_instance, talent_id):
-                    if follow_talent(session, random_instance, talent_id):
-                        follow_n += 1
-                        break
-            interruptible_sleep(random_instance.uniform(1, 3))
-        if like_n or fav_n or follow_n:
-            with print_lock:
-                print(f"📊 账号 {phone} 互动完成: 点赞{like_n} 收藏{fav_n} 关注{follow_n}")
-        session.interact = {"like": like_n, "fav": fav_n, "follow": follow_n}
 
     # ========== 阶段一：课程学习刷分（课程优先，每小节 +50 芳华币）==========
     if (
@@ -1375,11 +1131,8 @@ def run_single_account(phone, password, jpush_id, random_instance, all_accounts,
                 ):
                     break
 
-                video_id = video.get("id")
-                if not video_id:
-                    continue
-                title = video.get("title") or ""
-                video_title = title[:18] + "..." if len(title) > 18 else title
+                video_id = video["id"]
+                video_title = video["title"][:18] + "..." if len(video["title"]) > 18 else video["title"]
                 with print_lock:
                     print(f"📺 账号 {phone} 正在观看: {video_title}")
 
@@ -1404,13 +1157,6 @@ def run_single_account(phone, password, jpush_id, random_instance, all_accounts,
                 last_claim_time = time.time()
                 if integral_result == INTEGRAL_RESULT_SUCCESS:
                     total_integral += 1
-                    # 每日目标达到即停止（参考 fhb_每日2000币）
-                    if DAILY_TARGET_INTEGRAL and total_integral >= DAILY_TARGET_INTEGRAL:
-                        integral_limit_reached = True
-                        with print_lock:
-                            print(f"\n🎯 账号 {phone} 已达每日目标 {DAILY_TARGET_INTEGRAL} 芳华币，停止观看视频")
-                        send_final_report(session, phone, total_videos, total_integral, initial_integral, account_start, "已达每日目标芳华币", random_instance, all_accounts)
-                        break
                 elif integral_result == INTEGRAL_RESULT_LIMIT:
                     integral_limit_reached = True
                     with print_lock:
@@ -1425,12 +1171,6 @@ def run_single_account(phone, password, jpush_id, random_instance, all_accounts,
                     print(f"✅ 账号 {phone} 累计完成: {total_videos} 个视频 | 累计领币: {total_integral} 次\n")
 
                 interruptible_sleep(jittered(NEXT_VIDEO_DELAY, random_instance))
-
-                # 保活心跳：每隔约 600s(±120s) 发一次 portrait/heartbeat，对齐芳华7月26真实链路
-                if time.time() - last_hb_time > hb_gap:
-                    course_heartbeat(session, random_instance)
-                    last_hb_time = time.time()
-                    hb_gap = VIDEO_HEARTBEAT_INTERVAL_BASE + random_instance.uniform(-VIDEO_HEARTBEAT_INTERVAL_JITTER, VIDEO_HEARTBEAT_INTERVAL_JITTER)
 
             if integral_limit_reached:
                 break
@@ -1448,60 +1188,51 @@ def run_single_account(phone, password, jpush_id, random_instance, all_accounts,
 
 # ============================== 【主程序入口（并发调度）】 ==============================
 def main():
-    global all_threads, all_accounts_data
-
-    # 每次运行清空全局汇总，避免同进程内重复运行时数据叠加
-    all_accounts_data.clear()
-
+    global all_threads
+    
     print("="*60)
     print("🚀 多账号并发自动刷芳华币脚本")
     print(f"📌 单账号最大运行时间: {MAX_RUN_HOURS_PER_ACCOUNT} 小时")
     print(f"📌 观看节奏: 每视频约 {PLAY_TO_3S_SECONDS + WATCH_AFTER_3S_SECONDS} 秒 (PLAY→PLAY_3S→COMPLETE→领币一次)")
     print(f"📌 芳华币规则: 每看完一个视频领取一次 (服务端按视频计，金额递减)")
-    print(f"📌 缓存文件: {TOKEN_CACHE_FILE} (自动保存token和jpushId)")
-    print(f"📌 环境变量格式: 手机号#密码 (多账号用 & 或换行分隔)")
+    print("📌 运行方式: 直接使用环境变量中的 Token，不需要手机号和密码")
+    print("📌 环境变量格式: Token1@Token2；可选格式 Token#deviceId")
     print("="*60 + "\n")
     
     env_str = os.environ.get(ENV_VAR_NAME, "")
     if not env_str:
         print(f"❌ 未找到环境变量 {ENV_VAR_NAME}")
-        print(f"💡 配置格式: export {ENV_VAR_NAME}='手机号1#密码1&手机号2#密码2'")
+        print(f"💡 配置格式: export {ENV_VAR_NAME}='Token1@Token2'")
         sys.exit(1)
     
     accounts = []
-    for item in env_str.replace("&", "\n").split("\n"):
-        item = item.strip()
-        if not item:
-            continue
-        parts = item.split("#")
-        if len(parts) < 2:
-            print(f"⚠️  跳过无效账号配置: {item} (格式应为 手机号#密码)")
-            continue
-        phone, pwd = parts[0], parts[1]
-        # 子账号可用「手机号#密码#邀请码」单独覆盖默认邀请码
-        invite = parts[2].strip() if len(parts) > 2 else DEFAULT_INVITE_CODE
-        accounts.append((phone.strip(), pwd.strip(), invite))
+    for index, item in enumerate(env_str.split("@"), 1):
+        parts = [part.strip() for part in item.strip().split("#", 1)]
+        token = parts[0] if parts else ""
+        device_id = parts[1] if len(parts) == 2 else _new_device_id()
+        if token:
+            accounts.append((f"账号 {index}", token, device_id))
     
     if not accounts:
         print("❌ 没有解析到有效的账号")
-        print("💡 配置格式: 手机号#密码 (多账号用 & 或换行分隔；可选 手机号#密码#邀请码)")
+        print(f"💡 请按 Token1@Token2 的格式配置环境变量 {ENV_VAR_NAME}")
         sys.exit(1)
     
     print(f"✅ 共解析到 {len(accounts)} 个账号，即将并发运行\n")
     
     all_threads = []
-    for idx, (phone, pwd, invite) in enumerate(accounts, 1):
+    for idx, (account_label, token, device_id) in enumerate(accounts, 1):
         random_seed = int(time.time() * 1000000) + idx * 12345
         thread_random = random.Random(random_seed)
         
         start_delay = thread_random.uniform(START_DELAY_MIN, START_DELAY_MAX)
-        print(f"🔄 账号 {phone} 将在 {start_delay:.1f} 秒后启动")
+        print(f"🔄 {account_label} 将在 {start_delay:.1f} 秒后启动")
         
         thread = threading.Thread(
             target=run_single_account,
-            args=(phone, pwd, derive_jpush_id(phone), thread_random, accounts, invite),
+            args=(account_label, token, device_id, thread_random, accounts),
             daemon=True,
-            name=f"Account-{phone}"
+            name=f"Account-{idx}"
         )
         all_threads.append(thread)
         
