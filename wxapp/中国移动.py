@@ -50,7 +50,22 @@ from datetime import datetime
 from typing import Any, Dict, List, Tuple
 from urllib.parse import quote
 
+import ssl
+
 import requests
+import urllib3
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# 优先使用 curl_cffi（浏览器 TLS 指纹，绕过 SSL 反爬），缺失时回退 requests
+try:
+    from curl_cffi import requests as _cffi_requests
+    HAS_CFFI = True
+except Exception:
+    _cffi_requests = None
+    HAS_CFFI = False
+
+DEFAULT_FINGERPRINT = "chrome"
 
 try:
     from Crypto.Cipher import AES
@@ -189,9 +204,32 @@ def log_account_header(index: int, total: int, server: str) -> None:
     print("└" + "─" * 50 + "┘")
 
 
-def direct_session() -> requests.Session:
+def direct_session():
+    """优先返回 curl_cffi Session（带浏览器 TLS 指纹，绕过 SSL 反爬），失败回退 requests"""
+    if HAS_CFFI:
+        try:
+            session = _cffi_requests.Session()
+            session.verify = False
+            return session
+        except Exception:
+            pass
     session = requests.Session()
     session.trust_env = False
+    # 跳过证书校验，规避证书/套件问题
+    session.verify = False
+    try:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        session.mount(
+            "https://",
+            requests.adapters.HTTPAdapter(
+                max_retries=requests.adapters.Retry(total=2, backoff_factor=0.5),
+                ssl_context=ctx,
+            ),
+        )
+    except Exception:
+        pass
     return session
 
 
@@ -330,6 +368,7 @@ def request_with_proxy(
     kwargs.setdefault("timeout", REQUEST_TIMEOUT)
 
     if proxies:
+        kwargs.setdefault("verify", False)
         try:
             return requests.request(method, url, proxies=proxies, **kwargs)
         except Exception as exc:
@@ -339,6 +378,8 @@ def request_with_proxy(
             print("🔁 [兜底] 切换直连重试")
 
     session = direct_session()
+    if HAS_CFFI:
+        kwargs.setdefault("impersonate", DEFAULT_FINGERPRINT)
     return session.request(method, url, **kwargs)
 
 
