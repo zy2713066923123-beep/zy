@@ -491,6 +491,12 @@ async function buildAwscParams(url, session = {}, umidToken = '') {
   if (!fs.existsSync(bridge)) {
     return { ok: false, error: `缺少 ${bridge}（awsc_bridge.cjs），无法生成 bx-ua/mini-janus，请放置 eleme_assets 资源或用 ELEME_LOGIN_RESULT 注入` };
   }
+  // umidtoken 持久化复用：未显式传入时，复用本地缓存的上次 umid（阿里风控中 umid 是设备级、应长期稳定，
+  // 每次重新生成会造成设备指纹漂移，更容易触发 snsBind 绑定风控）
+  if (!umidToken) {
+    const _cache = readTokenCache();
+    if (_cache.awscUmidToken) umidToken = _cache.awscUmidToken;
+  }
   const { execFile } = require('child_process');
   const maxRetries = 3;
   let lastErr = '';
@@ -524,7 +530,18 @@ async function buildAwscParams(url, session = {}, umidToken = '') {
       const result = JSON.parse(fs.readFileSync(outTmp, 'utf8'));
       if (result && typeof result === 'object') {
         // 生成成功
-        if (result.ok) return result;
+        if (result.ok) {
+          // 持久化最新 umidtoken，供后续登录复用（保持设备指纹稳定）
+          const newUmid = result.params && result.params.bxUmidToken;
+          if (newUmid) {
+            const _cache = readTokenCache();
+            if (_cache.awscUmidToken !== newUmid) {
+              _cache.awscUmidToken = newUmid;
+              writeTokenCache(_cache);
+            }
+          }
+          return result;
+        }
         // 部分缺失：优先重试补齐；若失败，返回完整 result（参考 eleme.py：带已生成的头继续尝试）
         const p = result.params || {};
         const miss = [];
@@ -570,7 +587,8 @@ async function havanaCodeLogin(code) {
     needPassWebViewCookie: false,
     authorizationCode: authorizationCode
   };
-  if (autoUmid) requestData.umidToken = autoUmid;
+  // 注意：真实抓包请求体不含 umidToken，umid 通过 bx-umidtoken 请求头传递；
+  // 与真实请求保持一致，不在 body 中附带 umidToken
   const body = formEncode(requestData);
 
   const headers = {
@@ -579,7 +597,12 @@ async function havanaCodeLogin(code) {
     'Accept-Language': 'zh-CN,zh;q=0.9',
     'User-Agent': ELEME_UA,
     'Referer': ELEME_REFERER,
-    'x-tap': 'wx'
+    'x-tap': 'wx',
+    // 补齐真实微信小程序 webview 的请求指纹头，降低被风控判定为“非真实小程序请求”的概率
+    'xweb_xhr': '1',
+    'Sec-Fetch-Site': 'cross-site',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Dest': 'empty'
   };
   for (const [k, v] of Object.entries(awsc.headers || {})) {
     if (v !== undefined && v !== null && v !== '') headers[k] = String(v);
@@ -831,6 +854,12 @@ async function runAccount(cookie, opts) {
  * 第 4 部分：青龙通知
  * ===================================================================== */
 function loadQingLongNotify() {
+  // 1) 优先项目自带 sendNotify（与仓库其它脚本一致，走环境变量推送，不依赖青龙面板 token，最稳定）
+  try {
+    const mod = require('../sendNotify');
+    if (mod && typeof mod.sendNotify === 'function') return mod.sendNotify;
+  } catch (e) {}
+  // 2) 回退青龙部署版 sendNotify（部分环境青龙版会因 access_token 缺失报错，故仅作兜底）
   try {
     const mod = require('/ql/scripts/sendNotify.js');
     if (mod && typeof mod.sendNotify === 'function') return mod.sendNotify;
