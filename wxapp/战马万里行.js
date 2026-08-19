@@ -46,7 +46,11 @@ function brief(data, max = 320) {
 
 function isProtocolAccountId(id) {
   const s = String(id || '').trim();
-  return s.startsWith('wxid_') || s.startsWith('yyb:');
+  // 支持三种账号格式：
+  // 1. 牛子：wxid_ 开头
+  // 2. 应用宝显式前缀：yyb: 开头
+  // 3. 应用宝 openid：o 开头 + 20+ 位字母数字（可含 - _），如 owNAX6...
+  return s.startsWith('wxid_') || s.startsWith('yyb:') || /^o[a-zA-Z0-9_-]{20,}$/.test(s);
 }
 
 function parseAccounts(raw) {
@@ -546,7 +550,7 @@ async function main() {
     await runAccountsConcurrent(accounts, concurrency);
   } else {
     if (!process.env.WHMLX_SKEY && !process.env.WHMLX_AUTH_URL && !process.env.WHMLX_AUTH_QUERY && !process.env.WHMLX_TOKEN) {
-      log('未找到账号。请设置环境变量 ' + ENV_NAME + '，格式：wxid_xxx#备注 或 yyb:openid#备注');
+      log('未找到账号。请设置环境变量 ' + ENV_NAME + '(或 WX_ID)，格式：wxid_xxx#备注 / yyb:openid#备注 / 应用宝openid#备注');
     }
     try {
       await runAccount(null);
