@@ -1,5 +1,5 @@
 /*
- * # 合并版：绿树田园（广告任务 + 签到任务）
+ * 
  *
  * 环境变量：
  *   TREECOIN_AUTH       授权码（优先，格式 authCode 或 authCode#deviceFP，多账号用换行/&/, 分隔）
@@ -14,8 +14,8 @@
  *     - 广告领奖所需的微信 code 取自共享 WX_ID 池中同索引的账号；若某行想单独指定，可加第3字段 authCode#deviceFP#wxid 覆盖
  *
  * 依赖：axios（已在 package.json）；crypto 内置；sendNotify（仓库统一推送）；getCode（统一取码，双协议路由）
- *
- * cron: 30 8 * * *   （广告+签到同跑，每日一次即可）
+ * name: 绿树田园
+ * cron: 30 8,16 * * *   
  */
 
 const crypto = require('crypto');
