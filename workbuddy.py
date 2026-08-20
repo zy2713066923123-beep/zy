@@ -7,8 +7,9 @@
 ============================================================
 
 【快速开始（30 秒上手）】
-    1) 青龙添加环境变量：WORKBUDDY_ACCESS_TOKEN = token1@token2 （多账号用 @ 分隔；
-       也可拆成 WORKBUDDY_ACCESS_TOKEN_1 / _2 ... 多个变量）。Token 即 Bearer Token
+    1) 青龙添加环境变量：可直接添加多条同名 WORKBUDDY_ACCESS_TOKEN（每条一个 Token）；
+       也可单变量多值 WORKBUDDY_ACCESS_TOKEN = token1@token2（@ / & / 换行分隔），
+       或拆成 WORKBUDDY_ACCESS_TOKEN_1 / _2 ... 编号变量。Token 即 Bearer Token
        （以 eyJ 开头的长字符串，有效期约 1 年）
     2) （可选，仅本机运行）保持 WorkBuddy Desktop 运行，脚本会自动发现 desktop info 里的 accessToken
     3) 青龙新建任务：命令 `task python3 workbuddy_checkin_发帖版.py`，
@@ -50,6 +51,8 @@
        获取方法：登录 WorkBuddy Desktop → 找到 workbuddy-desktop.info 文件
        → 复制 auth.accessToken 的值 (以 eyJ 开头的长字符串)
        → 有效期约1年
+       多账号：直接添加多条同名 WORKBUDDY_ACCESS_TOKEN 变量（每条一个 Token），
+       或用 @ / & / 换行 分隔，或用 WORKBUDDY_ACCESS_TOKEN_1 / _2 编号变量
      - PUSHPLUS_TOKEN = <你的 PushPlus token>（可选，用于推送通知）
   3. 删除旧的 WORKBUDDY_KEYCLOAK 环境变量（已弃用）
   4. 定时规则：0 7,9 * * *
@@ -86,11 +89,15 @@
   - 代理失效时自动回退直连
 
 【多账号支持】
-  用 @ 分隔多个 Token：
-  WORKBUDDY_ACCESS_TOKEN = token1@token2@token3
-  或用编号：
-  WORKBUDDY_ACCESS_TOKEN_1 = token1
-  WORKBUDDY_ACCESS_TOKEN_2 = token2
+  方式1（推荐）：青龙面板直接添加多条同名变量，每条填一个 Token：
+      WORKBUDDY_ACCESS_TOKEN = token1
+      WORKBUDDY_ACCESS_TOKEN = token2
+      WORKBUDDY_ACCESS_TOKEN = token3
+  方式2：单变量多值（@ / & / 换行 分隔）：
+      WORKBUDDY_ACCESS_TOKEN = token1@token2@token3
+  方式3：编号变量：
+      WORKBUDDY_ACCESS_TOKEN_1 = token1
+      WORKBUDDY_ACCESS_TOKEN_2 = token2
 ============================================================
 """
 
@@ -2851,10 +2858,21 @@ def get_env(name):
 
 
 def parse_multi_env(prefix):
+    """解析多账号环境变量。
+
+    支持 3 种写法：
+      1. 多个同名变量（青龙面板直接添加多条 WORKBUDDY_ACCESS_TOKEN，
+         青龙会自动以换行符合并，本函数按换行拆分）
+      2. 单变量多值：WORKBUDDY_ACCESS_TOKEN = token1@token2
+         （@ / & / 换行 均可作为分隔符）
+      3. 编号变量：WORKBUDDY_ACCESS_TOKEN_1 / _2 ...
+    """
     items = []
     main = get_env(prefix)
     if main:
-        items.extend([x.strip() for x in main.split("@") if x.strip()])
+        # 注意：不能用 ; 做分隔符，Keycloak/Cookie 值本身含 ;
+        parts = re.split(r"[@&\r\n]+", main)
+        items.extend([x.strip() for x in parts if x.strip()])
     i = 1
     while True:
         val = get_env(prefix + "_" + str(i))
