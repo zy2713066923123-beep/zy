@@ -83,6 +83,9 @@ const AD_ECPM = '';
 const AD_REWARD_MIN = 180;                       // 范围略微放大，让 ecpm 取值更分散
 const AD_REWARD_MAX = 1500;
 const AD_SKIP_PROB = 0.2;                        // 20% 文章不上报广告，模拟真人翻页行为，同时降低单网广告密度
+// HTTP 5xx/网络错误自动重试：服务端偶发 502/503/504 或抖动时，指数退避重试，避免整批账号白跑。
+const HTTP_RETRY_MAX = 2;                        // 最多额外重试 2 次
+const HTTP_RETRY_BASE_MS = 1000;                 // 退避基数 1s，重试间隔 1s/2s
 const AD_FAIL_BACKOFF_MS = 45000;                // 检测到封禁/失败信号后的全局冷却时间
 const BATCH_BREAK_PROB = 0.07;                   // 每篇之后有概率进入短间歇（3~10 秒）
 const BATCH_BREAK_MIN_MS = 3000;
@@ -556,7 +559,7 @@ async function yfxRequest(method, urlPath, data, token) {
 }
 
 function requestJson(url, options) {
-  return new Promise((resolve, reject) => {
+  const doOnce = () => new Promise((resolve, reject) => {
     const u = new URL(url);
     const client = u.protocol === 'http:' ? http : https;
     const body = options.body || '';
@@ -579,17 +582,38 @@ function requestJson(url, options) {
         let data = text;
         try { data = JSON.parse(text); } catch {}
         if (res.statusCode < 200 || res.statusCode >= 300) {
-          reject(new Error(`HTTP ${res.statusCode}: ${stringifyShort(data)}`));
+          const err = new Error(`HTTP ${res.statusCode}: ${stringifyShort(data)}`);
+          err.statusCode = res.statusCode;
+          err.retryable = res.statusCode >= 500 || res.statusCode === 429;
+          reject(err);
           return;
         }
         resolve(data);
       });
     });
-    req.on('timeout', () => req.destroy(new Error('请求超时')));
-    req.on('error', reject);
+    req.on('timeout', () => req.destroy(Object.assign(new Error('请求超时'), { retryable: true })));
+    req.on('error', (e) => { e.retryable = true; reject(e); });
     if (body) req.write(body);
     req.end();
   });
+
+  const maxAttempts = 1 + HTTP_RETRY_MAX;
+  return (async () => {
+    let lastErr;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        return await doOnce();
+      } catch (e) {
+        lastErr = e;
+        const retryable = e && (e.retryable || (e.statusCode && e.statusCode >= 500) || e.code === 'ECONNRESET' || e.code === 'ETIMEDOUT' || e.code === 'ECONNREFUSED');
+        if (!retryable || attempt >= maxAttempts - 1) break;
+        const delay = HTTP_RETRY_BASE_MS * Math.pow(2, attempt);
+        log(`HTTP 请求失败（${e && e.message}），${delay}ms 后重试（第 ${attempt + 1}/${HTTP_RETRY_MAX} 次）`);
+        await sleep(delay);
+      }
+    }
+    throw lastErr;
+  })();
 }
 
 function parseAccounts(raw) {
