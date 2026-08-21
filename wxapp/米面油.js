@@ -60,7 +60,7 @@ const YFX_DEVICE_ID = readEnv('MMY_YFX_DEVICE_ID') || 'ms2skrbk-3ttyclbz0cv-50la
 const APPID = 'wxa6bd2711a95f2e26';
 const USER_AGENT = 'Dart/3.12 (dart:io)';
 const YFX_USER_AGENT = readEnv('MMY_YFX_UA') || 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.75(0x18004b62) NetType/4G Language/zh_CN';
-const INVITE_CODE = readEnv('MMY_INVITE_CODE') || '';
+const INVITE_CODE = readEnv('MMY_INVITE_CODE') || '8B98028196';
 // 核心测试参数写死：避免青龙旧环境变量覆盖，导致次数/等待/奖励不符合本次测试。
 const READ_COUNT = 60;  // 浏览文章数从 100 降到 60，避免连续行为过于规律
 const LIST_PAGES = 50;
