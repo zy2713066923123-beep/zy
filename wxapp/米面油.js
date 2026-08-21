@@ -58,9 +58,20 @@ const YFX_APPID = readEnv('MMY_YFX_APPID') || 'wx82b9bc71fff22c52';
 const YFX_CLIENT_BUILD = readEnv('MMY_YFX_CLIENT_BUILD') || '2026-08-20 14:20:49';
 const YFX_DEVICE_ID = readEnv('MMY_YFX_DEVICE_ID') || 'ms2skrbk-3ttyclbz0cv-50lagacyae7';
 const APPID = 'wxa6bd2711a95f2e26';
-const USER_AGENT = 'Dart/3.12 (dart:io)';
-const YFX_USER_AGENT = readEnv('MMY_YFX_UA') || 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.75(0x18004b62) NetType/4G Language/zh_CN';
+// 旧域名接口 UA：改为真实微信小程序 UA（原 Dart/3.12 一眼就是脚本重放，是最大破绽）。
+const USER_AGENT = 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.49(0x18003123) NetType/4G Language/zh_CN';
+const YFX_USER_AGENT_DEFAULT = 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.75(0x18004b62) NetType/4G Language/zh_CN';
+// UA 池：不同 iOS 版本 + 微信版本组合，按账号确定性选取，避免所有账号同一 UA 被聚类。
+const UA_POOL = [
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.49(0x18003123) NetType/4G Language/zh_CN',
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.47(0x18002f23) NetType/WIFI Language/zh_CN',
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.50(0x18003223) NetType/4G Language/zh_CN',
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.54(0x18003623) NetType/WIFI Language/zh_CN',
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.75(0x18004b62) NetType/4G Language/zh_CN',
+];
 const INVITE_CODE = readEnv('MMY_INVITE_CODE') || '8B98028196';
+// 当前账号的设备指纹（UA/deviceId/clientBuild），在 runAccount 开头按账号确定性生成，同账号多次运行保持一致。
+let currentFp = null;
 // 核心测试参数写死：避免青龙旧环境变量覆盖，导致次数/等待/奖励不符合本次测试。
 const READ_COUNT = 60;  // 浏览文章数从 100 降到 60，避免连续行为过于规律
 const LIST_PAGES = 50;
@@ -90,6 +101,12 @@ const AD_FAIL_BACKOFF_MS = 45000;                // 检测到封禁/失败信号
 const BATCH_BREAK_PROB = 0.07;                   // 每篇之后有概率进入短间歇（3~10 秒）
 const BATCH_BREAK_MIN_MS = 3000;
 const BATCH_BREAK_MAX_MS = 10000;
+const QUICK_EXIT_PROB = 0.12;                    // 12% 概率"秒退"（1~3 秒快速划过），模拟真人走马观花，避免每篇都完整停留
+const SKIP_EARN_PROB = 0.08;                     // 8% 概率不领取内容积分，模拟偶尔忘记/没点领取
+const READ_COUNT_JITTER = 10;                    // 每日阅读量 ±10 波动，避免每天行为量级完全一致
+const PAGE_WAIT_MIN_MS = 800;                    // 翻页基础等待下限
+const PAGE_WAIT_MAX_MS = 4000;                   // 翻页基础等待上限（拉宽，减少规律性）
+const PAGE_WAIT_TAIL_PROB = 0.05;                // 5% 概率翻页额外长尾等待 4~9 秒
 const CACHE_DIR = path.join(process.cwd(), '.cache');
 const CACHE_FILE = path.join(CACHE_DIR, 'mmy_accounts.json');
 const READ_HISTORY_FILE = path.join(CACHE_DIR, 'mmy_read_history.json');
@@ -104,6 +121,13 @@ async function main() {
   }
 
   log(`共找到 ${accounts.length} 个账号`);
+
+  // 预热延迟：定时任务启动瞬间就高频打接口，秒级时间戳过于整齐是明显机器人特征。
+  // 先随机静默 3~15 秒，打散首次请求时间，降低被按"整点/定时"规律识别的风险。
+  const warmupMs = randomInt(3000, 15000);
+  log(`随机预热 ${Math.round(warmupMs / 1000)} 秒后开始`);
+  await sleep(warmupMs);
+
   for (let i = 0; i < accounts.length; i++) {
     const account = accounts[i];
     try {
@@ -136,6 +160,8 @@ async function main() {
 }
 
 async function runAccount(account) {
+  // 为当前账号生成稳定的设备指纹（UA/deviceId/clientBuild），同账号多次运行一致，避免设备漂移触发风控。
+  currentFp = makeFingerprint(account.id);
   if (account.type === 'mmyToken') return runMmyTokenAccount(account);
   if (account.type === 'bearer') return runBearerAccount(account);
 
@@ -165,7 +191,8 @@ async function runAccount(account) {
   }
 
   if (!DIRECT_AD_ONLY && READ_COUNT > 0) {
-    const items = await getContentItems(session, READ_COUNT, account.id);
+    const readCount = makeDailyReadCount();
+    const items = await getContentItems(session, readCount, account.id);
     let adReports = 0;
     let consecutiveBanned = 0;  // 连续上报失败计数；超过阈值自动降频，防止被封禁
     let adBlockedByNetwork = false; // 网络广告上限后，停止本轮其余广告上报
@@ -174,15 +201,23 @@ async function runAccount(account) {
       log(`[${account.remark}] 浏览 ${item.id}${item.title ? ' - ' + item.title : ''}`);
       await getContentDetail(session, item.id);
 
-      // 浏览链路第二步：随机停留时间，模拟真人节奏（带偶发长停顿），而非固定秒数。
-      const staySeconds = makeStaySeconds();
-      if (staySeconds > 0) {
+      // 浏览链路第二步：随机停留时间，模拟真人节奏（带偶发长停顿 + 偶发秒退），而非固定秒数。
+      let staySeconds = makeStaySeconds();
+      if (Math.random() < QUICK_EXIT_PROB) {
+        staySeconds = randomInt(1, 3); // 秒退：快速划过，模拟走马观花
+        log(`[${account.remark}] 秒退停留 ${staySeconds} 秒`);
+      } else {
         log(`[${account.remark}] 停留 ${staySeconds} 秒`);
+      }
+      if (staySeconds > 0) {
         await sleep(staySeconds * 1000);
       }
 
-      // 浏览链路第三步：领取内容阅读积分。抓包里该接口可能返回 0，属正常现象。
-      const contentPoint = await earnContentPoints(session, item.id);
+      // 浏览链路第三步：领取内容阅读积分。偶发跳过，模拟偶尔没点领取，避免每次都领。
+      let contentPoint = 0;
+      if (Math.random() >= SKIP_EARN_PROB) {
+        contentPoint = await earnContentPoints(session, item.id);
+      }
       let adPoint = 0;
 
       // 浏览链路第四步：上报广告展示，HAR 中"阅读停留奖励/看文章奖励"由这里结算。
@@ -210,8 +245,11 @@ async function runAccount(account) {
       markReadHistory(account.id, item.id);
       log(`[${account.remark}] 阅读 ${item.id} 获得 ${point}（内容 ${contentPoint} / 停留 ${adPoint}）`);
 
-      // 模拟真人翻页节奏：基础等待 + 偶发批次间歇（3~10 秒），让上报间隔更分散。
-      await sleep(randomInt(1200, 2500));
+      // 模拟真人翻页节奏：拉宽基础等待 + 偶发长尾 + 偶发批次间歇，让上报间隔更分散。
+      await sleep(randomInt(PAGE_WAIT_MIN_MS, PAGE_WAIT_MAX_MS));
+      if (Math.random() < PAGE_WAIT_TAIL_PROB) {
+        await sleep(randomInt(4000, 9000));
+      }
       if (Math.random() < BATCH_BREAK_PROB) {
         const breakMs = randomInt(BATCH_BREAK_MIN_MS, BATCH_BREAK_MAX_MS);
         log(`[${account.remark}] 模拟真人间歇 ${Math.round(breakMs / 1000)} 秒`);
@@ -242,7 +280,8 @@ async function runMmyTokenAccount(account) {
   }
 
   if (!DIRECT_AD_ONLY && READ_COUNT > 0) {
-    const items = await getContentItems(session, READ_COUNT, account.id);
+    const readCount = makeDailyReadCount();
+    const items = await getContentItems(session, readCount, account.id);
     let adReports = 0;
     let adBlockedByNetwork = false; // 网络广告上限后，停止本轮其余广告上报
     for (const item of items) {
@@ -458,8 +497,8 @@ async function reportBrowseAdShow(session) {
   }
 
   const rewardPlan = makeAdRewardPlan();
-  // show_time 做 ±120 秒抖动，避免每次上报时间戳规律性过强。
-  const showTime = Math.floor(Date.now() / 1000) + randomInt(-120, 120);
+  // show_time 做 -30~0 秒抖动：广告展示时间应略早于上报时刻，避免出现"未来时间"破绽。
+  const showTime = Math.floor(Date.now() / 1000) - randomInt(0, 30);
   const data = await apiRequest('POST', '/api/ad/reportShow', {
     auth: session,
     form: {
@@ -521,8 +560,10 @@ async function apiRequest(method, urlPath, opts = {}) {
   const headers = {
     accept: 'application/json',
     'content-type': 'application/x-www-form-urlencoded',
-    'user-agent': USER_AGENT,
+    'accept-language': 'zh-CN,zh;q=0.9',
+    'user-agent': currentFp ? currentFp.ua : USER_AGENT,
     'x-app-version': '1.0.2',
+    'x-requested-with': 'XMLHttpRequest',
   };
   if (opts.auth) {
     headers.user_id = String(opts.auth.user_id);
@@ -540,13 +581,18 @@ async function apiRequest(method, urlPath, opts = {}) {
 }
 
 async function yfxRequest(method, urlPath, data, token) {
+  const ua = currentFp ? currentFp.ua : (readEnv('MMY_YFX_UA') || YFX_USER_AGENT_DEFAULT);
+  const deviceId = currentFp ? currentFp.deviceId : (readEnv('MMY_YFX_DEVICE_ID') || YFX_DEVICE_ID);
+  const clientBuild = currentFp ? currentFp.clientBuild : (readEnv('MMY_YFX_CLIENT_BUILD') || YFX_CLIENT_BUILD);
   const headers = {
     accept: 'application/json',
     'content-type': 'application/json',
-    'user-agent': YFX_USER_AGENT,
+    'accept-language': 'zh-CN,zh;q=0.9',
+    'user-agent': ua,
+    'x-requested-with': 'XMLHttpRequest',
     'x-promopixis-platform': 'miniprogram',
-    'x-client-build': YFX_CLIENT_BUILD,
-    'x-device-id': YFX_DEVICE_ID,
+    'x-client-build': clientBuild,
+    'x-device-id': deviceId,
     referer: `https://servicewechat.com/${YFX_APPID}/36/page-frame.html`,
     authorization: token.startsWith('Bearer ') ? token : `Bearer ${token}`,
   };
@@ -834,6 +880,61 @@ function randomInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+// 用账号 id 做确定性哈希，保证同一账号每次运行生成同一套指纹（UA/deviceId/clientBuild），
+// 不同账号之间指纹不同，避免所有账号共用同一设备指纹被风控聚类识别。
+function stableHash(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function makeFingerprint(accountId) {
+  const seed = stableHash(String(accountId));
+  // 若用户显式配置了 MMY_YFX_UA / MMY_YFX_DEVICE_ID / MMY_YFX_CLIENT_BUILD，则优先使用（覆盖自动生成）。
+  const envUa = readEnv('MMY_YFX_UA');
+  const envDevice = readEnv('MMY_YFX_DEVICE_ID');
+  const envBuild = readEnv('MMY_YFX_CLIENT_BUILD');
+
+  const ua = envUa || UA_POOL[seed % UA_POOL.length];
+  const deviceId = envDevice || makeDeviceId(seed);
+  const clientBuild = envBuild || makeClientBuild(seed);
+  return { ua, deviceId, clientBuild };
+}
+
+// deviceId 形如 "ms2skrbk-3ttyclbz0cv-50lagacyae7"（三段字母 + 数字段），按 seed 生成不同组合。
+function makeDeviceId(seed) {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz';
+  const pick = (rnd, len) => {
+    let s = '';
+    for (let i = 0; i < len; i++) {
+      rnd = (rnd * 1103515245 + 12345) & 0x7fffffff;
+      s += alphabet[rnd % alphabet.length];
+    }
+    return s;
+  };
+  let r = seed || 1;
+  const seg = (len) => {
+    const out = pick(r, len);
+    r = (r * 1103515245 + 12345) & 0x7fffffff;
+    return out;
+  };
+  return `${seg(8)}-${seg(11)}-${seg(2)}${Math.floor((r % 9) + 1)}${seg(6)}`;
+}
+
+// clientBuild 形如 "2026-08-20 14:20:49"，在合理范围内按 seed 抖动日期和时分秒。
+function makeClientBuild(seed) {
+  const r = seed || 1;
+  const day = (r % 27) + 1;                       // 1~27 日
+  const hour = (r % 24);
+  const minute = Math.floor((r * 7) % 60);
+  const second = Math.floor((r * 13) % 60);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `2026-08-${pad(day)} ${pad(hour)}:${pad(minute)}:${pad(second)}`;
+}
+
 function makeAdRewardPlan() {
   if (AD_ECPM) {
     return { target: '固定', ecpm: String(AD_ECPM) };
@@ -847,6 +948,11 @@ function makeAdRewardPlan() {
   const decimals = Math.random() < 0.4 ? 1 : 2;
   const ecpm = baseEcpm.toFixed(decimals);
   return { target, ecpm };
+}
+
+// 每日阅读量 ±10 波动，避免每天行为量级完全一致被风控识别为定时脚本。
+function makeDailyReadCount() {
+  return Math.max(1, READ_COUNT + randomInt(-READ_COUNT_JITTER, READ_COUNT_JITTER));
 }
 
 // 真人节奏停留时长：大部分 22~55 秒（接近阅读 + 拉到最后），8% 概率走神 60~120 秒。
