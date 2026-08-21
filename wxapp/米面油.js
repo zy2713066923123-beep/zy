@@ -75,14 +75,14 @@ const STAY_SECONDS_MAX = 55;
 const STAY_SECONDS_BIG_PAUSE_PROB = 0.08;        // 8% 概率模拟走神/切换，长停留 60~120 秒
 const STAY_SECONDS_BIG_PAUSE_MIN = 60;
 const STAY_SECONDS_BIG_PAUSE_MAX = 120;
-const AD_REPORT_COUNT = 50;  // 降到 50 次，配合随机跳过和长停留节奏，避免被识别批量作弊
+const AD_REPORT_COUNT = readEnv('MMY_AD_REPORT_COUNT') ? Number(readEnv('MMY_AD_REPORT_COUNT')) : 15;  // 单账号广告上报上限，默认 15 次（原 50），降低单网广告账号密度，规避平台限流；可用 MMY_AD_REPORT_COUNT 覆盖
 const AD_REPORT_TYPE = readEnv('MMY_AD_REPORT_TYPE') || 'feed';
 const AD_PLATFORM_CODE = readEnv('MMY_AD_PLATFORM_CODE') || 'sigmob';
 const AD_SDK_NAME = readEnv('MMY_AD_SDK_NAME') || 'gdt';
 const AD_ECPM = '';
 const AD_REWARD_MIN = 180;                       // 范围略微放大，让 ecpm 取值更分散
 const AD_REWARD_MAX = 1500;
-const AD_SKIP_PROB = 0.12;                       // 12% 文章不上报广告，模拟真人翻页行为
+const AD_SKIP_PROB = 0.2;                        // 20% 文章不上报广告，模拟真人翻页行为，同时降低单网广告密度
 const AD_FAIL_BACKOFF_MS = 45000;                // 检测到封禁/失败信号后的全局冷却时间
 const BATCH_BREAK_PROB = 0.07;                   // 每篇之后有概率进入短间歇（3~10 秒）
 const BATCH_BREAK_MIN_MS = 3000;
@@ -125,7 +125,8 @@ async function main() {
       });
     }
 
-    if (i < accounts.length - 1) await sleep(randomInt(3000, 6000));
+    // 账号间错峰：拉长启动间隔，避免同一出口 IP 下多账号广告请求在短时间窗口内集中，触发平台单网广告账号数上限。
+    if (i < accounts.length - 1) await sleep(randomInt(30000, 60000));
   }
 
   printSummary();
@@ -164,6 +165,7 @@ async function runAccount(account) {
     const items = await getContentItems(session, READ_COUNT, account.id);
     let adReports = 0;
     let consecutiveBanned = 0;  // 连续上报失败计数；超过阈值自动降频，防止被封禁
+    let adBlockedByNetwork = false; // 网络广告上限后，停止本轮其余广告上报
     for (const item of items) {
       // 浏览链路第一步：打开文章详情，让服务端记录文章访问。
       log(`[${account.remark}] 浏览 ${item.id}${item.title ? ' - ' + item.title : ''}`);
@@ -182,10 +184,13 @@ async function runAccount(account) {
 
       // 浏览链路第四步：上报广告展示，HAR 中"阅读停留奖励/看文章奖励"由这里结算。
       // 加概率跳过 + 失败冷却，降低被广告反作弊系统识别的风险。
-      if (adReports < AD_REPORT_COUNT && Math.random() >= AD_SKIP_PROB) {
+      if (adReports < AD_REPORT_COUNT && !adBlockedByNetwork && Math.random() >= AD_SKIP_PROB) {
         adPoint = await reportBrowseAdShow(session);
         adReports += 1;
-        if (isBannedResponse(adPoint)) {
+        if (isNetworkAdLimit(adPoint)) {
+          adBlockedByNetwork = true;
+          log(`[${account.remark}] 命中网络广告上限，剩余内容仅保留阅读积分，停止广告上报`);
+        } else if (isBannedResponse(adPoint)) {
           consecutiveBanned += 1;
           if (consecutiveBanned >= 2) {
             log(`[${account.remark}] 连续检测到封禁信号，全局冷却 ${AD_FAIL_BACKOFF_MS / 1000} 秒后恢复`);
@@ -236,6 +241,7 @@ async function runMmyTokenAccount(account) {
   if (!DIRECT_AD_ONLY && READ_COUNT > 0) {
     const items = await getContentItems(session, READ_COUNT, account.id);
     let adReports = 0;
+    let adBlockedByNetwork = false; // 网络广告上限后，停止本轮其余广告上报
     for (const item of items) {
       log(`[${account.remark}] 浏览 ${item.id}${item.title ? ' - ' + item.title : ''}`);
       await getContentDetail(session, item.id);
@@ -246,9 +252,13 @@ async function runMmyTokenAccount(account) {
 
       const contentPoint = await earnContentPoints(session, item.id);
       let adPoint = 0;
-      if (adReports < AD_REPORT_COUNT) {
+      if (adReports < AD_REPORT_COUNT && !adBlockedByNetwork) {
         adPoint = await reportBrowseAdShow(session);
         adReports++;
+        if (isNetworkAdLimit(adPoint)) {
+          adBlockedByNetwork = true;
+          log(`[${account.remark}] 命中网络广告上限，剩余内容仅保留阅读积分，停止广告上报`);
+        }
       }
 
       const point = contentPoint + adPoint;
@@ -274,7 +284,13 @@ async function runDirectAdReports(session, remark) {
 
   log(`[${remark}] 只上报停留金币模式，共 ${count} 次`);
   let consecutiveBanned = 0;
+  let adBlockedByNetwork = false; // 网络广告上限后，停止本轮其余广告上报
   for (let i = 0; i < count; i++) {
+    // 网络广告上限后直接终止，避免无意义重试加重风控
+    if (adBlockedByNetwork) {
+      log(`[${remark}] 已命中网络广告上限，终止剩余 ${count - i} 次上报`);
+      break;
+    }
     // 跳过概率模拟真人节奏
     if (Math.random() < AD_SKIP_PROB) {
       log(`[${remark}] 第 ${i + 1}/${count} 次跳过（模拟真人翻页）`);
@@ -287,6 +303,11 @@ async function runDirectAdReports(session, remark) {
       await sleep(staySeconds * 1000);
     }
     const point = await reportBrowseAdShow(session);
+    if (isNetworkAdLimit(point)) {
+      adBlockedByNetwork = true;
+      log(`[${remark}] 命中网络广告上限，终止本轮上报`);
+      break;
+    }
     gained += point;
     log(`[${remark}] 第 ${i + 1}/${count} 次停留金币 ${point}`);
     if (isBannedResponse(point)) {
@@ -451,8 +472,15 @@ async function reportBrowseAdShow(session) {
     },
   });
   if (!data || data.code !== 1) {
+    const rawCode = data && data.data && typeof data.data.code !== 'undefined' ? Number(data.data.code) : null;
     const msg = String((data && (data.msg || data.message)) || '');
     log(`reportShow 返回异常：${stringifyShort(data)}`);
+    // 网络级限流：同一出口 IP 下广告账号数超过平台上限（sigmob/gdt 返回 code:5）。
+    // 这是网络维度限制，不是账号被封，继续重试只会加重风控，应立即停止本轮广告上报。
+    if (rawCode === 5 || /该网络下广告账号数已达上限|网络下广告账号数/i.test(msg)) {
+      log(`[网络广告上限] 同一网络下广告账号数已达平台上限，终止本轮广告上报（需更换出口 IP 或错峰运行）`);
+      return -2;
+    }
     // 标记 -1 表示检测到封禁/限流信号，让主循环触发全局冷却。
     if (/封禁|作弊|违规|限流|频繁|黑名单/i.test(msg)) return -1;
     return 0;
@@ -465,6 +493,11 @@ async function reportBrowseAdShow(session) {
 
 function isBannedResponse(point) {
   return typeof point === 'number' && point < 0;
+}
+
+// 网络级广告上限（code:5）：同一出口 IP 下广告账号数超平台上限，应停止本轮而非冷却后重试。
+function isNetworkAdLimit(point) {
+  return point === -2;
 }
 
 async function getAdRemaining(session) {
