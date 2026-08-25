@@ -368,107 +368,121 @@ class WxAdapter:
             "data": {},
         }
 
-        if self._can_use_unified_wxapp(wxid):
+        if get_single_operate_wx_data:
             try:
-                data = self._unified_operate_wx_data(wxid, appid, payload)
+                data = get_single_operate_wx_data(appid, wxid, payload)
                 parsed = self._extract_encrypt_key(data)
                 if parsed:
-                    log.info(f"YYB 获取加密密钥成功 version={parsed.get('version')}")
                     return {"success": True, **parsed}
-                log.warning(f"YYB get_user_encrypt_key无法提取密钥: {data}")
-            except Exception as e:
-                log.warning(f"YYB get_user_encrypt_key失败，尝试牛子API: {e}")
+            except Exception:
+                pass
 
-        body = {"wxid": wxid, "appid": appid, "data": json.dumps(payload)}
-        data = self._post("app/call/function", body)
-        parsed = self._extract_encrypt_key(data)
-        if parsed:
-            log.info(f"牛子 获取加密密钥成功 version={parsed.get('version')}")
-            return {"success": True, **parsed}
-        return {"success": False, "error": f"无法提取加密密钥: {str(data)[:200]}"}
+        if self._is_wxid_style(wxid):
+            try:
+                body = {"wxid": wxid, "appid": appid, "data": json.dumps(payload)}
+                data = self._post("app/call/function", body)
+                parsed = self._extract_encrypt_key(data)
+                if parsed:
+                    return {"success": True, **parsed}
+            except Exception:
+                pass
+
+        return {"success": False, "error": "当前协议通道未提供独立加密密钥"}
     
     def call_function(self, wxid, appid, data_str):
         """调用小程序云函数，兼容牛子与YYB"""
-        if self._can_use_unified_wxapp(wxid):
+        if get_single_operate_wx_data:
             try:
                 payload = json.loads(data_str) if isinstance(data_str, str) else (data_str or {})
-            except Exception:
-                payload = {"data": data_str}
-            try:
-                data = self._unified_operate_wx_data(wxid, appid, payload)
+                data = get_single_operate_wx_data(appid, wxid, payload)
                 encrypted = self._extract_encrypted_data(data)
                 if encrypted:
                     return {"success": True, **encrypted}
                 return {"success": True, "rawData": data}
-            except Exception as e:
-                log.warning(f"YYB call_function失败，尝试牛子API: {e}")
-
-        body = {"wxid": wxid, "appid": appid, "data": data_str}
-        data = self._post("app/call/function", body)
-        outer_ok = data.get("Code") == 0 or data.get("Success") is True
-        if not outer_ok:
-            return {"success": False, "error": data.get("Message", str(data))}
-        inner = data.get("Data") or data.get("data") or {}
-        jsapi_err = inner.get("jsapiBaseresponse", {}).get("errcode")
-        if jsapi_err is not None and jsapi_err != 0:
-            return {"success": False, "error": f"jsapi errcode={jsapi_err}"}
-        b64_str = inner.get("data") if isinstance(inner, dict) else None
-        if b64_str and isinstance(b64_str, str):
-            try:
-                res = json.loads(base64.b64decode(b64_str).decode())
-                return {
-                    "success": True, "signature": res.get("signature"),
-                    "encryptedData": res.get("encryptedData"), "iv": res.get("iv"), "rawData": res,
-                }
             except Exception:
                 pass
-        if isinstance(inner, dict) and inner.get("encryptedData"):
-            return {"success": True, "encryptedData": inner.get("encryptedData"), "iv": inner.get("iv"), "rawData": inner}
-        return {"success": False, "error": "无法提取 encryptedData"}
+
+        if self._is_wxid_style(wxid):
+            try:
+                body = {"wxid": wxid, "appid": appid, "data": data_str}
+                data = self._post("app/call/function", body)
+                outer_ok = data.get("Code") == 0 or data.get("Success") is True
+                if not outer_ok:
+                    return {"success": False, "error": data.get("Message", str(data))}
+                inner = data.get("Data") or data.get("data") or {}
+                jsapi_err = inner.get("jsapiBaseresponse", {}).get("errcode")
+                if jsapi_err is not None and jsapi_err != 0:
+                    return {"success": False, "error": f"jsapi errcode={jsapi_err}"}
+                b64_str = inner.get("data") if isinstance(inner, dict) else None
+                if b64_str and isinstance(b64_str, str):
+                    try:
+                        res = json.loads(base64.b64decode(b64_str).decode())
+                        return {
+                            "success": True, "signature": res.get("signature"),
+                            "encryptedData": res.get("encryptedData"), "iv": res.get("iv"), "rawData": res,
+                        }
+                    except Exception:
+                        pass
+                if isinstance(inner, dict) and inner.get("encryptedData"):
+                    return {"success": True, "encryptedData": inner.get("encryptedData"), "iv": inner.get("iv"), "rawData": inner}
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+
+        return {"success": False, "error": "当前协议通道不支持云函数调用"}
     
     def get_mobile(self, wxid, appid):
         """获取手机号及加密数据 - 仅牛子支持"""
-        body = {
-            "wxid": wxid, "appid": appid,
-            "data": '{"api_name":"webapi_getuserwxphone","with_credentials":true}', "opt": 1,
-        }
-        data = self._post("app/get/all/mobile", body)
-        if data.get("Code") != 0:
-            return {"success": False, "error": data.get("Message", "获取手机号失败")}
-        item = None
-        all_mobile = data["Data"].get("ALLMobile", [])
-        if all_mobile:
-            item = all_mobile[0]
-        elif data["Data"].get("Data"):
-            try:
-                inner = json.loads(data["Data"]["Data"])
-                phones = inner.get("custom_phone_list", [])
-                item = next((p for p in phones if p.get("encryptedData")), phones[0] if phones else None)
-                if item and not item.get("code") and item.get("data"):
-                    try: item["code"] = json.loads(item["data"]).get("code", "")
-                    except Exception: pass
-            except Exception as e:
-                return {"success": False, "error": f"解析手机号数据失败: {e}"}
-        if not item:
-            return {"success": False, "error": "未找到手机号信息"}
-        return {
-            "success": True, "mobile": item.get("mobile"),
-            "encryptedData": item.get("encryptedData", ""), "iv": item.get("iv", ""), "code": item.get("code", ""),
-        }
+        if not self._is_wxid_style(wxid):
+            return {"success": False, "error": "当前账号无需调用牛子手机号接口"}
+        try:
+            body = {
+                "wxid": wxid, "appid": appid,
+                "data": '{"api_name":"webapi_getuserwxphone","with_credentials":true}', "opt": 1,
+            }
+            data = self._post("app/get/all/mobile", body)
+            if data.get("Code") != 0:
+                return {"success": False, "error": data.get("Message", "获取手机号失败")}
+            item = None
+            all_mobile = data["Data"].get("ALLMobile", [])
+            if all_mobile:
+                item = all_mobile[0]
+            elif data["Data"].get("Data"):
+                try:
+                    inner = json.loads(data["Data"]["Data"])
+                    phones = inner.get("custom_phone_list", [])
+                    item = next((p for p in phones if p.get("encryptedData")), phones[0] if phones else None)
+                    if item and not item.get("code") and item.get("data"):
+                        try: item["code"] = json.loads(item["data"]).get("code", "")
+                        except Exception: pass
+                except Exception as e:
+                    return {"success": False, "error": f"解析手机号数据失败: {e}"}
+            if not item:
+                return {"success": False, "error": "未找到手机号信息"}
+            return {
+                "success": True, "mobile": item.get("mobile"),
+                "encryptedData": item.get("encryptedData", ""), "iv": item.get("iv", ""), "code": item.get("code", ""),
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
     
     def get_session_id(self, wxid, appid):
         """获取sessionid - 仅牛子支持"""
-        data = self._post("app/get/sessionid", {"wxid": wxid, "appid": appid})
-        outer_ok = data.get("Code") == 0 or data.get("Success") is True
-        if outer_ok:
-            inner = data.get("Data") or data.get("data") or {}
-            session_key = (
-                inner.get("session_key") or inner.get("sessionKey") or
-                inner.get("SessionKey") or inner.get("sessionid") or
-                inner.get("Sessionid") or inner
-            )
-            return {"success": True, "session_key": session_key, "raw": inner}
-        return {"success": False, "error": data.get("Message", str(data))}
+        if not self._is_wxid_style(wxid):
+            return {"success": False, "error": "当前账号无需调用牛子sessionid接口"}
+        try:
+            data = self._post("app/get/sessionid", {"wxid": wxid, "appid": appid})
+            outer_ok = data.get("Code") == 0 or data.get("Success") is True
+            if outer_ok:
+                inner = data.get("Data") or data.get("data") or {}
+                session_key = (
+                    inner.get("session_key") or inner.get("sessionKey") or
+                    inner.get("SessionKey") or inner.get("sessionid") or
+                    inner.get("Sessionid") or inner
+                )
+                return {"success": True, "session_key": session_key, "raw": inner}
+            return {"success": False, "error": data.get("Message", str(data))}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
     
     # 内部方法
     def _post(self, path, body):
@@ -1355,13 +1369,13 @@ def auto_login_with_retry(client, wxid, wx_server, ocr_server=None,
         except Exception as e:
             last_err = e
             msg = str(e)
-            if "暂未获得此小程序code" in msg or "取码返回空" in msg or "不支持" in msg:
+            if "暂未获得此小程序code" in msg or "取码返回空" in msg or "不支持" in msg or "未获取到有效code" in msg or "获取code失败" in msg:
                 log.warning("   ⚠️  账号协议通道限制: %s，跳过该账号" % e)
                 break
             log.warning("   ⚠️  登录失败（%d/%d）: %s，%ds 后重试..." % (attempt, max_retry, e, base_delay * attempt))
         if attempt < max_retry:
             time.sleep(base_delay * attempt + random.randint(0, 3))
-    if "暂未获得此小程序code" not in str(last_err) and "取码返回空" not in str(last_err):
+    if not any(k in str(last_err) for k in ("暂未获得此小程序code", "取码返回空", "未获取到有效code", "获取code失败")):
         log.error("   ❌ 登录重试 %d 次仍失败" % max_retry)
     raise last_err if last_err else RuntimeError("登录失败")
 
