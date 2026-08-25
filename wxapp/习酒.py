@@ -561,27 +561,8 @@ class GardenClient:
         self.session.headers["Authorization"] = token
 
     def set_crypto(self, key, iv, version=3):
-        if isinstance(key, str):
-            if len(key) == 24 and key.endswith("="):
-                try:
-                    key_bytes = base64.b64decode(key)
-                except Exception:
-                    key_bytes = key.encode("utf-8")
-            elif len(key) in (16, 24, 32):
-                key_bytes = key.encode("utf-8")
-            else:
-                try:
-                    key_bytes = base64.b64decode(key)
-                except Exception:
-                    key_bytes = key.encode("utf-8")
-        else:
-            key_bytes = key
-
-        if isinstance(iv, str):
-            iv_bytes = iv.encode("utf-8")[:16]
-        else:
-            iv_bytes = iv[:16]
-
+        key_bytes = key.encode("utf-8") if isinstance(key, str) else key
+        iv_bytes = iv.encode("utf-8") if isinstance(iv, str) else iv
         self.crypto = AesCrypto(key_bytes, iv_bytes)
         self._encrypt_version = version
         self._crypto_set_time = time.time()
@@ -597,32 +578,49 @@ class GardenClient:
         self._wx = wx
         self._wx_appid = appid
 
-        # 获取微信登录 code
-        code_res = wx.get_wx_code(wxid, appid)
-        if not code_res["success"]:
-            raise RuntimeError(f"获取code失败: {code_res['error']}")
-        
-        login_result = self.login(code_res["code"])
+        # Step 1: 获取 login_code（主系统防伪溯源）
+        code_res1 = wx.get_wx_code(wxid, appid)
+        if not code_res1["success"]:
+            raise RuntimeError(f"获取code失败: {code_res1['error']}")
+        main_login_url = f"{MAIN_BASE_URL}/auth/session?code={code_res1['code']}"
+        try:
+            resp = self.session.get(main_login_url, timeout=15)
+            resp.raise_for_status()
+            main_body = resp.json()
+            if main_body.get("code") == 0:
+                login_code = main_body["data"].get("login_code")
+                if login_code:
+                    self.session.headers["login_code"] = login_code
+                    self.login_code = login_code
+                    log.info("   🔑 login_code 获取成功")
+        except Exception as e:
+            log.warning(f"   ⚠️  获取 login_code 异常: {e}")
+
+        # Step 2: 再获取一个 code → garden authorized_token
+        code_res2 = wx.get_wx_code(wxid, appid)
+        if not code_res2["success"]:
+            raise RuntimeError(f"获取garden code失败: {code_res2['error']}")
+        login_result = self.login(code_res2["code"])
         token = login_result.get("authorized_token") or login_result.get("token") or login_result.get("access_token")
         if not token:
             raise RuntimeError(f"登录未返回token，响应: {login_result}")
         self.set_token(token)
 
-        # 获取加密密钥
+        # Step 3: 获取加密密钥
         env_key = os.environ.get("GARDEN_ENCRYPT_KEY", "")
         env_iv = os.environ.get("GARDEN_ENCRYPT_IV", "")
         if env_key and env_iv:
             self.set_crypto(env_key, env_iv)
-            return {"token": token, "crypto_ready": True}
+            return {"token": token, "login_code": getattr(self, "login_code", ""), "crypto_ready": True}
 
         # 方式 b: webapi_getuserencryptkey
         try:
             enc_key_res = wx.get_user_encrypt_key(wxid, appid)
             if enc_key_res.get("success"):
                 self.set_crypto(enc_key_res["encrypt_key"], enc_key_res["iv"], version=enc_key_res.get("version", 3))
-                return {"token": token, "crypto_ready": True}
-        except Exception:
-            pass
+                return {"token": token, "login_code": getattr(self, "login_code", ""), "crypto_ready": True}
+        except Exception as e:
+            log.warning(f"   ⚠️  webapi_getuserencryptkey 异常: {e}")
 
         # 方式 c: session_id 备选
         try:
@@ -634,8 +632,6 @@ class GardenClient:
         except Exception:
             pass
 
-        return {"token": token, "crypto_ready": self.crypto is not None}
-
         # 方式 d/d2: userinfo → mobile → getAuth
         encrypted_data, iv = self._try_encrypted_data_via_userinfo(wx, wxid, appid)
         if not encrypted_data or not iv:
@@ -643,7 +639,7 @@ class GardenClient:
         if encrypted_data and iv:
             self._try_get_auth(encrypted_data, iv)
 
-        return {"token": token, "crypto_ready": self.crypto is not None}
+        return {"token": token, "login_code": getattr(self, "login_code", ""), "crypto_ready": self.crypto is not None}
 
     def _try_encrypted_data_via_userinfo(self, wx, wxid, appid):
         try:
@@ -693,15 +689,11 @@ class GardenClient:
         if not self.crypto:
             return data or {}
         self._refresh_crypto_if_needed()
-        payload = dict(data) if data else {}
-        ts = int(time.time() * 1000)
-        payload["ts"] = ts
-        enc_hex = self.crypto.encrypt(payload)
-        return {
-            "ts": ts,
-            "encryptData": enc_hex,
-            "version": getattr(self, "_encrypt_version", 3),
-        }
+        result = dict(data) if data else {}
+        result["ts"] = int(time.time() * 1000)
+        result["encryptData"] = self.crypto.encrypt(result)
+        result["version"] = getattr(self, "_encrypt_version", 3)
+        return result
 
     def _handle_response(self, body, retry_fn):
         code = body.get("code") or body.get("err")
@@ -1501,10 +1493,19 @@ if __name__ == "__main__":
         log.info("─" * 50); log.info("👤 [%d/%d] 账号: %s" % (i+1, len(accounts), mask))
 
         client = GardenClient(ocr_server=OCR_SERVER or None)
-        cached_token = cache.get(wxid, "")
+        cached_entry = cache.get(wxid)
+        if isinstance(cached_entry, dict):
+            cached_token = cached_entry.get("token", "")
+            cached_login_code = cached_entry.get("login_code", "")
+        else:
+            cached_token = str(cached_entry or "")
+            cached_login_code = cache.get(wxid + "_login_code", "")
 
         if cached_token and token_valid(cached_token):
             log.info("   🔑 使用缓存 token"); client.set_token(cached_token)
+            if cached_login_code:
+                client.session.headers["login_code"] = cached_login_code
+                client.login_code = cached_login_code
             client.wxid = wxid
             wx = WxAdapter(WX_SERVER)
             client._wx = wx
@@ -1530,7 +1531,11 @@ if __name__ == "__main__":
                 "✅ 就绪" if result.get("crypto_ready") else "ℹ️ 标准模式"))
 
             if not result.get("token"): log.error("   ❌ 登录失败，跳过"); continue
-            cache[wxid] = client.token; save_cache(cache)
+            cache[wxid] = {
+                "token": client.token,
+                "login_code": getattr(client, "login_code", "")
+            }
+            save_cache(cache)
 
         try:
             today = datetime.now().strftime("%Y-%m-%d"); do_daily = cache.get(wxid + "_daily") != today
@@ -1552,7 +1557,11 @@ if __name__ == "__main__":
                 try:
                     result = auto_login_with_retry(client, wxid, WX_SERVER, OCR_SERVER, base_delay=5)
                     if result.get("token"):
-                        cache[wxid] = client.token; save_cache(cache)
+                        cache[wxid] = {
+                            "token": client.token,
+                            "login_code": getattr(client, "login_code", "")
+                        }
+                        save_cache(cache)
                         today = datetime.now().strftime("%Y-%m-%d"); do_daily = cache.get(wxid + "_daily") != today
                         summary, min_harvest, _brewed = run(client, do_daily=do_daily, suppress_token_error=True)
                         notify_lines.append("👤 %s\n%s" % (mask, summary))
