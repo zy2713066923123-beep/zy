@@ -127,12 +127,14 @@ def _bootstrap_accounts_sync():
     if os.getenv("WX_ID") and os.getenv("WX_ID").strip():
         return
 
+    has_server_env = bool(os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or os.getenv("WECHAT_SERVER") or os.getenv("YINGYONGBAO_SERVER"))
     server_url = get_global_server_url()
-    if not server_url:
-        return
+
+    if not has_server_env:
+        print(f"[getCode] ⚠️ 未检测到 WX_SERVER 环境变量，尝试连接默认地址: {server_url}")
 
     try:
-        r = requests.get(f"{server_url}/accounts", timeout=3)
+        r = requests.get(f"{server_url}/accounts", timeout=4)
         if r.status_code == 200:
             data = r.json()
             if data.get("code") == 0 and isinstance(data.get("data"), list):
@@ -153,9 +155,14 @@ def _bootstrap_accounts_sync():
                         lt = normalize_login_type(acc.get("login_type"))
                         print(f"  - [{login_type_label(lt)}] {name} (id={acc.get('id')}, openid={acc.get('openid')})")
                 else:
-                    print(f"[getCode] 提示: yyb_go ({server_url}) 当前无存活账号，请先在 yyb_go 扫码登录")
-    except Exception:
-        pass
+                    print(f"[getCode] ⚠️ 提示: yyb_go ({server_url}) 当前无存活账号，请先在 yyb_go 网页端扫码登录")
+            else:
+                print(f"[getCode] ❌ 从 yyb_go ({server_url}) 获取账号失败: {data.get('msg', '未知响应')}")
+        else:
+            print(f"[getCode] ❌ 请求 yyb_go ({server_url}/accounts) 响应状态异常: {r.status_code}")
+    except Exception as e:
+        print(f"[getCode] ❌ 无法连接取码服务 ({server_url}/accounts)，原因: {e}")
+        print(f"[getCode] 请确认: 1. 在青龙中配置了环境变量 WX_SERVER=http://服务IP:端口；2. yyb_go 服务正在运行且网络可达。")
 
 # 模块导入时执行同步拉取
 _bootstrap_accounts_sync()

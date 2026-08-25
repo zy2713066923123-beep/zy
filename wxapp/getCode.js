@@ -123,39 +123,75 @@ function bootstrapAccountsSync() {
         return;
     }
 
+    const hasServerEnv = !!(process.env.WX_SERVER || process.env.YYB_SERVER || process.env.WECHAT_SERVER || process.env.YINGYONGBAO_SERVER);
     const serverUrl = getGlobalServerUrl();
-    if (!serverUrl) return;
+
+    if (!hasServerEnv) {
+        console.log(`[getCode] ⚠️ 未检测到 WX_SERVER 环境变量，尝试连接默认地址: ${serverUrl}`);
+    }
 
     try {
         let stdout = '';
-        // 优先尝试 curl（青龙 Linux Docker 和 Windows 10+ 均内置且极快）
-        const curlRes = spawnSync('curl', ['-s', '--max-time', '3', `${serverUrl}/accounts`], {
-            encoding: 'utf8',
-            timeout: 4000,
-        });
+        let lastErr = '';
 
-        if (curlRes.status === 0 && curlRes.stdout && curlRes.stdout.trim()) {
-            stdout = curlRes.stdout.trim();
-        } else {
-            // 备用方案：通过 node 执行微脚本同步请求
-            const nodeCode = `
-                const http = require(${JSON.stringify(serverUrl)}.startsWith('https') ? 'https' : 'http');
-                http.get(${JSON.stringify(serverUrl + '/accounts')}, { timeout: 3000 }, (res) => {
-                    let d = '';
-                    res.on('data', (c) => d += c);
-                    res.on('end', () => process.stdout.write(d));
-                }).on('error', () => {});
-            `;
-            const nodeRes = spawnSync(process.execPath, ['-e', nodeCode], {
+        // 1. 尝试 curl（青龙 Linux Docker 和 Windows 10+ 均内置）
+        try {
+            const curlRes = spawnSync('curl', ['-s', '--max-time', '4', `${serverUrl}/accounts`], {
                 encoding: 'utf8',
-                timeout: 4000,
+                timeout: 5000,
             });
-            if (nodeRes.status === 0 && nodeRes.stdout && nodeRes.stdout.trim()) {
-                stdout = nodeRes.stdout.trim();
+            if (curlRes.status === 0 && curlRes.stdout && curlRes.stdout.trim()) {
+                stdout = curlRes.stdout.trim();
+            } else if (curlRes.error) {
+                lastErr = curlRes.error.message;
+            }
+        } catch (e) {
+            lastErr = e.message;
+        }
+
+        // 2. 尝试 wget（部分 Linux 容器无 curl 但有 wget）
+        if (!stdout) {
+            try {
+                const wgetRes = spawnSync('wget', ['-q', '-O', '-', '-T', '4', `${serverUrl}/accounts`], {
+                    encoding: 'utf8',
+                    timeout: 5000,
+                });
+                if (wgetRes.status === 0 && wgetRes.stdout && wgetRes.stdout.trim()) {
+                    stdout = wgetRes.stdout.trim();
+                } else if (wgetRes.error) {
+                    lastErr = wgetRes.error.message;
+                }
+            } catch (e) {
+                lastErr = e.message;
             }
         }
 
-        if (!stdout) return;
+        // 3. 尝试 node 微脚本单行请求
+        if (!stdout) {
+            try {
+                const isHttps = serverUrl.startsWith('https');
+                const mod = isHttps ? 'https' : 'http';
+                const subScript = `const m=require('${mod}');m.get('${serverUrl}/accounts',r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>process.stdout.write(d))}).on('error',e=>process.stderr.write(e.message));`;
+                const nodeRes = spawnSync(process.execPath, ['-e', subScript], {
+                    encoding: 'utf8',
+                    timeout: 5000,
+                });
+                if (nodeRes.status === 0 && nodeRes.stdout && nodeRes.stdout.trim()) {
+                    stdout = nodeRes.stdout.trim();
+                } else if (nodeRes.stderr) {
+                    lastErr = nodeRes.stderr.trim();
+                }
+            } catch (e) {
+                lastErr = e.message;
+            }
+        }
+
+        if (!stdout) {
+            console.log(`[getCode] ❌ 无法从服务拉取账号列表 (${serverUrl}/accounts)`);
+            if (lastErr) console.log(`[getCode] 失败原因: ${lastErr}`);
+            console.log(`[getCode] 请确认: 1. 在青龙中配置了环境变量 WX_SERVER=http://服务IP:端口；2. yyb_go 服务正在运行且网络可达。`);
+            return;
+        }
 
         const res = JSON.parse(stdout);
         if (res && res.code === 0 && Array.isArray(res.data)) {
@@ -180,11 +216,11 @@ function bootstrapAccountsSync() {
                     console.log(`  - [${loginTypeLabel(lt)}] ${name} (id=${acc.id}, openid=${acc.openid})`);
                 });
             } else {
-                console.log(`[getCode] 提示: yyb_go (${serverUrl}) 当前无存活账号，请先在 yyb_go 扫码登录`);
+                console.log(`[getCode] ⚠️ 提示: yyb_go (${serverUrl}) 当前无存活账号，请先在 yyb_go 网页端扫码登录`);
             }
         }
     } catch (e) {
-        // 静默捕获，不影响单账号手动调用的场景
+        console.log(`[getCode] 同步账号异常: ${e.message}`);
     }
 }
 
