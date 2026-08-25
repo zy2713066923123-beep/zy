@@ -46,7 +46,7 @@ STAFF_PREFIX = "/staff-api"
 REFERER = "https://servicewechat.com/wx853b3ae8d25c1dd3/312/page-frame.html"
 ACTIVITY_PLAN_CODE = "Nestle_Thrive_Companion_180_Days"
 
-DEFAULT_WECHAT_SERVER = "http://127.0.0.1:8000"
+DEFAULT_WECHAT_SERVER = os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or "http://127.0.0.1:8000"
 
 WECHAT_SERVER = os.getenv("WECHAT_SERVER", DEFAULT_WECHAT_SERVER).rstrip("/")
 WX_CODE_API = ""  # 已废弃：现使用 getCode.py 统一接口

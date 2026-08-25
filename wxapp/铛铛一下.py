@@ -40,7 +40,7 @@ MULTI_ACCOUNT_PROXY = False  # 是否使用多账号代理，默认不使用，T
 
 SCRIPT_NAME = "铛铛一下"
 WX_APPID = "wxe378d2d7636c180e"
-DEFAULT_WECHAT_SERVER = "http://127.0.0.1:8000"
+DEFAULT_WECHAT_SERVER = os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or "http://127.0.0.1:8000"
 HOST = "vues.dd1x.cn"
 USER_AGENT = "Mozilla/5.0 (Linux; Android 12; M2012K11AC Build/SKQ1.220303.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/134.0.6998.136 Mobile Safari/537.36 XWEB/1340129 MMWEBSDK/20240301 MMWEBID/9871 MicroMessenger/8.0.48.2580(0x28003036) WeChat/arm64 Weixin NetType/WIFI Language/zh_CN ABI/arm64 MiniProgramEnv/android"
 

@@ -69,7 +69,7 @@ SIGN_URL = f"{BASE_URL}/5dca57afa379e?m=toSign"
 CASH_CHECK_URL = f"{BASE_URL}/62b2bafcd77cc?m=cashCheck"
 CASH_APPLY_URL = f"{BASE_URL}/5e12a7e1848ba?m=cashApplyTwo"
 
-DEFAULT_WECHAT_SERVER = "http://127.0.0.1:8000"
+DEFAULT_WECHAT_SERVER = os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or "http://127.0.0.1:8000"
 WX_APPID = "wx6fcde446296d9588"
 
 CACHE_FILE = "lmf_token.json"
@@ -509,7 +509,7 @@ def main() -> int:
                 push_message(SCRIPT_NAME, error_msg, args.timeout)
             return 1
 
-    wechat_server = args.wechat_server or os.environ.get("WECHAT_SERVER", DEFAULT_WECHAT_SERVER)
+    wechat_server = args.wechat_server or os.environ.get("WX_SERVER") or os.environ.get("WECHAT_SERVER") or os.environ.get("YYB_SERVER") or DEFAULT_WECHAT_SERVER
 
     cache = load_cache()
     need_refresh = args.force_refresh

@@ -53,7 +53,7 @@ if (!WX_IDS.length) {
     process.exit(1);
 }
 
-const SERVER = (process.env.WX_SERVER || process.env.YYB_SERVER || process.env.WECHAT_SERVER || "").trim();
+const SERVER = (process.env.WX_SERVER || process.env.WX_SERVER || process.env.YYB_SERVER || process.env.WECHAT_SERVER || "").trim();
 
 if (!SERVER) {
     console.log("❌ 未配置取码服务地址，请设置 WX_SERVER 后重试");

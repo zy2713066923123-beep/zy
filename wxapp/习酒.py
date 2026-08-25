@@ -56,10 +56,12 @@ from pathlib import Path
 # 1. getCode.py 标准模式（推荐）：获取微信code
 # 2. 牛子协议高级模式（可选）：获取加密密钥/云函数/手机号等
 try:
-    
+    from getCode import get_single_code, get_single_operate_wx_data, get_single_phone_number, load_accounts
     _HAS_GETCODE = True
 except ImportError:
+    get_single_code = None
     get_single_operate_wx_data = None
+    get_single_phone_number = None
     _HAS_GETCODE = False
 
 logging.basicConfig(level=logging.INFO,
@@ -114,7 +116,7 @@ WINE_STATUS = {0: "空坛", 1: "空坛", 2: "已酿好", 3: "酿造中", 4: "已
 BASE_URL = "https://apimallwm.exijiu.com"
 MAIN_BASE_URL = "https://xcx.exijiu.com/anti-channeling/public/index.php/api/v2"
 APPID = "wx489f950decfeb93e"
-DEFAULT_WECHAT_SERVER = "http://127.0.0.1:8000"
+DEFAULT_WECHAT_SERVER = os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or "http://127.0.0.1:8000"
 
 # 环境变量
 _SEED_TYPE_FORCE = int(os.environ.get("GARDEN_SEED_TYPE", "0"))
@@ -197,6 +199,7 @@ class WxAdapter:
     def __init__(self, server_url=None):
         self.server_url = (server_url or DEFAULT_WECHAT_SERVER).rstrip("/")
         self.yyb_server = (
+            os.environ.get("WX_SERVER") or
             os.environ.get("YYB_SERVER") or
             os.environ.get("YINGYOGBAO_SERVER") or
             ""
@@ -1374,7 +1377,7 @@ def auto_login_with_retry(client, wxid, wx_server, ocr_server=None,
 #  主函数
 # ============================================================
 if __name__ == "__main__":
-    WX_SERVER = os.environ.get("WECHAT_SERVER", DEFAULT_WECHAT_SERVER)
+    WX_SERVER = os.environ.get("WX_SERVER") or os.environ.get("WECHAT_SERVER") or os.environ.get("YYB_SERVER") or DEFAULT_WECHAT_SERVER
     WX_ID_RAW = (os.getenv("WX_ID") or os.getenv("WXIDXJ", "")).strip()
 
     accounts = parse_accounts(WX_ID_RAW)

@@ -27,7 +27,7 @@ import requests
 
 
 # ============ 常量配置 ============
-DEFAULT_WECHAT_SERVER = "http://127.0.0.1:8000"
+DEFAULT_WECHAT_SERVER = os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or "http://127.0.0.1:8000"
 WECHAT_MINI_APPID = "wxe3fd49854884240e"          # 东风日产 人车生活 小程序 appid
 ARIYA_BASE = "https://ariya-api.dongfeng-nissan.com.cn"
 WXAPI_BASE = "https://wxapi.dongfeng-nissan.com.cn"
@@ -359,7 +359,7 @@ def push_notify(title: str, content: str) -> None:
 class NissanSign:
     def __init__(self) -> None:
         self.wechat_server = build_code_url(
-            os.environ.get("WECHAT_SERVER", DEFAULT_WECHAT_SERVER)
+            os.environ.get("WX_SERVER") or os.environ.get("WECHAT_SERVER") or os.environ.get("YYB_SERVER") or DEFAULT_WECHAT_SERVER
         )
         self.skip_community = os.environ.get("NISSAN_SKIP_COMMUNITY") == "1"
         self.user_agent = (

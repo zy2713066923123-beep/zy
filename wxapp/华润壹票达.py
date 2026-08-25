@@ -46,7 +46,7 @@ DEFAULT_VER = "4.63.0"
 DEFAULT_SRC = "weixin_mini"
 DEFAULT_TERMINAL_SRC = "WEIXIN_MINI"
 DEFAULT_UTC_OFFSET = "480"
-DEFAULT_WECHAT_SERVER = "http://127.0.0.1:8000"
+DEFAULT_WECHAT_SERVER = os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or "http://127.0.0.1:8000"
 API_HOST = "https://crld.caiyicloud.com"
 NOTIFY_TITLE = "壹票达签到"
 

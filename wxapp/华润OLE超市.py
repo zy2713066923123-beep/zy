@@ -58,7 +58,7 @@ DEFAULT_HEAD_IMG = (
 # 业务常量（一般不用改）
 # =========================
 WECHAT_MINI_APPID = "wx6c61aaeba1551439"  # OLE 超市小程序 appid（抓包 referer）
-DEFAULT_WECHAT_SERVER = "http://127.0.0.1:8000"
+DEFAULT_WECHAT_SERVER = os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or "http://127.0.0.1:8000"
 API_BASE = "https://ole-app.crvole.com.cn"
 TENANT = "VGDT"
 TENANT_CHANNEL = "OLE"
@@ -227,7 +227,7 @@ def push_notify(title: str, content: str) -> None:
 class OleSign:
     def __init__(self) -> None:
         self.wechat_code_url = build_code_url(
-            os.environ.get("WECHAT_SERVER", DEFAULT_WECHAT_SERVER)
+            os.environ.get("WX_SERVER") or os.environ.get("WECHAT_SERVER") or os.environ.get("YYB_SERVER") or DEFAULT_WECHAT_SERVER
         )
         self.session = requests.Session()
         self.session.trust_env = False
@@ -761,7 +761,7 @@ def main() -> None:
 
     print(f"📋 共 {len(accounts)} 个账号")
     print(f"登录 code / 手机号: 通过 getCode 模块按账号协议自动路由（牛子/应用宝）")
-    print(f"牛子手机号接口: WECHAT_SERVER => {build_code_url(os.environ.get('WECHAT_SERVER', DEFAULT_WECHAT_SERVER))}")
+    print(f"牛子手机号接口: WECHAT_SERVER => {build_code_url(os.environ.get("WX_SERVER") or os.environ.get("WECHAT_SERVER") or os.environ.get("YYB_SERVER") or DEFAULT_WECHAT_SERVER)}")
 
     signer = OleSign()
     results: List[AccountSummary] = []

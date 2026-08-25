@@ -46,7 +46,7 @@ name = "꧁༺ 汤汤༒星球 ༻꧂"
 
 WX_APPID = "wx9bb6d5ac457bd69d"
 HOST = "https://vip.by-health.com"
-DEFAULT_WECHAT_SERVER = "http://127.0.0.1:8000"
+DEFAULT_WECHAT_SERVER = os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or "http://127.0.0.1:8000"
 
 SIGN_PATH = "/vip-api/sign/daily/create"
 SIGN_ACTIVITY_ID = 11
@@ -186,7 +186,7 @@ def do_sign(authorization, label=""):
 
 def main():
     wechat_server = build_code_url(
-        os.environ.get("WECHAT_SERVER", DEFAULT_WECHAT_SERVER)
+        os.environ.get("WX_SERVER") or os.environ.get("WECHAT_SERVER") or os.environ.get("YYB_SERVER") or DEFAULT_WECHAT_SERVER
     )
 
     log_lines = []

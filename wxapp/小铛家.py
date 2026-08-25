@@ -36,7 +36,7 @@ import requests
 
 
 
-DEFAULT_WECHAT_SERVER = "http://127.0.0.1:8000"
+DEFAULT_WECHAT_SERVER = os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or "http://127.0.0.1:8000"
 DEFAULT_WECHAT_MINI_APPID = "wx7f5bc6f204abc629"
 DEFAULT_XIAODANJIA_APPID = "xiaodangjia"
 DEFAULT_XIAODANJIA_BASE_URL = "https://lm.api.sujh.net"
@@ -186,7 +186,7 @@ def push_notify(title: str, content: str) -> bool:
 
 class XiaodangjiaWxidSign:
     def __init__(self) -> None:
-        self.wechat_server = os.environ.get("WECHAT_SERVER", DEFAULT_WECHAT_SERVER)
+        self.wechat_server = os.environ.get("WX_SERVER") or os.environ.get("WECHAT_SERVER") or os.environ.get("YYB_SERVER") or DEFAULT_WECHAT_SERVER
         self.wechat_mini_appid = os.environ.get("WECHAT_MINI_APPID", DEFAULT_WECHAT_MINI_APPID)
         self.api_appid = os.environ.get("XIAODANJIA_APPID", DEFAULT_XIAODANJIA_APPID)
         self.base_url = os.environ.get("XIAODANJIA_BASE_URL", DEFAULT_XIAODANJIA_BASE_URL).rstrip("/")
@@ -911,7 +911,7 @@ def main() -> None:
     print("=" * 50)
     print("小铛家签到脚本")
     print("=" * 50)
-    print(f"微信中转服务端: {os.environ.get('WECHAT_SERVER', DEFAULT_WECHAT_SERVER)}")
+    print(f"微信中转服务端: {os.environ.get("WX_SERVER") or os.environ.get("WECHAT_SERVER") or os.environ.get("YYB_SERVER") or DEFAULT_WECHAT_SERVER}")
     print(f"共 {len(accounts)} 个账号")
     if proxy_api:
         print(f"已启用品赞代理，代理类型: {proxy_type}")
