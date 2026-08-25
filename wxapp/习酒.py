@@ -209,23 +209,27 @@ class WxAdapter:
         self.session.headers["Content-Type"] = "application/json"
     
     def get_wx_code(self, wxid, appid):
-        """获取微信code - 优先使用 getCode.py，回退到牛子API"""
+        """获取微信code - 优先使用 getCode.py，避免无效404回退"""
         if _HAS_GETCODE:
             try:
                 code = get_single_code(appid, wxid)
-                return {"success": True, "code": code}
+                if code:
+                    return {"success": True, "code": code}
+                return {"success": False, "error": "取码返回空（该账号协议类型暂未获得此小程序code）"}
             except Exception as e:
-                log.warning(f"getCode获取失败，尝试牛子API: {e}")
+                return {"success": False, "error": str(e)}
         
-        # 回退到牛子 API
-        try:
-            data = self.session.post(self.base + "app/get/code",
-                json={"wxid": wxid, "appid": appid}, timeout=15).json()
-            if data.get("Code") == 0:
-                return {"success": True, "code": data["Data"]["code"]}
-            return {"success": False, "error": data.get("Message", "获取code失败")}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
+        # 仅在非 yyb_go 且以 wxid_ 开头时尝试回退到牛子 API
+        if self._is_wxid_style(wxid):
+            try:
+                data = self.session.post(self.base + "app/get/code",
+                    json={"wxid": wxid, "appid": appid}, timeout=15).json()
+                if data.get("Code") == 0:
+                    return {"success": True, "code": data["Data"]["code"]}
+                return {"success": False, "error": data.get("Message", "获取code失败")}
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+        return {"success": False, "error": "未获取到有效code"}
 
     def _raw_id(self, wxid):
         return str(wxid).split("#")[0].strip()
@@ -242,11 +246,14 @@ class WxAdapter:
     def _yyb_accounts(self):
         if not self.yyb_server:
             return []
-        resp = self.session.get(f"{self.yyb_server}/accounts", timeout=15)
-        resp.raise_for_status()
-        body = resp.json()
-        accounts = body.get("data", []) if isinstance(body, dict) else []
-        return accounts if isinstance(accounts, list) else []
+        try:
+            resp = self.session.get(f"{self.yyb_server}/accounts", timeout=15)
+            resp.raise_for_status()
+            body = resp.json()
+            accounts = body.get("data", []) if isinstance(body, dict) else []
+            return accounts if isinstance(accounts, list) else []
+        except Exception:
+            return []
 
     def _yyb_resolve_ref(self, wxid):
         raw_id = self._raw_id(wxid)
@@ -303,7 +310,7 @@ class WxAdapter:
             try:
                 return get_single_operate_wx_data(appid, wxid, payload)
             except Exception as e:
-                log.warning(f"getCode通用接口失败，尝试直连YYB: {e}")
+                pass
         return self._yyb_operate_wx_data(wxid, appid, payload)
 
     def _decode_jsonish(self, value):
@@ -318,9 +325,9 @@ class WxAdapter:
             except Exception:
                 return value
         try:
-            decoded = base64.b64decode(text + "=" * (-len(text) % 4)).decode()
-            if decoded[:1] in "{[":
-                return json.loads(decoded)
+            parsed = json.loads(text)
+            if isinstance(parsed, (dict, list)):
+                return parsed
         except Exception:
             pass
         return value
@@ -329,48 +336,29 @@ class WxAdapter:
         data = self._decode_jsonish(data)
         if not isinstance(data, dict):
             return None
-
-        code = data.get("Code")
-        if code not in (None, 0) and data.get("Success") is not True:
-            return None
-
-        inner = data.get("Data") or data.get("data") or data.get("result") or data.get("rawData") or {}
-        if isinstance(inner, dict):
-            jsapi_err = inner.get("jsapiBaseresponse", {}).get("errcode")
-            if jsapi_err is not None and jsapi_err != 0:
-                return None
-
-        key = data.get("encrypt_key") or data.get("encryptKey")
-        iv = data.get("iv")
-        if key and iv:
-            return {
-                "encrypt_key": key,
-                "iv": iv,
-                "version": data.get("version") or data.get("encryptVer") or 3,
-                "expire_in": data.get("expire_in") or data.get("expireIn"),
-            }
-
-        if isinstance(inner, dict) or isinstance(inner, str):
-            parsed = self._extract_encrypt_key(inner)
-            if parsed:
-                return parsed
+        for candidate in (data, data.get("data"), data.get("result")):
+            candidate = self._decode_jsonish(candidate)
+            if not isinstance(candidate, dict):
+                continue
+            key = candidate.get("encrypt_key") or candidate.get("encryptKey") or candidate.get("key")
+            iv = candidate.get("iv") or candidate.get("iv_data")
+            version = candidate.get("version") or candidate.get("ver") or 3
+            if key and iv:
+                return {"encrypt_key": key, "iv": iv, "version": version}
         return None
 
     def _extract_encrypted_data(self, data):
         data = self._decode_jsonish(data)
         if not isinstance(data, dict):
             return None
-
-        encrypted_data = data.get("encryptedData") or data.get("encrypted_data")
-        iv = data.get("iv")
-        if encrypted_data and iv:
-            return {"encryptedData": encrypted_data, "iv": iv, "rawData": data}
-
-        for field in ("Data", "data", "result", "rawData"):
-            if field in data:
-                parsed = self._extract_encrypted_data(data[field])
-                if parsed:
-                    return parsed
+        for candidate in (data, data.get("data"), data.get("result")):
+            candidate = self._decode_jsonish(candidate)
+            if not isinstance(candidate, dict):
+                continue
+            enc = candidate.get("encryptedData") or candidate.get("encrypted_data")
+            iv = candidate.get("iv") or candidate.get("iv_data")
+            if enc and iv:
+                return {"encryptedData": enc, "iv": iv}
         return None
     
     def get_user_encrypt_key(self, wxid, appid):
@@ -1366,10 +1354,15 @@ def auto_login_with_retry(client, wxid, wx_server, ocr_server=None,
             log.warning("   ⚠️  登录未返回 token（%d/%d），%ds 后重试..." % (attempt, max_retry, base_delay * attempt))
         except Exception as e:
             last_err = e
+            msg = str(e)
+            if "暂未获得此小程序code" in msg or "取码返回空" in msg or "不支持" in msg:
+                log.warning("   ⚠️  账号协议通道限制: %s，跳过该账号" % e)
+                break
             log.warning("   ⚠️  登录失败（%d/%d）: %s，%ds 后重试..." % (attempt, max_retry, e, base_delay * attempt))
         if attempt < max_retry:
             time.sleep(base_delay * attempt + random.randint(0, 3))
-    log.error("   ❌ 登录重试 %d 次仍失败" % max_retry)
+    if "暂未获得此小程序code" not in str(last_err) and "取码返回空" not in str(last_err):
+        log.error("   ❌ 登录重试 %d 次仍失败" % max_retry)
     raise last_err if last_err else RuntimeError("登录失败")
 
 
