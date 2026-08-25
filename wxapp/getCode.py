@@ -576,6 +576,26 @@ def get_single_phone_number(app_id: str, identifier: str) -> Optional[str]:
         print(f"[getCode] 获取手机号失败: {e}")
         return None
 
+def get_single_operate_wx_data(app_id: str, identifier: str, payload: dict) -> Optional[dict]:
+    """获取 operateWxData 数据（包括加密密钥 webapi_getuserencryptkey）"""
+    if not identifier:
+        return None
+    getter = WeChatCodeGetter()
+    getter.init()
+    try:
+        parsed = parse_identifier(identifier)
+        url = getter.server_url.rstrip("/") + "/wxapp/operateWxData"
+        body = {
+            "ref": parsed["raw_id"] or identifier,
+            "app_id": app_id,
+            "payload": payload or {"api_name": "webapi_getuserencryptkey", "data": {}}
+        }
+        resp = requests.post(url, json=body, timeout=30)
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as e:
+        return None
+
 if __name__ == '__main__':
     import sys
     print("=" * 50)

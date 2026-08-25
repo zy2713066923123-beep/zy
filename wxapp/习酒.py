@@ -209,13 +209,15 @@ class WxAdapter:
     """
     
     def __init__(self, server_url=None):
-        self.server_url = (server_url or DEFAULT_WECHAT_SERVER).rstrip("/")
-        self.yyb_server = (
+        self.server_url = (
+            server_url or
             os.environ.get("WX_SERVER") or
+            os.environ.get("WECHAT_SERVER") or
             os.environ.get("YYB_SERVER") or
-            os.environ.get("YINGYOGBAO_SERVER") or
-            ""
+            os.environ.get("YINGYONGBAO_SERVER") or
+            DEFAULT_WECHAT_SERVER
         ).rstrip("/")
+        self.yyb_server = self.server_url
         self.base = self.server_url + "/api/v1/wx/"
         self.session = requests.Session()
         self.session.headers["Content-Type"] = "application/json"
