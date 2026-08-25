@@ -691,11 +691,15 @@ class GardenClient:
         if not self.crypto:
             return data or {}
         self._refresh_crypto_if_needed()
-        result = dict(data) if data else {}
-        result["ts"] = int(time.time() * 1000)
-        result["encryptData"] = self.crypto.encrypt(result)
-        result["version"] = getattr(self, "_encrypt_version", 3)
-        return result
+        payload = dict(data) if data else {}
+        ts = int(time.time() * 1000)
+        payload["ts"] = ts
+        enc_hex = self.crypto.encrypt(payload)
+        return {
+            "ts": ts,
+            "encryptData": enc_hex,
+            "version": getattr(self, "_encrypt_version", 3),
+        }
 
     def _handle_response(self, body, retry_fn):
         code = body.get("code") or body.get("err")
