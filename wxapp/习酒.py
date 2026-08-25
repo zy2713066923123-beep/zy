@@ -348,10 +348,15 @@ class WxAdapter:
         data = self._decode_jsonish(data)
         if not isinstance(data, dict):
             return None
-        for candidate in (data, data.get("data"), data.get("result")):
+        candidates = [data, data.get("data"), data.get("result")]
+        for candidate in list(candidates):
             candidate = self._decode_jsonish(candidate)
             if not isinstance(candidate, dict):
                 continue
+            if "data" in candidate and isinstance(candidate["data"], (dict, str)):
+                candidates.append(self._decode_jsonish(candidate["data"]))
+            if "result" in candidate and isinstance(candidate["result"], (dict, str)):
+                candidates.append(self._decode_jsonish(candidate["result"]))
             key = candidate.get("encrypt_key") or candidate.get("encryptKey") or candidate.get("key")
             iv = candidate.get("iv") or candidate.get("iv_data")
             version = candidate.get("version") or candidate.get("ver") or 3
@@ -363,10 +368,15 @@ class WxAdapter:
         data = self._decode_jsonish(data)
         if not isinstance(data, dict):
             return None
-        for candidate in (data, data.get("data"), data.get("result")):
+        candidates = [data, data.get("data"), data.get("result")]
+        for candidate in list(candidates):
             candidate = self._decode_jsonish(candidate)
             if not isinstance(candidate, dict):
                 continue
+            if "data" in candidate and isinstance(candidate["data"], (dict, str)):
+                candidates.append(self._decode_jsonish(candidate["data"]))
+            if "result" in candidate and isinstance(candidate["result"], (dict, str)):
+                candidates.append(self._decode_jsonish(candidate["result"]))
             enc = candidate.get("encryptedData") or candidate.get("encrypted_data")
             iv = candidate.get("iv") or candidate.get("iv_data")
             if enc and iv:
@@ -379,6 +389,15 @@ class WxAdapter:
             "api_name": "webapi_getuserencryptkey",
             "data": {},
         }
+
+        if self.yyb_server:
+            try:
+                data = self._yyb_operate_wx_data(wxid, appid, payload)
+                parsed = self._extract_encrypt_key(data)
+                if parsed:
+                    return {"success": True, **parsed}
+            except Exception:
+                pass
 
         if get_single_operate_wx_data:
             try:
@@ -540,8 +559,27 @@ class GardenClient:
         self.session.headers["Authorization"] = token
 
     def set_crypto(self, key, iv, version=3):
-        key_bytes = key.encode("utf-8")
-        iv_bytes = iv.encode("utf-8")
+        if isinstance(key, str):
+            if len(key) == 24 and key.endswith("="):
+                try:
+                    key_bytes = base64.b64decode(key)
+                except Exception:
+                    key_bytes = key.encode("utf-8")
+            elif len(key) in (16, 24, 32):
+                key_bytes = key.encode("utf-8")
+            else:
+                try:
+                    key_bytes = base64.b64decode(key)
+                except Exception:
+                    key_bytes = key.encode("utf-8")
+        else:
+            key_bytes = key
+
+        if isinstance(iv, str):
+            iv_bytes = iv.encode("utf-8")[:16]
+        else:
+            iv_bytes = iv[:16]
+
         self.crypto = AesCrypto(key_bytes, iv_bytes)
         self._encrypt_version = version
         self._crypto_set_time = time.time()
