@@ -153,7 +153,14 @@ def _bootstrap_accounts_sync():
                     for acc in alive_accounts:
                         name = acc.get("nickname") or acc.get("alias") or "未知"
                         lt = normalize_login_type(acc.get("login_type"))
-                        print(f"  - [{login_type_label(lt)}] {name} (id={acc.get('id')}, openid={acc.get('openid')})")
+                        channel = "微信标准"
+                        if lt == LOGIN_TYPE_WMPF:
+                            channel = "微信原生/全兼容"
+                        elif lt == LOGIN_TYPE_WX:
+                            channel = "应用宝微信/商业兼容"
+                        elif lt == LOGIN_TYPE_SYZS:
+                            channel = "手游助手iLink/腾讯游戏及互通"
+                        print(f"  - [{login_type_label(lt)}] {name} (id={acc.get('id')}, 通道: {channel})")
                 else:
                     print(f"[getCode] ⚠️ 提示: yyb_go ({server_url}) 当前无存活账号，请先在 yyb_go 网页端扫码登录")
             else:
@@ -328,13 +335,16 @@ class YYBAdapter:
 
     def _post_code(self, path: str, ref: str, app_id: str, kind: str = "code",
                    expect_login_type: Optional[str] = None) -> str:
-        resolved_ref = self._resolve_ref(ref, expect_login_type)
+        acc = self._resolve_account(ref, expect_login_type)
+        resolved_ref = str(acc.get("id")) if acc and acc.get("id") else self._resolve_ref(ref, expect_login_type)
+        acc_name = acc.get("nickname") or acc.get("alias") or f"ID_{resolved_ref}" if acc else f"ref_{resolved_ref}"
+        acc_type = login_type_label(normalize_login_type(acc.get("login_type"))) if acc else "未知"
         url = f"{self.server_url}{path}"
         payload = {"ref": resolved_ref, "app_id": app_id}
         headers = {"Content-Type": "application/json"}
 
         try:
-            print(f"[YYB] 请求{kind}: ref={resolved_ref}, app_id={app_id}")
+            print(f"[YYB] 请求{kind}: ref={resolved_ref} [{acc_name}/{acc_type}], app_id={app_id}")
             r = requests.post(url, json=payload, headers=headers, timeout=30)
             if r.status_code == 404:
                 try:
@@ -357,17 +367,23 @@ class YYBAdapter:
                 raise Exception(f"[{code_val}] {msg}")
 
             data = result.get("data", {})
+            final_code = None
             if isinstance(data, dict):
                 inner = data.get("result", {})
                 if isinstance(inner, dict):
                     if inner.get("code"):
-                        return inner["code"]
-                    if inner.get("login_buffer"):
-                        return inner["login_buffer"]
-                if data.get("code") and isinstance(data["code"], str):
-                    return data["code"]
-                if data.get("login_buffer") and isinstance(data["login_buffer"], str):
-                    return data["login_buffer"]
+                        final_code = inner["code"]
+                    elif inner.get("login_buffer"):
+                        final_code = inner["login_buffer"]
+                if not final_code and data.get("code") and isinstance(data["code"], str):
+                    final_code = data["code"]
+                if not final_code and data.get("login_buffer") and isinstance(data["login_buffer"], str):
+                    final_code = data["login_buffer"]
+
+            if final_code:
+                if acc_type == "手游助手" and (final_code.startswith("Cq4B") or len(final_code) > 80):
+                    print(f"[YYB] 提示: 账号 [{acc_name}] 采用手游助手(iLink通道)取码，若第三方自建商城(非腾讯系)返回40029/code无效属微信通道限制。")
+                return final_code
             raise Exception(f"未拿到有效{kind}: {json.dumps(result, ensure_ascii=False)[:150]}")
         except requests.RequestException as e:
             raise Exception(f"[YYB] 请求{kind}失败: {e}")

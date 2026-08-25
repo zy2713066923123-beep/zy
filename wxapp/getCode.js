@@ -213,7 +213,11 @@ function bootstrapAccountsSync() {
                 aliveAccounts.forEach(acc => {
                     const name = acc.nickname || acc.alias || '未知';
                     const lt = normalizeLoginType(acc.login_type);
-                    console.log(`  - [${loginTypeLabel(lt)}] ${name} (id=${acc.id}, openid=${acc.openid})`);
+                    let channel = '微信标准';
+                    if (lt === LOGIN_TYPE_WMPF) channel = '微信原生/全兼容';
+                    else if (lt === LOGIN_TYPE_WX) channel = '应用宝微信/商业兼容';
+                    else if (lt === LOGIN_TYPE_SYZS) channel = '手游助手iLink/腾讯游戏及互通';
+                    console.log(`  - [${loginTypeLabel(lt)}] ${name} (id=${acc.id}, 通道: ${channel})`);
                 });
             } else {
                 console.log(`[getCode] ⚠️ 提示: yyb_go (${serverUrl}) 当前无存活账号，请先在 yyb_go 网页端扫码登录`);
@@ -416,10 +420,13 @@ class YYBAdapter {
      */
     async getCode(ref, appId, expectLoginType = null) {
         const url = `${this.serverUrl}/wxapp/getCode`;
-        const resolvedRef = await this._resolveRef(ref, expectLoginType);
+        const account = await this._resolveAccount(ref, expectLoginType).catch(() => null);
+        const resolvedRef = account ? (String(account.id || account.openid || ref)) : await this._resolveRef(ref, expectLoginType);
+        const accName = account ? (account.nickname || account.alias || `ID_${account.id}`) : `ref_${resolvedRef}`;
+        const accType = account ? loginTypeLabel(normalizeLoginType(account.login_type)) : '未知';
 
         try {
-            console.log(`[YYB] 请求code: ref=${resolvedRef}, app_id=${appId}`);
+            console.log(`[YYB] 请求code: ref=${resolvedRef} [${accName}/${accType}], app_id=${appId}`);
             const r = await axios.post(url, { ref: resolvedRef, app_id: appId }, {
                 headers: { 'Content-Type': 'application/json' },
                 timeout: 30000,
@@ -446,17 +453,17 @@ class YYBAdapter {
             }
 
             const data = result?.data;
-            if (data?.result?.code) {
-                return data.result.code;
-            }
-            if (data?.result?.login_buffer) {
-                return data.result.login_buffer;
-            }
-            if (data?.code && typeof data.code === 'string') {
-                return data.code;
-            }
-            if (data?.login_buffer && typeof data.login_buffer === 'string') {
-                return data.login_buffer;
+            let finalCode = null;
+            if (data?.result?.code) finalCode = data.result.code;
+            else if (data?.result?.login_buffer) finalCode = data.result.login_buffer;
+            else if (data?.code && typeof data.code === 'string') finalCode = data.code;
+            else if (data?.login_buffer && typeof data.login_buffer === 'string') finalCode = data.login_buffer;
+
+            if (finalCode) {
+                if (accType === '手游助手' && (finalCode.startsWith('Cq4B') || finalCode.length > 80)) {
+                    console.log(`[YYB] 提示: 账号 [${accName}] 采用手游助手(iLink通道)取码，若第三方自建商城(非腾讯系)返回40029/code无效属微信通道限制。`);
+                }
+                return finalCode;
             }
 
             throw new Error(`未拿到有效code: ${JSON.stringify(result).slice(0, 150)}`);
