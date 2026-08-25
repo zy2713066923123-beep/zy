@@ -792,6 +792,15 @@ async function getSingleOperateWxData(appId, identifier) {
     }
 }
 
+// 挂载到全局 global，确保无论脚本以何种形式 require('getCode') 均可直接调用
+global.getSingleCode = getSingleCode;
+global.getSinglePhoneNumber = getSinglePhoneNumber;
+global.getSinglePhoneEncrypted = getSinglePhoneEncrypted;
+global.getSingleOperateWxData = getSingleOperateWxData;
+global.WeChatCodeGetter = WeChatCodeGetter;
+global.YYBAdapter = YYBAdapter;
+global.loadAccounts = loadAccounts;
+
 module.exports = {
     WeChatCodeGetter,
     loadAccounts,

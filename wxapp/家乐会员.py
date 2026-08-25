@@ -99,7 +99,6 @@ DEFAULT_RECIPE_ARTID = "content/ufs/zh/recipes/sgslszj/jcr:content"
 
 
 # 统一取码 (与项目其它脚本一致: WX_ID + getCode 双协议自动路由)
-from getCode import get_single_code
 
 # 统一通知: 桥接青龙内置 notify (无环境则降级为仅打印, 绝不抛异常)
 try:
