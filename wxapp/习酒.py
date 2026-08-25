@@ -708,8 +708,8 @@ class GardenClient:
         msg = body.get("msg") or ""
         if code == 0:
             return body.get("data")
-        if code == 5001 or "加密校验失败" in msg or "用户信息异常" in msg:
-            raise TokenInvalidError(f"[5001] {msg} (加密校验失败)")
+        if "加密校验失败" in msg or "请从小程序重新进入" in msg:
+            raise TokenInvalidError(f"[{code}] {msg}")
         if code == 4012 or "非法的用户 token" in msg:
             raise TokenInvalidError(f"[4012] {msg} (非法的用户 token)")
         if code == 5008:
