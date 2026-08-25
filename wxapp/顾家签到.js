@@ -38,8 +38,24 @@ class WeChatServer {
 class Env {
   constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; this.logs = []; const originalLog = console.log; console.log = (...args) => { this.logs.push(args.join(" ")); originalLog.apply(console, args); }; }
   log(...args) { console.log(...args); this.logs.push(args.join(" ")); }
-  checkEnv(ckName) {
-    const val = process.env.WX_ID || process.env[ckName];
+  async checkEnv(ckName) {
+    let val = process.env.WX_ID || process.env[ckName];
+    if (!val) {
+      try {
+        const adapter = new YYBAdapter();
+        const accounts = await adapter.getAccounts();
+        if (accounts && accounts.length > 0) {
+          const alive = accounts.filter(a => ['alive', '', 'unknown'].includes(String(a.status || '').toLowerCase()));
+          if (alive.length > 0) {
+            val = alive.map(a => `${a.openid || a.id}#${a.nickname || a.alias || a.id}`).join('\n');
+            process.env.WX_ID = val;
+            console.log(`[getCode] 自动从 yyb_go (${adapter.serverUrl}) 成功获取到 ${alive.length} 个存活账号`);
+          }
+        }
+      } catch (e) {
+        console.log(`[getCode] 连接 yyb_go 获取账号失败: ${e.message}`);
+      }
+    }
     if (val) this.userList = val.split(/[\n&]+/).map(v => String(v).split('#')[0].trim()).filter(Boolean);
     else console.log('未找到环境变量 WX_ID');
   }
@@ -675,7 +691,7 @@ class Task {
 // ====================== 主入口 ======================
 !(async () => {
   console.log(`============ 顾家家居会员俱乐部 ============`);
-  $.checkEnv(ckName);
+  await $.checkEnv(ckName);
   console.log(`共 ${$.userList.length} 个账号`);
   for (const openid of $.userList) {
     await new Task(openid).run();
