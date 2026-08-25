@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 /** cron: 28 9,14 * * *
  * Show:微信公众号 庙友之家 每日签到 积分可换首饰
  * 变量名:miaoyouHome

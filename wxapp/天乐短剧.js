@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 /*
  * name: 天乐短剧
  * cron: 41 8,16 * * *
@@ -55,7 +56,6 @@ const fs = require('fs');
 const path = require('path');
 require('events').defaultMaxListeners = 50;
 
-const getCode = require('./getCode.js');
 const getSingleCode = getCode.getSingleCode;
 
 const ENV_NAME = 'REELIX_AUTH';

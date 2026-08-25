@@ -1,3 +1,4 @@
+import getCode  # 自动同步 yyb_go 存活账号
 """
 # cron: 16 10,14 * * *
 ========================================
@@ -47,7 +48,6 @@
 import os, time, base64, logging, requests, calendar
 from datetime import datetime, timedelta
 
-import getCode  # 共享的微信小程序 code 获取模块（自动路由 牛子/应用宝，读取 WX_ID 过滤）
 
 logging.basicConfig(level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
@@ -538,7 +538,7 @@ if __name__ == "__main__":
     import json as _json
     import pathlib
 
-    WX_SERVER = os.environ.get("WECHAT_SERVER", "")
+    WX_SERVER = (os.environ.get("WX_SERVER") or os.environ.get("WECHAT_SERVER") or "")
     WXIDS = []
     for line in os.environ.get("WX_ID", "").replace("&", "\n").splitlines():
         line = line.strip()

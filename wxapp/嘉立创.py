@@ -1,3 +1,4 @@
+import getCode  # 自动同步 yyb_go 存活账号
 # cron: 57 8,16 * * *
 #!/usr/bin/env python3
 # name: 嘉立创
@@ -104,7 +105,6 @@ def mask_token(token):
 
 
 # ===================== 登录相关 =====================
-import getCode
 
 
 def get_wx_code(account_id):

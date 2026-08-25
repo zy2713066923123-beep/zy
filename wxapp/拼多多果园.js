@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 ﻿// name:拼多多果园
 /** cron: 26 9,13 * * *
  * 拼多多果园（微信协议版）
@@ -8,7 +9,6 @@
  *   PDD_NO_RELOGIN  设为 '0' 或 'false' 关闭自动重登（默认开启）
  */
 
-const { getSingleCode } = require('./getCode.js');
 const getWxCode = (wxid, appid) => getSingleCode(appid, String(wxid).split('#')[0].trim());
 const https = require('https');
 const http = require('http');

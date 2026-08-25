@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 ﻿// name:白马智选
 /**
  * 白马智选（白马严选）
@@ -7,7 +8,6 @@
  *   WX_ID           必填，格式：wxid#备注，多账号换行或 & 分隔
  *   WECHAT_SERVER   必填，微信协议服务地址
  */
-const { getSingleCode } = require('./getCode.js');
 const getWxCode = (wxid, appid) => getSingleCode(appid, String(wxid).split('#')[0].trim());
 const https = require('https');
 const http = require('http');

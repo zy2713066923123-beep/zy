@@ -1,3 +1,4 @@
+import getCode  # 自动同步 yyb_go 存活账号
 # cron: 58 11,16 * * *
 # -*- coding: utf-8 -*-
 # name: 巅峰美缝师
@@ -28,7 +29,6 @@ import random
 import hashlib
 import datetime
 import requests
-from getCode import get_single_code
 from typing import Optional, Dict, Any, List, Tuple
 
 # 通知模块

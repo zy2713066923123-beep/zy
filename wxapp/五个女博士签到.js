@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 /*
 ------------------------------------------
 @Author: sm
@@ -30,7 +31,6 @@ class Env {
 
 
 
-const { getSingleCode } = require('./getCode.js');
 const getWxCode = (wxid, appid) => getSingleCode(appid, String(wxid).split('#')[0].trim());
 const $ = new Env("五个女博士微信小程序签到");
 const axios = require("axios");

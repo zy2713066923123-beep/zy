@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 ﻿// name:临水玉泉
 /**
 微信协议-临水玉泉（getCode.js 统一版）
@@ -10,7 +11,6 @@ cron: 10 10,13 * * *
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const { getSingleCode } = require('./getCode.js'); // 共享微信小程序 code 获取模块（自动路由牛子/应用宝，读取 WX_ID）
 
 const APPID = 'wx21293beab739d5c3';
 const KDT_ID = '44353481';

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+import getCode  # 自动同步 yyb_go 存活账号
 # name: 认养一头牛
 # cron: 17 9,22 * * *
 
@@ -28,7 +29,6 @@ import random
 import time
 import re
 from datetime import datetime, timezone, timedelta
-from getCode import get_single_code
 
 try:
     from SendNotify import capture_output
@@ -66,9 +66,9 @@ ANSWER_CACHE = {}
 #   WXAPP_SERVICE_URL  兼容别名，等价于 YYB_SERVER
 WX_IDS = [s.strip() for s in os.getenv("WX_ID", "").replace("&", "\n").splitlines() if s.strip()]
 YYB_HOST = (
-    os.getenv("YYB_SERVER", "").strip()
+    (os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or "").strip()
     or os.getenv("WXAPP_SERVICE_URL", "").strip()
-    or os.getenv("WECHAT_SERVER", "").strip()
+    or (os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or "").strip()
 )
 if YYB_HOST:
     YYB_HOST = YYB_HOST.replace("http://", "").replace("https://", "").rstrip("/")

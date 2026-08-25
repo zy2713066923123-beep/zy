@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+import getCode  # 自动同步 yyb_go 存活账号
 """
 cron: 42 9,16 * * *
 脚本名称：捷停车自动任务
@@ -31,7 +32,6 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional
 from urllib.parse import parse_qsl, quote
 
-import getCode  # 共享的微信小程序 code 获取模块（自动路由 牛子/应用宝，读取 WX_ID 过滤）
 
 # 强制全局禁用所有系统代理环境变量
 for env_var in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 

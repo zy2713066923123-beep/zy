@@ -1,3 +1,4 @@
+import getCode  # 自动同步 yyb_go 存活账号
 # cron: 10 9,13 * * *
 
 """
@@ -33,7 +34,6 @@ import traceback
 
 import requests
 
-from getCode import get_single_code
 
 try:
     from notify import send as notify_send

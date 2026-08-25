@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+import getCode  # 自动同步 yyb_go 存活账号
 """
 ------------------------------------------
 @Author: sm
@@ -44,10 +45,7 @@ except ImportError:
     print("缺少 requests 依赖，请在青龙容器中执行: pip3 install requests")
     sys.exit(1)
 
-try:
-    from getCode import get_single_code
-except ImportError:
-    get_single_code = None
+
 
 
 BASE_URL = "https://net.todaypayforyou.fun/YSKJ/api"
@@ -313,5 +311,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-

@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 // name:伊家乐享会
 // cron:38 11,16 * * *
 
@@ -20,7 +21,6 @@
  *
  */
 
-const { getSingleCode } = require('./getCode');
 
 const APP_NAME = '伊家乐享会';
 const APPID = 'wxd606233dfaf91cae';

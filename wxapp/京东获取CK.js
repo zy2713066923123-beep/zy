@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 // name:京东获取CK
 // - export WX_SERVER='http://127.0.0.1:8000'
 // - wxjd：wxid#备注
@@ -6,7 +7,6 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const axios = require('axios');
-require('./getCode.js');
 
 // 多账号之间的延迟（毫秒）
 const ACCOUNT_DELAY_MS = 10000;
@@ -85,7 +85,6 @@ async function wxPost(paths, body, timeout = 20000) {
 }
 
 async function getWxCode(wxid) {
-  const { getSingleCode } = require('./getCode.js');
   try {
     const actualWxid = String(wxid).split('#')[0].trim();
     const code = await getSingleCode(APPID, actualWxid);

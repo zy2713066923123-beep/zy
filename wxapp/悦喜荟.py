@@ -17,6 +17,7 @@
 """
 
 from __future__ import annotations
+import getCode  # 自动同步 yyb_go 存活账号
 
 import hashlib
 import importlib.util
@@ -33,7 +34,6 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import requests
 
-from getCode import get_single_code
 
 # ========================= 业务常量（一般不用改） =========================
 APP_ID = "wx4a9b92a0680e7b29"

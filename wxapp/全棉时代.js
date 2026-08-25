@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 /**
  日期：2026-4-15
  软件：全棉时代
@@ -7,7 +8,6 @@
 
 const $ = new Env('全棉时代');
 const axios = require('axios');
-const { getSingleCode } = require('./getCode.js');
 const sendNotify = require('../sendNotify');
 const {log} = console;
 const debug = 0; //0为关闭调试，1为打开调试,默认为0

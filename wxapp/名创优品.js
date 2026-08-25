@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 // name: 名创优品
 // cron: 30 8 * * *
 const axios = require('axios');
@@ -6,7 +7,6 @@ const fs = require('fs');
 const path = require('path');
 
 // ============ 统一取码（WX_ID + getCode，支持牛子/YYB 双协议自动路由）============
-const { getSingleCode } = require('./getCode.js');
 
 const WX_IDS = (process.env.WX_ID || "")
     .split(/[\r\n|&]+/)

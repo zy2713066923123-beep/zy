@@ -1,3 +1,4 @@
+import getCode  # 自动同步 yyb_go 存活账号
 # cron: 35 9,15 * * * *
 import os
 # name: 申工社
@@ -5,7 +6,6 @@ import time
 import json as _json
 import pathlib
 import requests
-from getCode import get_single_code
 import logging
 import random
 from datetime import datetime
@@ -335,7 +335,7 @@ def should_run_today(wxid, remark, cache):
 
 if __name__ == "__main__":
 
-    WX_SERVER = os.environ.get("WECHAT_SERVER", "")
+    WX_SERVER = (os.environ.get("WX_SERVER") or os.environ.get("WECHAT_SERVER") or "")
     if not WX_SERVER:
         log.warning("未配置 WECHAT_SERVER，请检查环境变量")
 

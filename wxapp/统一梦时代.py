@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import getCode  # 自动同步 yyb_go 存活账号
 # cron: 26 11,13 * * *
 """
 # name: 统一梦时代
@@ -43,7 +44,6 @@ from Crypto.Hash import SHA256
 from Crypto.PublicKey import RSA
 from Crypto.Random import get_random_bytes
 
-from getCode import get_single_code, get_single_phone_number
 
 
 # ============================================================

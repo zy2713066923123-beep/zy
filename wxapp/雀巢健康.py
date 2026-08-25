@@ -1,3 +1,4 @@
+import getCode  # 自动同步 yyb_go 存活账号
 
 # cron: 55 10,16 * * *
 #!/usr/bin/env python3
@@ -30,7 +31,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
-from getCode import get_single_code
 
 try:
     from notify import send as notify_send

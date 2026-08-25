@@ -284,7 +284,16 @@ class YYBAdapter {
             }
         }
 
-        // 4. 备注序号匹配
+        // 4. 匹配昵称/备注
+        if (parsed.note) {
+            for (const acc of accounts) {
+                if (acc.nickname === parsed.note || acc.alias === parsed.note) {
+                    return acc;
+                }
+            }
+        }
+
+        // 5. 备注序号匹配 (e.g. #1, #2)
         if (/^\d+$/.test(parsed.note)) {
             const idx = parseInt(parsed.note, 10) - 1;
             if (idx >= 0 && idx < accounts.length) {
@@ -292,7 +301,20 @@ class YYBAdapter {
             }
         }
 
-        // 5. 唯一可用账号
+        // 6. 如果环境变量 WX_ID 中配置的是旧版 wxid_xxx（在 yyb_go 中不存在对应 openid）：
+        // 自动按配置项顺序匹配到 yyb_go 中的存活账号
+        const wxIdEnv = (process.env.WX_ID || "").trim();
+        if (wxIdEnv) {
+            const rawEntries = wxIdEnv.split(/[@&\n\r|]+/).map(x => parseIdentifier(x).rawId).filter(Boolean);
+            const idx = rawEntries.indexOf(rawId);
+            if (idx >= 0 && idx < accounts.length) {
+                const mapped = accounts[idx];
+                console.log(`[getCode] 智能映射: 旧版标识 [${rawId}] 自动匹配 yyb_go 账号 [${idx + 1}: ${mapped.nickname || mapped.id}]`);
+                return mapped;
+            }
+        }
+
+        // 7. 唯一可用账号
         if (accounts.length === 1) {
             return accounts[0];
         }
@@ -309,7 +331,13 @@ class YYBAdapter {
         const acc = await this._resolveAccount(wxidOrOpenid, expectLoginType);
         const fallback = parsed.rawId || String(wxidOrOpenid);
         if (!acc) return fallback;
-        return String(acc.id || '') || fallback;
+        if (acc.id !== undefined && acc.id !== null) {
+            return String(acc.id);
+        }
+        if (acc.openid) {
+            return String(acc.openid);
+        }
+        return fallback;
     }
 
     async getAccounts() {

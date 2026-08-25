@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import getCode  # 自动同步 yyb_go 存活账号
 # name: 宝妈上班
 # -*- coding: utf-8 -*-
 """
@@ -45,7 +46,6 @@ import os
 import sys
 import base64
 import requests
-from getCode import get_single_code
 
 # ============ 常量配置 (已从wxapkg提取 / 已逆向验证) ============
 SPACE_ID = "mp-50d375d9-5c5e-4271-8517-b09cb093334b"

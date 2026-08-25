@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import getCode  # 自动同步 yyb_go 存活账号
 # cron: 30 9,16 * * *
 # @Time     : 2025-12-25
 # name: 蒙娜丽莎
@@ -14,7 +15,6 @@ import os
 import time
 import random
 import requests
-from getCode import get_single_code
 
 try:
     from notify import send

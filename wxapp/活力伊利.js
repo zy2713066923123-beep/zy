@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 // name:活力伊利
 // cron:57 9,16 * * *
 
@@ -20,7 +21,6 @@
 
 const fs = require('fs');
 const path = require('path');
-const { getSingleCode } = require('./getCode');
 
 const APP_NAME = '活力伊利';
 const CACHE_FILE = path.join(__dirname, 'hlylck.txt');

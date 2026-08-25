@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 /**
  * 多账号：账号来源 / wx code / 手机号加密数据(encryptedData/iv) 全部统一走 getCode.js
  * （自动路由牛子/应用宝，读取 WX_ID 筛选账号）。不再直接依赖 8000 服务。
@@ -13,7 +14,6 @@ const $ = Env('战马能量星球');
 const fs = require('fs');
 const path = require('path');
 const notify = $.isNode() ? require('../sendNotify') : '';
-const getCode = require('./getCode.js'); // 共享账号列表/wx code/手机号加密数据（读取 WX_ID，自动路由牛子/应用宝）
 const Notify = 0;
 const debug = 0;
 const ganta = 1;

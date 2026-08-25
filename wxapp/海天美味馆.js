@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 /*
 ------------------------------------------
 @Author: sm
@@ -44,7 +45,6 @@ const $ = new Env("海天美味馆小程序");
 const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
-const { getSingleCode, getSingleOperateWxData } = require("./getCode.js");
 
 const ckName = "WX_ID";
 const strSplitor = "#";

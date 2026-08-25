@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 /*
  * name: 骆驼户外运动城签到
  * cron: 20 8 * * *
@@ -37,7 +38,6 @@ const path = require('path');
 const crypto = require('crypto');
 require('events').defaultMaxListeners = 50;
 
-const getCode = require('./getCode.js');
 const getSingleCode = getCode.getSingleCode;
 const getSinglePhoneEncrypted = getCode.getSinglePhoneEncrypted;
 const { sendNotify } = require('../sendNotify.js');

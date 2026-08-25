@@ -1,3 +1,4 @@
+import getCode  # 自动同步 yyb_go 存活账号
 # name: 都市甜心
 # cron: 0 8,14 * * *
 # -*- coding: utf-8 -*-
@@ -34,7 +35,6 @@ from urllib.parse import quote
 
 import requests
 
-import getCode
 
 try:
     from notify import send as notify_send

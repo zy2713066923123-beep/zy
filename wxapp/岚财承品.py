@@ -1,3 +1,4 @@
+import getCode  # 自动同步 yyb_go 存活账号
 
 # name:岚财承品
 # cron:10 9,15 * * *
@@ -148,10 +149,7 @@ import requests
 import urllib3
 
 # ============ 统一取码（WX_ID + getCode，支持牛子/YYB 双协议自动路由）============
-try:
-    from getCode import get_single_code
-except ImportError:
-    get_single_code = None
+
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 

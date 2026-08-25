@@ -1,3 +1,4 @@
+import getCode  # 自动同步 yyb_go 存活账号
 #  修改脚本 563行的配置信息
 #  脚本同文件夹放青龙面板自带的notify.py推送脚本
 """
@@ -55,11 +56,7 @@ from pathlib import Path
 # 1. getCode.py 标准模式（推荐）：获取微信code
 # 2. 牛子协议高级模式（可选）：获取加密密钥/云函数/手机号等
 try:
-    from getCode import get_single_code
-    try:
-        from getCode import get_single_operate_wx_data
-    except ImportError:
-        get_single_operate_wx_data = None
+    
     _HAS_GETCODE = True
 except ImportError:
     get_single_operate_wx_data = None

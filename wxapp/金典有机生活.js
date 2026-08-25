@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 // name:金典
 // cron:30 11,15 * * *
 
@@ -22,7 +23,6 @@
 
 const fs = require('fs');
 const path = require('path');
-const { getSingleCode } = require('./getCode');
 
 const APP_NAME = '金典';
 const CACHE_FILE = path.join(__dirname, 'jdlck.txt');

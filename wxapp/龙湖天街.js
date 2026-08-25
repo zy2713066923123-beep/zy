@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 /**
 // name: 龙湖天街
 ------------------------------------------
@@ -22,7 +23,6 @@ WX_ID 格式：
 */
 
 const axios = require("axios");
-const { getSingleCode } = require("./getCode.js");
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");

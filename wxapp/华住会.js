@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 /**
 // name: 华住会
 ------------------------------------------
@@ -24,7 +25,6 @@ WX_ID 格式：
 const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
-const { getSingleCode } = require("./getCode.js");
 // ====================== 账号（环境变量 WX_ID = wxid#备注，换行或&） ======================
 const SERVERS = (process.env.WX_ID || "")
     .split(/\r?\n|&/)

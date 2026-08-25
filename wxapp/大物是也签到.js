@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 /*
 ------------------------------------------
 @Author: sm
@@ -17,7 +18,6 @@ WX_ID 格式：
 */
 
 const axios = require("axios");
-const { getSingleCode } = require("./getCode.js");
 
 // ============ 配置 ============
 const APP_ID = "wx9d7354501dec9fe8";

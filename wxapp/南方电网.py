@@ -1,3 +1,4 @@
+import getCode  # 自动同步 yyb_go 存活账号
 """
  name: 南方电网
  cron: 17 8,22 * * *
@@ -38,11 +39,7 @@ from urllib.parse import quote
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # 统一取码（与项目其它脚本一致：WX_ID + getCode 双协议自动路由）
-try:
-    from getCode import get_single_code
-except Exception as exc:
-    print(f"[警告] getCode.py 导入失败：{exc}，WX_ID 取码不可用，仅支持环境变量 token 兜底")
-    get_single_code = None
+from getCode import get_single_code
 
 # 统一通知：桥接青龙内置 notify（无环境则降级为仅打印，绝不抛异常）
 try:

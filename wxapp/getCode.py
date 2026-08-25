@@ -237,7 +237,13 @@ class YYBAdapter:
                 if str(acc.get("id", "")) == raw_id or str(acc.get("uin", "")) == raw_id:
                     return acc
 
-        # 3. 唯一前缀匹配
+        # 3. 匹配 nickname / alias
+        if parsed.get("note"):
+            for acc in accounts:
+                if acc.get("nickname") == parsed["note"] or acc.get("alias") == parsed["note"]:
+                    return acc
+
+        # 4. 唯一前缀匹配
         if len(raw_id) >= 8:
             prefix_hits = [
                 acc for acc in accounts
@@ -246,17 +252,26 @@ class YYBAdapter:
             if len(prefix_hits) == 1:
                 return prefix_hits[0]
 
-        # 4. 备注号选择
+        # 5. 备注号选择 (#1, #2)
         note_match = re.search(r'#(\d+)$', str(wxid_or_openid))
         if note_match:
             idx_1based = int(note_match.group(1))
             if 1 <= idx_1based <= len(accounts):
                 return accounts[idx_1based - 1]
 
-        # 5. 唯一可用账号
-        if len(accounts) == 1:
-            return accounts[0]
+        # 6. 如果环境变量 WX_ID 中配置的是旧版 wxid_xxx（在 yyb_go 中不存在对应 openid）：
+        # 自动按配置项顺序匹配到 yyb_go 中的存活账号
+        wx_id_env = os.getenv("WX_ID") or ""
+        if wx_id_env:
+            raw_entries = [parse_identifier(x)["raw_id"] for x in re.split(r'[@&\n\r|]+', wx_id_env) if x.strip()]
+            if raw_id in raw_entries:
+                idx = raw_entries.index(raw_id)
+                if 0 <= idx < len(accounts):
+                    mapped = accounts[idx]
+                    print(f"[getCode] 智能映射: 旧版标识 [{raw_id}] 自动匹配 yyb_go 账号 [{idx+1}: {mapped.get('nickname') or mapped.get('id')}]")
+                    return mapped
 
+        # 7. 兜底首个可用账号
         if accounts:
             return accounts[0]
 
@@ -265,10 +280,11 @@ class YYBAdapter:
     def _resolve_ref(self, wxid_or_openid: str,
                      expect_login_type: Optional[str] = None) -> str:
         acc = self._resolve_account(wxid_or_openid, expect_login_type)
-        fallback = parse_identifier(wxid_or_openid)["raw_id"] or str(wxid_or_openid)
-        if acc:
-            return str(acc.get("id", "")) or fallback
-        return fallback
+        if acc and acc.get("id") is not None:
+            return str(acc.get("id"))
+        if acc and acc.get("openid"):
+            return str(acc.get("openid"))
+        return parse_identifier(wxid_or_openid)["raw_id"] or str(wxid_or_openid)
 
     def get_accounts(self) -> List[Dict]:
         """获取存活账号列表"""

@@ -11,6 +11,7 @@ cron: 0 8,12,20 * * *
 """
 
 from __future__ import annotations
+import getCode  # 自动同步 yyb_go 存活账号
 
 import json
 import os
@@ -24,7 +25,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 import urllib3
 
-import getCode
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 SCRIPT_NAME = "旧衣客"

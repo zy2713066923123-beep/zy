@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 // name:问问农
 /**
  * 问问农
@@ -35,7 +36,6 @@
 
 'use strict';
 
-const { getSingleCode } = require('./getCode');
 
 const ENV_NAME = 'wwnhd';
 

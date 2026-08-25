@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 壹票达小程序 - 青龙每日签到
@@ -16,6 +16,7 @@ cron: 18 9,17 * * *
 """
 
 from __future__ import annotations
+import getCode  # 自动同步 yyb_go 存活账号
 
 import hashlib
 import importlib.util
@@ -34,7 +35,6 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlencode
 
 import requests
-import getCode
 
 
 # =========================

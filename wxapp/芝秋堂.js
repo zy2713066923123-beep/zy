@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 /*
  * name: 芝秋堂
  * cron: 16 9,17 * * *
@@ -23,7 +24,6 @@ const axios = require('axios');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { getSingleCode } = require('./getCode.js'); // 共享微信小程序 code 获取模块（统一 WX_ID 路由 牛子/应用宝）
 
 // ==================== 头部集中配置 ====================
 const ACCOUNT_ENV = 'WX_ID';

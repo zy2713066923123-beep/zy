@@ -1,4 +1,5 @@
-﻿# cron: 59 10,13 * * *
+import getCode  # 自动同步 yyb_go 存活账号
+# cron: 59 10,13 * * *
 
 # name: 顺丰速运积分任务
 
@@ -32,7 +33,6 @@ from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 # getCode 标准模式（优先），导入失败则回退牛子/YYB（与其他脚本一致）
 try:
-    from getCode import get_single_code as _gc_get_single_code
     _HAS_GETCODE = True
 except Exception:
     _gc_get_single_code = None

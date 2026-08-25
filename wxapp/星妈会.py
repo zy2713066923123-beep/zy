@@ -1,3 +1,4 @@
+import getCode  # 自动同步 yyb_go 存活账号
 
 # cron: 24 11,16 * * *
 #!/usr/bin/env python3
@@ -43,7 +44,6 @@ import sys
 from datetime import datetime
 from urllib.parse import urlencode
 
-from getCode import get_single_code
 
 # 消息通知开关 (True/False)
 ENABLE_NOTIFY = False
@@ -381,7 +381,7 @@ def get_env_data():
     import re
     # 优先读取 WX_ID，支持 fallback 到 FEIHE_DATA 兼容旧版本，不再需要解析 Authorization 等复杂变量，直接读取微信 ID
     wxid_raw = (os.getenv("WX_ID") or os.getenv("FEIHE_DATA") or "").strip()
-    wechat_server = os.getenv("WECHAT_SERVER", "").strip()
+    wechat_server = (os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or "").strip()
     if not wxid_raw:
         print("❌ 未找到环境变量 WX_ID 或 FEIHE_DATA")
         return []
@@ -429,7 +429,7 @@ def main():
             wxid=acc.get('wxid', ''),
             remark=acc.get('remark', ''),
             index=i,
-            wechat_server=os.getenv("WECHAT_SERVER", "")
+            wechat_server=(os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or "")
         )
         client.run()
         # 账号间延迟
