@@ -1470,14 +1470,18 @@ if __name__ == "__main__":
 
         if cached_token and token_valid(cached_token):
             log.info("   🔑 使用缓存 token"); client.set_token(cached_token)
+            client.wxid = wxid
             wx = WxAdapter(WX_SERVER)
+            client._wx = wx
             try:
                 enc = wx.get_user_encrypt_key(wxid, APPID)
                 if enc.get("success"):
                     client.set_crypto(enc["encrypt_key"], enc["iv"], version=enc.get("version", 3))
-                    log.info("   🔐 加密密钥已获取  version=%s" % enc.get("version"))
-            except Exception:
-                pass
+                    log.info("   🔐 加密密钥已就绪  version=%s" % enc.get("version"))
+                else:
+                    log.info("   ℹ️  该通道未提供独立加密密钥，以标准模式运行")
+            except Exception as e:
+                log.warning("   ⚠️  获取加密密钥异常: %s" % e)
 
         if not cached_token or not token_valid(cached_token):
             log.info("   🔄 token 无效或已过期，重新登录...")
