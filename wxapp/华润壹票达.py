@@ -2,13 +2,14 @@
 # -*- coding: utf-8 -*-
 """
 壹票达小程序 - 青龙每日签到
-cron: 18 9,17 * * *
+cron: 18 9,17 * * *
+
 # name: 华润壹票达
 环境变量（
   WX_ID / ypd_wxid / YPD_WXID
       格式：wxid#备注，多账号换行或 @
       兼容：备注#wxid（备注不以 wxid_ 开头时）
-  WECHAT_SERVER   牛子协议服务，默认 http://127.0.0.1:8011
+  WECHAT_SERVER   牛子协议服务，默认 http://127.0.0.1:8000
                   （仅手机号加密包使用 /get/all/mobile；YYB 账号由 getCode 自动路由）
   YYB_SERVER      应用宝(YYB) 服务地址（getCode 读取，auto 模式自动路由）
 
@@ -45,7 +46,7 @@ DEFAULT_VER = "4.63.0"
 DEFAULT_SRC = "weixin_mini"
 DEFAULT_TERMINAL_SRC = "WEIXIN_MINI"
 DEFAULT_UTC_OFFSET = "480"
-DEFAULT_WECHAT_SERVER = "http://127.0.0.1:8011"
+DEFAULT_WECHAT_SERVER = "http://127.0.0.1:8000"
 API_HOST = "https://crld.caiyicloud.com"
 NOTIFY_TITLE = "壹票达签到"
 
@@ -828,7 +829,7 @@ def main() -> None:
             "未配置账号。请设置环境变量 ypd_wxid + WECHAT_SERVER（推荐）。\n"
             "示例:\n"
             "  export ypd_wxid='wxid_xxx#备注'\n"
-            "  export WECHAT_SERVER='http://127.0.0.1:8011'\n"
+            "  export WX_SERVER='http://127.0.0.1:8000'\n"
             "可选回退: ypd_token / YPD_ANGRY_DOG / YPD_COOKIE"
         )
         print(msg)

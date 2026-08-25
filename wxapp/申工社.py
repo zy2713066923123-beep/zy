@@ -36,7 +36,7 @@ CACHE_NAME = "sgs"
                     wxid_abc123#张三
                     wxid_xyz456
 
-  WECHAT_SERVER   微信协议服务地址（可选，在 getCode.py 中配置）
+  WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:8000）（可选，在 getCode.py 中配置）
 
 ========================================
 """

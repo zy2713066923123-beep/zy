@@ -53,17 +53,14 @@ if (!WX_IDS.length) {
     process.exit(1);
 }
 
-const YYB_SERVER = (process.env.YYB_SERVER || "").trim();
-const WECHAT_SERVER = (process.env.WECHAT_SERVER || "").trim();
+const SERVER = (process.env.WX_SERVER || process.env.YYB_SERVER || process.env.WECHAT_SERVER || "").trim();
 
-if (!YYB_SERVER && !WECHAT_SERVER) {
-    console.log("❌ 未配置取码服务地址，请设置 YYB_SERVER 或 WECHAT_SERVER 后重试");
+if (!SERVER) {
+    console.log("❌ 未配置取码服务地址，请设置 WX_SERVER 后重试");
     process.exit(1);
 }
 
-// 不强制 SERVER_TYPE，由统一 getCode 模块按 WX_ID 标识格式自动路由双协议
-if (YYB_SERVER) process.env.YYB_SERVER = YYB_SERVER;
-if (WECHAT_SERVER) process.env.WECHAT_SERVER = WECHAT_SERVER;
+if (!process.env.WX_SERVER) process.env.WX_SERVER = SERVER;
 console.log(`✅ 读取到 ${WX_IDS.length} 个微信账号，自动路由牛子/YYB 双协议`);
 
 const PLUSPLUS_TOKEN = process.env.PLUSPLUS_TOKEN || "";

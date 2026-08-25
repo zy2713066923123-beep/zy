@@ -18,7 +18,7 @@
  *       token#deviceId#userAgent#clientBuild#encryptKey#iv#version
  *
  * 可选：
- *   WECHAT_SERVER=http://127.0.0.1:xxxx   牛子协议服务（默认 http://192.168.6.222:8011）
+ *   WECHAT_SERVER=http://127.0.0.1:xxxx   牛子协议服务（默认 http://127.0.0.1:8000）
  *   YYB_SERVER=http://127.0.0.1:8000      应用宝服务
  *   REELIX_INVITE_CODE=xxxx               邀请码，可选
  *   REELIX_USER_KEY=encryptKey#iv#version  全局微信用户加密 key，不配置时会跳过签到/红包领取/提现
@@ -61,7 +61,7 @@ const getSingleCode = getCode.getSingleCode;
 const ENV_NAME = 'REELIX_AUTH';
 const APPID = 'wx82b9bc71fff22c52';
 const BASE_URL = 'https://live.mkjsy.com/reelix/api/v1/app';
-const WECHAT_SERVER = String(process.env.WECHAT_SERVER || '').replace(/\/$/, '');
+const WECHAT_SERVER = String(process.env.WX_SERVER || process.env.WECHAT_SERVER || '').replace(/\/$/, '');
 const REELIX_INVITE_CODE = String(process.env.REELIX_INVITE_CODE || 'JEL3OH').trim();
 const DEFAULT_BUILD = '2026-07-25 17:41:50';
 const DEFAULT_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.75(0x18004b47) NetType/4G Language/zh_CN';

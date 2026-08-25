@@ -12,7 +12,7 @@ cron: 25 10,13 * * *
 
 自动登录相关环境变量：
 
-  WX_ID=wxid#备注 (或 IQOO_WXID)
+  WX_SERVER=http://127.0.0.1:8000 (必填); WX_ID=wxid#备注 (可选白名单)
   多账号使用换行或 @ 分隔
  
 任务控制：
@@ -748,7 +748,7 @@ def get_wx_user_info(wxid: str, log: LogFunc) -> Dict[str, Any]:
     }
 
     if is_yyb:
-        yyb_server = (os.getenv("YYB_SERVER") or os.getenv("YINGYOGBAO_SERVER") or "http://127.0.0.1:8000").rstrip('/')
+        yyb_server = (os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or os.getenv("YINGYOGBAO_SERVER") or "http://127.0.0.1:8000").rstrip('/')
         resolved_ref = raw_id
         try:
             r = requests.get(f"{yyb_server}/accounts", timeout=15)

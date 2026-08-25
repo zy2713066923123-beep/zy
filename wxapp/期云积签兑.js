@@ -11,7 +11,7 @@
  *   多账号可用换行、& 分割
  *
  * 微信协议中转服务器：
- *   WECHAT_SERVER=http://127.0.0.1:8011
+ *   WECHAT_SERVER=http://127.0.0.1:8000
  *
  * 可选控制变量：
  *   QYQD_DRY_RUN=1       只登录不执行
@@ -46,7 +46,7 @@ const CONFIG = {
   lotteryDelay: toNumber(process.env.QYQD_LOTTERY_DELAY, 1),
   globalInviteCode: (process.env.QYQD_INVITE_CODE || '').trim(),
   sharedDeviceId: (process.env.QYQD_DEVICE_ID || '').trim(),
-  wechatServer: buildWechatCodeUrl(process.env.WECHAT_SERVER || ''),
+  wechatServer: buildWechatCodeUrl(process.env.WX_SERVER || process.env.WECHAT_SERVER || ''),
   miniAppId: (process.env.QYQD_MINI_APPID || 'wx958515f1809b73c0').trim(),
   notify: process.env.QYQD_NOTIFY !== '0' && !isTruthy(process.env.QYQD_NO_NOTIFY),
 };
@@ -609,9 +609,6 @@ async function main() {
   if (CONFIG.dryRun) console.log('当前为 dry-run：不会提交签到或领奖接口');
   const accounts = parseAccounts();
   if (accounts.length === 0) throw new Error('未找到环境变量 WX_ID 或 qyqd');
-  if (accounts.some((account) => account.mode === 'wxid') && !CONFIG.wechatServer) {
-    throw new Error('wxid 自动登录需要配置 WECHAT_SERVER');
-  }
 
   for (let i = 0; i < accounts.length; i++) {
     try {

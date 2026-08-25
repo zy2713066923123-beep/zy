@@ -1,7 +1,7 @@
 # cron: 35 9,16 * * *
-# 1 必须设置环境变量 WECHAT_SERVER，值为微信中转服务地址。
+# 1 环境变量 WX_SERVER 填 yyb_go 服务地址（例如：http://127.0.0.1:8000）
 # name: 七彩虹社区商城
-# 2 必须设置环境变量 WX_ID，格式为：wxid#备注
+# 2 环境变量 WX_ID（可选，默认自动拉取 yyb_go 上所有存活账号，支持 wxid#备注 白名单过滤）
 #    多账号支持使用换行或 @ 分隔，例如：
 #    wxid_xxx#主号@wxid_yyy#小号
 
@@ -88,7 +88,7 @@ def 读取配置(配置文件路径):
 
     配置 = 深度更新(配置, 内容)
 
-    环境变量中转服务 = (os.getenv("WECHAT_SERVER") or "").strip()
+    环境变量中转服务 = (os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or "").strip()
     if 环境变量中转服务:
         配置["中转服务器"] = 环境变量中转服务
 

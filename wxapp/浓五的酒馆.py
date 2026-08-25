@@ -15,7 +15,7 @@ cron: 0 0 11,14 * * *
 ------------------------------------------
 
 变量：
-  WX_ID          微信账号（openid/wxid），多账号换行 / & 分隔，必须配置
+  WX_ID          (可选白名单) 微信账号，多账号换行/&分隔，留空自动拉取 yyb_go 所有存活账号
   PLUSPLUS_TOKEN PushPlus token（可选，用于结果推送）
   PROXY_API      品赞代理提取 API（可选）
   PROXY_TYPE     http / socks5（默认 http）

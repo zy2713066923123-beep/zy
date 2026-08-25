@@ -22,8 +22,8 @@ const addFriend = 1;
 // ===================== 配置 =====================
 // 应用宝服务地址：手机号加密数据(encryptedData/iv)由其 /wxapp/getPhoneNumber 返回
 // 兼容旧的 WX_SERVICE 变量；战马旧版仅依赖 8000(应用宝) 服务，故默认走应用宝协议
-if (!process.env.YYB_SERVER) {
-    process.env.YYB_SERVER = process.env.WX_SERVICE || 'http://192.168.4.26:8000';
+if (!process.env.WX_SERVER && !process.env.YYB_SERVER) {
+    process.env.WX_SERVER = process.env.WX_SERVICE || 'http://192.168.4.26:8000';
 }
 if (!process.env.SERVER_TYPE) {
     process.env.SERVER_TYPE = 'yyb';

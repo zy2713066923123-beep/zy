@@ -20,8 +20,8 @@ cron: 26 8,14 * * *
 7、所有直接或间接使用、查看此脚本的人均应该仔细阅读此声明。本人保留随时更改或补充此声明的权利。一旦您使用或复制了此脚本，即视为您已接受此免责声明。
 
 变量：
-  WECHAT_SERVER  微信协议服务地址，默认 http://192.168.6.222:8011
-  WX_ID         微信账号，多账号支持换行、& 分隔，必须配置
+  WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:8000）
+  WX_ID         (可选白名单) 微信账号，多账号支持换行、& 分隔，留空自动拉取 yyb_go 所有存活账号
 
 WX_ID 格式：
   wxid#备注  多个换行
@@ -68,7 +68,7 @@ const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
 const defaultUserAgent = USER_AGENT;
 
 const wechat = new WeChatServer({
-    url: process.env.WECHAT_SERVER || "http://192.168.6.222:8011",
+    url: process.env.WX_SERVER || process.env.WECHAT_SERVER || "http://127.0.0.1:8000",
     appid: MINI_APP_ID,
     WX_ID: process.env.WX_ID || "",
 });

@@ -1,45 +1,212 @@
-﻿// name: 微信Code获取模块
+// name: 微信Code获取模块
 /**
- * 微信小程序登录Code获取模块（双协议支持）
- * 
- * 默认策略: 双协议 Fallback 模式
- *   优先使用牛子(Wechat)获取code，失败后自动切换到应用宝(YYB)重试
- * 
- * 环境变量：
- *     WECHAT_SERVER: 牛子协议服务地址（默认 http://192.168.6.222:8011）
- *     YYB_SERVER:    应用宝服务地址（默认 http://127.0.0.1:8000）
+ * 微信小程序登录Code获取模块（yyb_go 统一协议网关）
  *
- *     ADMIN_KEY:     牛子管理密钥（仅WeChatPadPro/iwechat需要）
- *     WX_ID:         可选，指定要获取Code的微信账号ID
+ * 对接 yyb_go 服务，自动从服务端获取存活账号，并根据账号的 login_type 自适应走不同的底层协议：
+ *   - WX   (应用宝 iLink/MMTLS): 支持全功能取码、手机号、云函数、运动步数，服务端自动续期
+ *   - SYZS (手游助手 login_buffer): 支持标准小程序取码
+ *   - WMPF (微信小程序 transfer): 支持标准小程序取码、手机号，失效时提示重扫
+ *
+ * 环境变量：
+ *     WX_SERVER:     yyb_go 服务地址（推荐，默认 http://127.0.0.1:8000）
+ *                    同时兼容 YYB_SERVER / WECHAT_SERVER / YINGYONGBAO_SERVER
+ *     WX_ID:         可选，默认留空自动拉取 yyb_go 上所有存活账号。
+ *                    若配置则作为白名单过滤（支持 id/openid，多个用 & 或换行分隔，支持 #备注）。
  */
 
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const { spawnSync } = require('child_process');
 
 // ============================================================
-//  YYB Server（应用宝）适配器
+//  服务地址解析（首选 WX_SERVER）
+// ============================================================
+function getGlobalServerUrl() {
+    return (
+        process.env.WX_SERVER ||
+        process.env.YYB_SERVER ||
+        process.env.WECHAT_SERVER ||
+        process.env.YINGYONGBAO_SERVER ||
+        'http://127.0.0.1:8000'
+    ).replace(/\/+$/, '');
+}
+
+// ============================================================
+//  YYB 登录模式（与 yyb_go internal/qr 的 LoginType 常量对齐）
+// ============================================================
+const LOGIN_TYPE_WX = 'WX';
+const LOGIN_TYPE_SYZS = 'SYZS';
+const LOGIN_TYPE_WMPF = 'WMPF';
+
+const LOGIN_TYPE_ALIASES = {
+    '': LOGIN_TYPE_WX,
+    'wx': LOGIN_TYPE_WX,
+    'yyb': LOGIN_TYPE_WX,
+    '应用宝': LOGIN_TYPE_WX,
+    'syzs': LOGIN_TYPE_SYZS,
+    '手游助手': LOGIN_TYPE_SYZS,
+    'wmpf': LOGIN_TYPE_WMPF,
+    '微信小程序': LOGIN_TYPE_WMPF,
+    '小程序': LOGIN_TYPE_WMPF,
+};
+
+const LOGIN_TYPE_LABELS = {
+    [LOGIN_TYPE_WX]: '应用宝',
+    [LOGIN_TYPE_SYZS]: '手游助手',
+    [LOGIN_TYPE_WMPF]: '微信小程序',
+};
+
+/** 把任意写法的登录模式归一化为 WX / SYZS / WMPF，未知值一律回退 WX */
+function normalizeLoginType(value) {
+    const key = String(value === undefined || value === null ? '' : value).trim().toLowerCase();
+    return LOGIN_TYPE_ALIASES[key] || LOGIN_TYPE_WX;
+}
+
+/** 返回登录模式的中文展示名 */
+function loginTypeLabel(value) {
+    const lt = normalizeLoginType(value);
+    return LOGIN_TYPE_LABELS[lt] || lt;
+}
+
+// ============================================================
+//  账号标识解析与前缀语法
+// ============================================================
+const IDENTIFIER_SCHEMES = {
+    'yyb': LOGIN_TYPE_WX,
+    'wx': LOGIN_TYPE_WX,
+    'syzs': LOGIN_TYPE_SYZS,
+    'wmpf': LOGIN_TYPE_WMPF,
+    'niuzi': null,
+    'wxid': null,
+    'wechat': null,
+};
+
+/**
+ * 解析账号标识，拆出前缀(scheme)、真实ID与备注。
+ * 支持 `scheme:id#备注`，也兼容无前缀的 `id#备注`。
+ */
+function parseIdentifier(identifier) {
+    const text = String(identifier === undefined || identifier === null ? '' : identifier).trim();
+    let scheme = '';
+    let loginType = null;
+    let body = text;
+
+    const colonIdx = text.indexOf(':');
+    if (colonIdx > 0) {
+        const key = text.slice(0, colonIdx).trim().toLowerCase();
+        if (IDENTIFIER_SCHEMES[key] !== undefined) {
+            scheme = key;
+            loginType = IDENTIFIER_SCHEMES[key];
+            body = text.slice(colonIdx + 1).trim();
+        }
+    }
+
+    const hashIdx = body.indexOf('#');
+    const rawId = (hashIdx >= 0 ? body.slice(0, hashIdx) : body).trim();
+    const note = hashIdx >= 0 ? body.slice(hashIdx + 1).trim() : '';
+
+    return { original: text, scheme, loginType, rawId, note, idWithNote: body };
+}
+
+/** 去掉 scheme 前缀，保留 `id#备注` */
+function stripScheme(identifier) {
+    return parseIdentifier(identifier).idWithNote;
+}
+
+// ============================================================
+//  启动阶段：自动从 yyb_go 拉取账号并同步至 process.env.WX_ID
+// ============================================================
+function bootstrapAccountsSync() {
+    // 若用户显式配置了 WX_ID，则尊重用户配置（作为白名单/目标指定）
+    if (process.env.WX_ID && process.env.WX_ID.trim()) {
+        return;
+    }
+
+    const serverUrl = getGlobalServerUrl();
+    if (!serverUrl) return;
+
+    try {
+        let stdout = '';
+        // 优先尝试 curl（青龙 Linux Docker 和 Windows 10+ 均内置且极快）
+        const curlRes = spawnSync('curl', ['-s', '--max-time', '3', `${serverUrl}/accounts`], {
+            encoding: 'utf8',
+            timeout: 4000,
+        });
+
+        if (curlRes.status === 0 && curlRes.stdout && curlRes.stdout.trim()) {
+            stdout = curlRes.stdout.trim();
+        } else {
+            // 备用方案：通过 node 执行微脚本同步请求
+            const nodeCode = `
+                const http = require(${JSON.stringify(serverUrl)}.startsWith('https') ? 'https' : 'http');
+                http.get(${JSON.stringify(serverUrl + '/accounts')}, { timeout: 3000 }, (res) => {
+                    let d = '';
+                    res.on('data', (c) => d += c);
+                    res.on('end', () => process.stdout.write(d));
+                }).on('error', () => {});
+            `;
+            const nodeRes = spawnSync(process.execPath, ['-e', nodeCode], {
+                encoding: 'utf8',
+                timeout: 4000,
+            });
+            if (nodeRes.status === 0 && nodeRes.stdout && nodeRes.stdout.trim()) {
+                stdout = nodeRes.stdout.trim();
+            }
+        }
+
+        if (!stdout) return;
+
+        const res = JSON.parse(stdout);
+        if (res && res.code === 0 && Array.isArray(res.data)) {
+            // 过滤出未失效的存活账号
+            const aliveAccounts = res.data.filter(acc => {
+                const s = String(acc.status || '').toLowerCase();
+                return ['alive', '', 'unknown'].includes(s);
+            });
+
+            if (aliveAccounts.length > 0) {
+                const formatted = aliveAccounts.map(acc => {
+                    const ident = acc.openid || String(acc.id);
+                    const note = acc.nickname || acc.alias || `账号_${acc.id}`;
+                    return `${ident}#${note}`;
+                }).join('\n');
+
+                process.env.WX_ID = formatted;
+                console.log(`[getCode] 自动从 yyb_go (${serverUrl}) 同步到 ${aliveAccounts.length} 个存活账号:`);
+                aliveAccounts.forEach(acc => {
+                    const name = acc.nickname || acc.alias || '未知';
+                    const lt = normalizeLoginType(acc.login_type);
+                    console.log(`  - [${loginTypeLabel(lt)}] ${name} (id=${acc.id}, openid=${acc.openid})`);
+                });
+            } else {
+                console.log(`[getCode] 提示: yyb_go (${serverUrl}) 当前无存活账号，请先在 yyb_go 扫码登录`);
+            }
+        }
+    } catch (e) {
+        // 静默捕获，不影响单账号手动调用的场景
+    }
+}
+
+// 模块加载时执行同步拉取
+bootstrapAccountsSync();
+
+// ============================================================
+//  YYB Server（yyb_go 网关）适配器
 // ============================================================
 
 class YYBAdapter {
     constructor(serverUrl) {
-        this.serverUrl = serverUrl.replace(/\/+$/, '');
-        this._accountCache = null;  // 缓存账号列表
+        this.serverUrl = (serverUrl || getGlobalServerUrl()).replace(/\/+$/, '');
+        this._accountCache = null;
         this._accountCacheTime = 0;
     }
 
     async healthCheck() {
         try {
             const url = `${this.serverUrl}/health`;
-            console.log(`[YYB] 健康检查: ${url}`);
             const r = await axios.get(url, { timeout: 5000 });
-            console.log(`[YYB] 响应状态: ${r.status}, body: ${JSON.stringify(r.data).slice(0, 100)}`);
-            
-            // 兼容多种响应格式:
-            // - YYB Go: { code: 0, msg: "success", data: { ok: true } }
-            // - 其他: { ok: true }
             if (r.status !== 200) return false;
-            
             const d = r.data;
             return d?.code === 0 || d?.data?.ok === true || d?.ok === true;
         } catch (e) {
@@ -47,17 +214,16 @@ class YYBAdapter {
             return false;
         }
     }
-    
+
     /**
-     * 获取并缓存账号列表
+     * 获取并缓存账号列表（5分钟缓存）
      */
     async _getAccountList() {
         const now = Date.now();
-        // 缓存5分钟
         if (this._accountCache && (now - this._accountCacheTime) < 5 * 60 * 1000) {
             return this._accountCache;
         }
-        
+
         try {
             const r = await axios.get(`${this.serverUrl}/accounts`, { timeout: 15000 });
             if (r.data?.code !== 0 || !Array.isArray(r.data?.data)) {
@@ -71,76 +237,79 @@ class YYBAdapter {
             return [];
         }
     }
-    
+
     /**
-     * 根据 wxid/openid 查找 YYB 数据库中的 ref (优先用 id)
-     * 如果精确匹配失败且有可用账号，会尝试模糊匹配或使用第一个可用账号
+     * 根据 wxid/openid 查找 YYB 数据库中的账号记录
      */
-    async _resolveRef(wxidOrOpenid) {
-        // 防御：identifier 为空（undefined/null/''）时直接给出清晰报错，避免后续 .includes 崩溃
+    async _resolveAccount(wxidOrOpenid, expectLoginType = null) {
         if (wxidOrOpenid === undefined || wxidOrOpenid === null || wxidOrOpenid === '') {
-            throw new Error('identifier 未提供（WX_ID 解析为空），请检查 WX_ID 环境变量或调用参数');
+            throw new Error('identifier 未提供（WX_ID 解析为空），请检查服务状态或调用参数');
         }
-        const accounts = await this._getAccountList();
-        
-        // 精确匹配 openid
-        for (const acc of accounts) {
-            if (acc.openid === wxidOrOpenid) {
-                console.log(`[YYB] 精确匹配: ${wxidOrOpenid} → id=${acc.id}, openid=${acc.openid}`);
-                return String(acc.id);
-            }
-        }
-        
-        // 匹配 id (数字)
-        if (/^\d+$/.test(String(wxidOrOpenid))) {
-            for (const acc of accounts) {
-                if (String(acc.id) === String(wxidOrOpenid)) {
-                    console.log(`[YYB] ID匹配: ${wxidOrOpenid} → id=${acc.id}, openid=${acc.openid}`);
-                    return String(acc.id);
-                }
-            }
-        }
-        
-        // 模糊匹配（部分包含）
-        for (const acc of accounts) {
-            if (acc.openid?.includes(wxidOrOpenid) || wxidOrOpenid.includes(acc.openid || '')) {
-                console.log(`[YYB] 模糊匹配: ${wxidOrOpenid} → id=${acc.id}, openid=${acc.openid}`);
-                return String(acc.id);
+
+        const parsed = parseIdentifier(wxidOrOpenid);
+        const rawId = parsed.rawId;
+        const wantLoginType = expectLoginType || parsed.loginType;
+
+        let accounts = await this._getAccountList();
+
+        if (wantLoginType) {
+            const label = loginTypeLabel(wantLoginType);
+            const scoped = accounts.filter(a => normalizeLoginType(a.login_type) === wantLoginType);
+            if (scoped.length > 0) {
+                accounts = scoped;
             }
         }
 
-        // 打印所有可用账号帮助诊断
-        if (accounts.length > 0) {
-            console.log(`[YYB] ⚠ 无法精确匹配 "${wxidOrOpenid}"，可用账号: ${accounts.map(a => `${a.id}:${a.openid}`).join(', ')}`);
-            
-            // 尝试从原始输入中提取备注号 (#数字)，用于在多账号中选择
-            const noteMatch = String(wxidOrOpenid).match(/#(\d+)$/);
-            
-            if (noteMatch && accounts.length >= parseInt(noteMatch[1])) {
-                // 备注号在范围内，直接选择（1-based index）
-                const idx = parseInt(noteMatch[1]) - 1;
-                const selectedAcc = accounts[idx];
-                console.log(`[YYB] 通过备注#${noteMatch[1]}选择: id=${selectedAcc.id}, openid=${selectedAcc.openid}`);
-                return String(selectedAcc.id);
+        // 1. 精确匹配 openid
+        for (const acc of accounts) {
+            if (acc.openid === rawId) {
+                return acc;
             }
-            
-            if (accounts.length === 1) {
-                // 只有一个可用账号，直接使用
-                console.log(`[YYB] 自动使用唯一可用账号: id=${accounts[0].id}, openid=${accounts[0].openid}`);
-                return String(accounts[0].id);
-            }
-            
-            // 多个账号且无法通过备注选择时，使用第一个账号并给出警告
-            // （适用于大多数单 YYB 账号使用的场景）
-            console.log(`[YYB] ⚠ 多个账号无法确定目标，默认使用第1个账号: id=${accounts[0].id}`);
-            console.log(`[YYB]   提示: 如需指定其他账号，请在 wxid 后添加 #序号 (如 #2)`);
-            return String(accounts[0].id);
-        } else {
-            console.log(`[YYB] ⚠ 无可用账号！请先在应用宝扫码登录`);
         }
-        
-        // 返回原始值，让服务端报错以便调试
-        return wxidOrOpenid;
+
+        // 2. 匹配 id / uin (数字)
+        if (/^\d+$/.test(rawId)) {
+            for (const acc of accounts) {
+                if (String(acc.id) === rawId || String(acc.uin) === rawId) {
+                    return acc;
+                }
+            }
+        }
+
+        // 3. 唯一前缀匹配
+        if (rawId.length >= 8) {
+            const prefixHits = accounts.filter(a => String(a.openid || '').startsWith(rawId));
+            if (prefixHits.length === 1) {
+                return prefixHits[0];
+            }
+        }
+
+        // 4. 备注序号匹配
+        if (/^\d+$/.test(parsed.note)) {
+            const idx = parseInt(parsed.note, 10) - 1;
+            if (idx >= 0 && idx < accounts.length) {
+                return accounts[idx];
+            }
+        }
+
+        // 5. 唯一可用账号
+        if (accounts.length === 1) {
+            return accounts[0];
+        }
+
+        if (accounts.length > 0) {
+            return accounts[0];
+        }
+
+        return null;
+    }
+
+    async _resolveRef(wxidOrOpenid, expectLoginType = null) {
+        const parsed = parseIdentifier(wxidOrOpenid);
+        const acc = await this._resolveAccount(wxidOrOpenid, expectLoginType);
+        const fallback = parsed.rawId || String(wxidOrOpenid);
+        if (!acc) return fallback;
+        return String(acc.id || '') || fallback;
     }
 
     async getAccounts() {
@@ -149,19 +318,19 @@ class YYBAdapter {
             if (r.data?.code !== 0) {
                 throw new Error(r.data?.msg || '获取账号失败');
             }
-            
+
             const list = r.data?.data;
             if (!Array.isArray(list)) {
                 throw new Error(`返回格式错误: ${typeof list}`);
             }
-            
-            // 只返回存活账号
+
             return list
                 .filter(acc => {
                     const s = String(acc.status || '').toLowerCase();
                     return ['alive', '', 'unknown'].includes(s);
                 })
                 .map(acc => ({
+                    id: acc.id,
                     wxid: acc.openid || '',
                     openid: acc.openid || '',
                     uin: acc.uin,
@@ -170,6 +339,7 @@ class YYBAdapter {
                     avatar: acc.avatar,
                     status: 1,
                     loginState: 1,
+                    login_type: normalizeLoginType(acc.login_type),
                     _ref: String(acc.id || '') || acc.openid || '',
                 }));
         } catch (e) {
@@ -177,133 +347,112 @@ class YYBAdapter {
         }
     }
 
-    async getCode(ref, appId) {
+    /**
+     * 获取小程序登录 code（对应 yyb_go 的 POST /wxapp/getCode）
+     */
+    async getCode(ref, appId, expectLoginType = null) {
         const url = `${this.serverUrl}/wxapp/getCode`;
-        
-        // 先将 wxid/openid 转换为 YYB 数据库中的 ref（账号 ID）
-        const resolvedRef = await this._resolveRef(ref);
-        
+        const resolvedRef = await this._resolveRef(ref, expectLoginType);
+
         try {
             console.log(`[YYB] 请求code: ref=${resolvedRef}, app_id=${appId}`);
-            const r = await axios.post(url, { ref: resolvedRef, app_id: appId }, { 
+            const r = await axios.post(url, { ref: resolvedRef, app_id: appId }, {
                 headers: { 'Content-Type': 'application/json' },
                 timeout: 30000,
                 validateStatus: () => true
             });
-            
-            console.log(`[YYB] 响应状态: ${r.status}`);
-            
+
             if (r.status === 404) {
-                // 404 可能是接口路径错误或账号不存在
                 const errMsg = r.data?.msg || r.data?.error || JSON.stringify(r.data).slice(0, 80);
                 throw new Error(`接口/账号不存在(404): ${errMsg}`);
             }
-            
+
             if (r.status === 400) {
                 throw new Error(`参数错误 - 可能账号不存在: ${JSON.stringify(r.data).slice(0, 100)}`);
             }
-            
+
             if (r.status === 409) {
-                throw new Error('账号login_buffer已过期，需要重新扫码登录');
+                throw new Error('账号登录态已过期，需在 yyb_go 重新扫码登录');
             }
-            
+
             const result = r.data;
             const codeVal = result?.code ?? -1;
             if (codeVal !== 0) {
                 throw new Error(`[${codeVal}] ${result?.msg || `HTTP ${r.status}`}`);
             }
-            
-            // 从 data.result.code 提取
+
             const data = result?.data;
-            if (!data || typeof data !== 'object') {
-                // YYB 新版格式可能直接返回 { openid, result: { code: "xxx" } }
-                if (data?.result?.code) {
-                    return data.result.code;
-                }
-                throw new Error(`响应data异常: ${JSON.stringify(data).slice(0, 100)}`);
+            if (data?.result?.code) {
+                return data.result.code;
             }
-            
-            const inner = data.result;
-            if (!inner || typeof inner !== 'object') {
-                throw new Error(`result异常: ${JSON.stringify(inner).slice(0, 100)}`);
+            if (data?.result?.login_buffer) {
+                return data.result.login_buffer;
             }
-            
-            const code = inner.code;
-            if (!code || typeof code !== 'string' || code.length < 5) {
-                throw new Error(`未拿到有效code: ${JSON.stringify(result).slice(0, 150)}`);
+            if (data?.code && typeof data.code === 'string') {
+                return data.code;
             }
-            
-            return code;
+            if (data?.login_buffer && typeof data.login_buffer === 'string') {
+                return data.login_buffer;
+            }
+
+            throw new Error(`未拿到有效code: ${JSON.stringify(result).slice(0, 150)}`);
         } catch (e) {
             const msg = (e && e.message) ? e.message : String(e);
-            if (msg.includes('[YYB]') || msg.includes('login_buffer')) throw e;
+            if (msg.includes('[YYB]') || msg.includes('登录态')) throw e;
             throw new Error(`[YYB] 请求code失败: ${msg}`);
         }
     }
 
-    async getPhoneNumber(ref, appId) {
+    /**
+     * 获取手机号 code（对应 yyb_go 的 POST /wxapp/getPhoneNumber）
+     */
+    async getPhoneNumber(ref, appId, expectLoginType = null) {
         const url = `${this.serverUrl}/wxapp/getPhoneNumber`;
-        
-        // 先将 wxid/openid 转换为 YYB 数据库中的 ref（账号 ID）
-        const resolvedRef = await this._resolveRef(ref);
-        
+        const resolvedRef = await this._resolveRef(ref, expectLoginType);
+
         try {
             console.log(`[YYB] 请求手机号code: ref=${resolvedRef}, app_id=${appId}`);
-            const r = await axios.post(url, { ref: resolvedRef, app_id: appId }, { 
+            const r = await axios.post(url, { ref: resolvedRef, app_id: appId }, {
                 headers: { 'Content-Type': 'application/json' },
                 timeout: 30000,
                 validateStatus: () => true
             });
-            
-            console.log(`[YYB] 响应状态: ${r.status}`);
-            
+
             if (r.status === 404) {
                 const errMsg = r.data?.msg || r.data?.error || JSON.stringify(r.data).slice(0, 80);
                 throw new Error(`接口/账号不存在(404): ${errMsg}`);
             }
-            
-            if (r.status === 400) {
-                throw new Error(`参数错误 - 可能账号不存在: ${JSON.stringify(r.data).slice(0, 100)}`);
-            }
-            
+
             if (r.status === 409) {
-                throw new Error('账号login_buffer已过期，需要重新扫码登录');
+                throw new Error('账号登录态已过期，需在 yyb_go 重新扫码登录');
             }
-            
+
             const result = r.data;
             const codeVal = result?.code ?? -1;
             if (codeVal !== 0) {
                 throw new Error(`[${codeVal}] ${result?.msg || `HTTP ${r.status}`}`);
             }
-            
-            // 从 data.result.code 提取
+
             const data = result?.data;
-            if (!data || typeof data !== 'object') {
-                if (data?.result?.code) return data.result.code;
-                throw new Error(`响应data异常: ${JSON.stringify(data).slice(0, 100)}`);
-            }
-            
-            const inner = data.result;
-            if (!inner || typeof inner !== 'object') {
-                throw new Error(`result异常: ${JSON.stringify(inner).slice(0, 100)}`);
-            }
-            
-            const code = inner.code;
+            const inner = data?.result || data;
+            const code = inner?.code;
             if (!code || typeof code !== 'string' || code.length < 5) {
                 throw new Error(`未拿到有效手机号code: ${JSON.stringify(result).slice(0, 150)}`);
             }
-            
             return code;
         } catch (e) {
             const msg = (e && e.message) ? e.message : String(e);
-            if (msg.includes('[YYB]') || msg.includes('login_buffer')) throw e;
+            if (msg.includes('[YYB]') || msg.includes('登录态')) throw e;
             throw new Error(`[YYB] 请求手机号code失败: ${msg}`);
         }
     }
 
-    async getPhoneEncrypted(ref, appId) {
+    /**
+     * 获取手机号加密数据（encryptedData/iv）
+     */
+    async getPhoneEncrypted(ref, appId, expectLoginType = null) {
         const url = `${this.serverUrl}/wxapp/getPhoneNumber`;
-        const resolvedRef = await this._resolveRef(ref);
+        const resolvedRef = await this._resolveRef(ref, expectLoginType);
         try {
             console.log(`[YYB] 请求手机号加密数据: ref=${resolvedRef}, app_id=${appId}`);
             const r = await axios.post(url, { ref: resolvedRef, app_id: appId }, {
@@ -316,7 +465,7 @@ class YYBAdapter {
                 throw new Error(`接口/账号不存在(404): ${errMsg}`);
             }
             if (r.status === 409) {
-                throw new Error('账号login_buffer已过期，需要重新扫码登录');
+                throw new Error('账号登录态已过期，需在 yyb_go 重新扫码登录');
             }
             const result = r.data;
             const codeVal = result?.code ?? -1;
@@ -325,15 +474,10 @@ class YYBAdapter {
             }
             const data = result?.data;
             const inner = data?.result ?? data;
-            if (!inner || typeof inner !== 'object') {
-                throw new Error(`响应data异常: ${JSON.stringify(inner).slice(0, 100)}`);
-            }
-            const encryptedData = inner.encryptedData ?? inner.encrypted_data;
-            const iv = inner.iv ?? inner.IV;
+            const encryptedData = inner?.encryptedData ?? inner?.encrypted_data;
+            const iv = inner?.iv ?? inner?.IV;
             if (!encryptedData || !iv) {
-                // 部分服务仅返回手机号 code，不含加密载荷
-                if (inner.code) {
-                    console.warn('[YYB] 该服务仅返回手机号 code，不含 encryptedData/iv');
+                if (inner?.code) {
                     return { encryptedData: null, iv: null, code: String(inner.code) };
                 }
                 throw new Error(`未拿到 encryptedData/iv: ${JSON.stringify(result).slice(0, 150)}`);
@@ -344,267 +488,41 @@ class YYBAdapter {
             throw new Error(`[YYB] 请求手机号加密数据失败: ${msg}`);
         }
     }
-}
-
-
-// ============================================================
-//  Wechat (牛子协议) 适配器
-// ============================================================
-
-class WechatAdapter {
-    constructor(serverUrl, adminKey) {
-        this.serverUrl = serverUrl.replace(/\/+$/, '');
-        this.adminKey = adminKey;
-        this.subType = null; // Niuzi | WeChatPadPro | iwechat
-    }
-
-    async _detectSubProtocol() {
-        if (this.subType) return this.subType;
-        
-        const params = this.adminKey ? { key: this.adminKey } : {};
-        
-        try {
-            let r = await axios.get(`${this.serverUrl}/admin/GetAuthKey`, { params, timeout: 5000, validateStatus: () => true });
-            if (r.status === 200) { this.subType = 'iwechat'; return this.subType; }
-            
-            r = await axios.get(`${this.serverUrl}/admin/GetAllDevices`, { params, timeout: 5000, validateStatus: () => true });
-            if (r.status === 200) { this.subType = 'WeChatPadPro'; return this.subType; }
-        } catch (e) {}
-        
-        // 默认 Niuzi
-        try {
-            await axios.get(`${this.serverUrl}/api/v1/wx/user/status`, { timeout: 5000 });
-            this.subType = 'Niuzi';
-        } catch (e) {
-            this.subType = 'Niuzi';
-        }
-        return this.subType;
-    }
-
-    async healthCheck() {
-        try {
-            const r = await axios.get(`${this.serverUrl}/api/v1/wx/user/status`, { timeout: 5000 });
-            return r.status === 200;
-        } catch {
-            return false;
-        }
-    }
-
-    async getAccounts() {
-        const subType = await this._detectSubProtocol();
-        
-        switch (subType) {
-            case 'Niuzi': return this._getNiuziAccounts();
-            case 'WeChatPadPro': return this._getPadproAccounts();
-            case 'iwechat': return this._getIwechatAccounts();
-            default: return [];
-        }
-    }
-
-    async _getNiuziAccounts() {
-        const url = `${this.serverUrl}/api/v1/wx/user.status`;
-        try {
-            const r = await axios.get(url, { timeout: 60000 });
-            const result = r.data;
-            
-            if (!result.status) throw new Error(result.message || '未知错误');
-            
-            const accountsData = result.data || {};
-            if (typeof accountsData !== 'object') throw new Error('API返回格式错误');
-            
-            const accounts = [];
-            for (const [wxid, info] of Object.entries(accountsData)) {
-                if (typeof info === 'object' && info.wxid && info.nickname && info.survival === 1) {
-                    accounts.push({
-                        wxid: info.wxid,
-                        openid: info.wxid,
-                        nickname: info.nickname,
-                        alias: null,
-                        avatar: null,
-                        status: 1,
-                        loginState: 1,
-                        _ref: info.wxid,
-                    });
-                }
-            }
-            return accounts;
-        } catch (e) {
-            throw new Error(`[牛子] 获取账号列表失败: ${e.message}`);
-        }
-    }
-
-    async _getIwechatAccounts() {
-        try {
-            const r = await axios.get(`${this.serverUrl}/admin/GetAuthKey`, { 
-                params: { key: this.adminKey }, timeout: 60000 
-            });
-            const authData = r.data;
-            if (!Array.isArray(authData)) throw new Error('响应格式错误');
-            
-            return authData
-                .filter(a => (a.status || 0) === 1)
-                .map(a => ({
-                    wxid: a.wx_id || '',
-                    openid: a.wx_id || '',
-                    nickname: a.nick_name,
-                    alias: null,
-                    avatar: null,
-                    status: 1,
-                    loginState: 1,
-                    _ref: a.license || a.authKey || '',
-                }));
-        } catch (e) {
-            throw new Error(`[iwechat] 获取账号失败: ${e.message}`);
-        }
-    }
-
-    async _getPadproAccounts() {
-        try {
-            const r = await axios.get(`${this.serverUrl}/admin/GetAllDevices`, { 
-                params: { key: this.adminKey }, timeout: 60000 
-            });
-            let devices = [];
-            const d = r.data;
-            
-            if (typeof d === 'object' && d.Data?.devices) devices = d.Data.devices;
-            else if (d.data) devices = d.data;
-            else if (d.devices) devices = d.devices;
-            else if (Array.isArray(d)) devices = d;
-            else devices = [d];
-            
-            if (!Array.isArray(devices)) throw new Error('响应格式错误');
-            
-            return devices
-                .filter(a => (a.status || 0) === 1)
-                .map(a => ({
-                    wxid: a.deviceId || '',
-                    openid: a.deviceId || '',
-                    nickname: a.deviceName,
-                    alias: null,
-                    avatar: null,
-                    status: 1,
-                    loginState: 1,
-                    _ref: a.license || a.authKey || '',
-                }));
-        } catch (e) {
-            throw new Error(`[WeChatPadPro] 获取账号失败: ${e.message}`);
-        }
-    }
-
-    async getCode(identifier, appId) {
-        const subType = await this._detectSubProtocol();
-        return subType === 'Niuzi' ? this._niuziGetCode(identifier, appId) : this._legacyGetCode(identifier, appId);
-    }
 
     /**
-     * 获取登录用的 operate 数据（encryptedData/iv/code）
-     * 牛子协议专属：调用 /wx/operatedata 接口，返回小程序登录所需的完整数据。
-     * 部分服务仅返回手机号 code，不含加密载荷。
+     * 调用通用 operateWxData（如云函数、微信步数、用户信息等）
      */
-    async getOperateWxData(wxid, appId) {
-        const actualWxid = String(wxid).split('#')[0].trim();
-        if (!appId || appId === 'undefined') {
-            throw new Error(`appid 参数缺失！调用方必须传入有效的 appid。当前值: ${appId}`);
-        }
-        const url = `${this.serverUrl}/wx/operatedata`;
-        const auth = process.env.WX_ID || this.adminKey || '';
-        console.log(`[牛子] 请求 operate 数据: wxid=${actualWxid}, appid=${appId}`);
+    async operateWxData(ref, appId, payload, expectLoginType = null) {
+        const url = `${this.serverUrl}/wxapp/operateWxData`;
+        const resolvedRef = await this._resolveRef(ref, expectLoginType);
         try {
-            const r = await axios.post(url, { appid: appId, openid: actualWxid }, {
-                headers: { auth: String(auth).replace(/[\x00-\x1F\x7F]/g, '').replace(/\s+/g, ' ').trim() },
-                timeout: 45000,
+            console.log(`[YYB] 请求operateWxData: ref=${resolvedRef}, app_id=${appId}`);
+            const r = await axios.post(url, { ref: resolvedRef, app_id: appId, payload }, {
+                headers: { 'Content-Type': 'application/json' },
+                timeout: 30000,
                 validateStatus: () => true
             });
-            const result = r.data?.data || {};
-            const code = result.code;
-            const encryptedData = result.encryptedData ?? result.encrypted_data;
-            const iv = result.iv ?? result.IV;
-            if (!code || !encryptedData || !iv) {
-                throw new Error(`operatedata 未返回完整登录数据: ${JSON.stringify(r.data)}`);
+            if (r.status !== 200 || r.data?.code !== 0) {
+                throw new Error(r.data?.msg || `HTTP ${r.status}`);
             }
-            return { code: String(code), encryptedData: String(encryptedData), iv: String(iv) };
+            return r.data?.data?.result ?? r.data?.data;
         } catch (e) {
             const msg = (e && e.message) ? e.message : String(e);
-            throw new Error(`[牛子] 请求 operate 数据失败: ${msg}`);
-        }
-    }
-
-    async _niuziGetCode(wxid, appId) {
-        const actualWxid = String(wxid).split('#')[0].trim();
-        
-        // 防御性检查：appid 不能为空
-        if (!appId || appId === 'undefined') {
-            throw new Error(`appid 参数缺失！调用方必须传入有效的 appid。当前值: ${appId}`);
-        }
-        
-        // 尝试多个可能的 API 端点
-        const endpoints = [
-            '/api/v1/wx/app/get/code',
-            '/api/v1/wx/app/get/code/',
-            '/api/v1/wx/get/code',
-            '/wx/app/get/code',       // 某些变体
-            '/api/wx/app/get/code',    // 某些变体
-        ];
-        
-        console.log(`[牛子] 尝试获取code: wxid=${actualWxid}, appid=${appId}`);
-        
-        for (const ep of endpoints) {
-            const fullUrl = `${this.serverUrl}${ep}`;
-            try {
-                console.log(`[牛子] 请求: POST ${fullUrl}`);
-                const r = await axios.post(fullUrl, { wxid: actualWxid, appid: appId }, { timeout: 20000, validateStatus: () => true });
-                console.log(`[牛子] 响应状态: ${r.status}`);
-                
-                if (r.status === 404) {
-                    console.log(`[牛子] ⚠ 端点不存在: ${ep}`);
-                    continue;  // 尝试下一个端点
-                }
-                
-                const result = r.data;
-                
-                // 防御性检查：result 为 null/undefined 时直接跳过
-                if (!result || typeof result !== 'object') {
-                    console.log(`[牛子] ⚠ 响应数据无效(非对象): ${JSON.stringify(result)}，尝试下一个端点`);
-                    continue;
-                }
-                
-                let code = result.code ||
-                          (typeof result.data === 'object' ? result.data.code : null) ||
-                          (typeof result.Data === 'object' ? result.Data.code : null) ||
-                          (typeof result.data === 'string' ? result.data : null) ||
-                          (typeof result.Data === 'string' ? result.Data : null);
-                
-                if (code && typeof code === 'string' && code.length > 5) return code;
-                
-                console.log(`[牛子] 无有效code: ${JSON.stringify(result).slice(0, 100)}`);
-            } catch (e) {
-                console.log(`[牛子] 请求失败(${ep}): ${e.message}`);
-            }
-        }
-        throw new Error('所有API端点均不可达或返回无效数据(404)');
-    }
-
-    async _legacyGetCode(license, appId) {
-        try {
-            const r = await axios.post(
-                `${this.serverUrl}/applet/JsLogin`,
-                { AppId: appId, Data: "", Opt: 1, PackageName: "", SdkName: "" },
-                { params: { key: license }, timeout: 60000 }
-            );
-            const result = r.data;
-            
-            if (result.Code !== 200) throw new Error(result.Text || '未知错误');
-            
-            const code = result.Data?.Code;
-            if (!code) throw new Error('响应中无Code字段');
-            
-            return code;
-        } catch (e) {
-            throw new Error(`[传统协议] 请求失败: ${e.message}`);
+            throw new Error(`[YYB] operateWxData失败: ${msg}`);
         }
     }
 }
 
+// 兼容别名：旧脚本若显式引用 WechatAdapter 时无缝桥接
+class WechatAdapter extends YYBAdapter {
+    constructor(serverUrl, adminKey = null) {
+        super(serverUrl);
+        this.adminKey = adminKey;
+    }
+    async getOperateWxData(identifier, appId) {
+        return this.operateWxData(identifier, appId, {});
+    }
+}
 
 // ============================================================
 //  统一入口类
@@ -612,352 +530,90 @@ class WechatAdapter {
 
 class WeChatCodeGetter {
     constructor(forceType = null) {
-        this.yybServer = process.env.YYB_SERVER || process.env.YINGYOGBAO_SERVER || 'http://127.0.0.1:8000';
-        this.wechatServer = process.env.WECHAT_SERVER || 'http://192.168.6.222:8011';
-        this.adminKey = process.env.ADMIN_KEY;
-        this.wxIdFilter = process.env.WX_ID;
-        this.protocolType = 'Unknown';
-        
-        // 双协议适配器（fallback模式）
-        this.primaryAdapter = null;   // 主适配器
-        this.fallbackAdapter = null;  // 备用适配器
-        this.serverUrl = '';
-        
-        this.scriptDir = __dirname;
-        this.envCheckFile = path.join(this.scriptDir, 'env_check.json');
-        
+        this.serverUrl = getGlobalServerUrl();
+        this.adapter = new YYBAdapter(this.serverUrl);
         this.targetWxIds = [];
-        if (this.wxIdFilter) {
-            this.targetWxIds = this.wxIdFilter.split(/[@&\n|]+/).map(id => id.trim()).filter(id => id);
-            console.log(`[getCode] WX_ID筛选: ${this.targetWxIds.join(', ')}`);
+
+        if (process.env.WX_ID) {
+            this.targetWxIds = process.env.WX_ID.split(/[@&\n|]+/).map(id => id.trim()).filter(Boolean);
         }
-        
-        // 预解析每个ID的目标协议: 应用宝 openid → 应用宝, 其余(含不以 wxid_ 开头的真实微信 wxid) → 牛子
-        this._idProtocolMap = new Map();
-        for (const id of this.targetWxIds) {
-            const proto = this._isYybOpenid(id) ? 'yyb' : 'wechat';
-            this._idProtocolMap.set(id, proto);
-        }
-        
-        this._forceType = forceType;
     }
 
     async init() {
-        // 强制类型优先
-        let protocolType = this._forceType;
-        
-        if (!protocolType) {
-            const envType = (process.env.SERVER_TYPE || '').toLowerCase();
-            if (envType) {
-                protocolType = {
-                    'yyb': 'YYB', 'yingyongbao': 'YYB', '应用宝': 'YYB',
-                    'wechat': 'Wechat', 'niuzi': 'Wechat', '牛子': 'Wechat',
-                    'auto': 'Auto',  // 显式指定自动模式
-                }[envType] || 'Auto';  // 默认 Auto = 双协议 fallback
-            }
-        }
-        
-        // 默认使用 Auto（双协议 fallback）模式
-        if (!protocolType || protocolType === 'Unknown') {
-            protocolType = 'Auto';
-        }
-
-        if (protocolType === 'Auto') {
-            // 双协议 Fallback 模式：牛子优先 + 应用宝备用
-            await this._initAutoMode();
-        } else if (protocolType === 'YYB') {
-            // 纯应用宝模式
-            this.primaryAdapter = new YYBAdapter(this.yybServer);
-            this.fallbackAdapter = null;
-            this.protocolType = 'YYB';
-            this.serverUrl = this.yybServer;
-            console.log(`[getCode] 当前服务: YYB(应用宝) @ ${this.yybServer}`);
-        } else if (protocolType === 'Wechat') {
-            // 纯牛子模式
-            this.primaryAdapter = new WechatAdapter(this.wechatServer, this.adminKey);
-            this.fallbackAdapter = null;
-            this.protocolType = 'Wechat';
-            this.serverUrl = this.wechatServer;
-            console.log(`[getCode] 当前服务: Wechat(牛子) @ ${this.wechatServer}`);
-        }
-        
-        // 缓存检测结果
-        try {
-            fs.writeFileSync(this.envCheckFile, JSON.stringify({ 
-                protocol_type: protocolType,
-                primary: this.primaryAdapter ? this.protocolType : null,
-                fallback: this.fallbackAdapter ? (this.protocolType === 'Wechat' ? 'YYB' : 'Wechat') : null
-            }), 'utf-8');
-        } catch (e) {}
-    }
-
-    /**
-     * 初始化 Auto 模式（智能路由）
-     * 健康检查延迟到 getAppletCode 首次调用时执行
-     */
-    async _initAutoMode() {
-        this.protocolType = 'Auto(智能路由)';
-        
-        // 预创建适配器实例（不立即做健康检查）
-        this._wechatAdapterLazy = new WechatAdapter(this.wechatServer, this.adminKey);
-        this._yybAdapterLazy = new YYBAdapter(this.yybServer);
-        
-        // primaryAdapter 保留给 getOnlineAccounts 使用（默认用牛子查在线列表）
-        this.primaryAdapter = this._wechatAdapterLazy;
-        this.fallbackAdapter = null;
-        
-        const wechatIds = [...this._idProtocolMap.values()].filter(v => v === 'wechat').length;
-        const yybIds = [...this._idProtocolMap.values()].filter(v => v === 'yyb').length;
-        console.log(`[getCode] 智能路由: 牛子账号×${wechatIds} + 应用宝账号×${yybIds}, 延迟健康检查`);
-    }
-
-    _filterAccounts(accounts) {
-        if (!this.targetWxIds || this.targetWxIds.length === 0) return accounts;
-        
-        const filtered = accounts.filter(acc => {
-            const ref = acc._ref || '';
-            const wxid = acc.wxid || '';
-            const openid = acc.openid || '';
-            return this.targetWxIds.some(t => [ref, wxid, openid].includes(t));
-        });
-        
-        if (filtered.length > 0) {
-            console.log(`[getCode] 筛选后剩余 ${filtered.length} 个账号`);
-        } else {
-            console.log(`[getCode] 警告：WX_ID筛选无匹配账号`);
-        }
-        return filtered;
+        return true;
     }
 
     async getOnlineAccounts() {
-        const accounts = await this.primaryAdapter.getAccounts();
-        const filtered = this._filterAccounts(accounts);
-        
+        const accounts = await this.adapter.getAccounts();
+        if (!this.targetWxIds || this.targetWxIds.length === 0) {
+            return accounts.map(acc => ({
+                account: acc,
+                status: { loginState: 1, onlineTime: 0, device: acc.avatar || '' }
+            }));
+        }
+
+        const targets = this.targetWxIds.map(t => parseIdentifier(t));
+        const filtered = accounts.filter(acc => {
+            const keys = [String(acc.id || ''), acc._ref || '', acc.wxid || '', acc.openid || ''].filter(Boolean);
+            const accLoginType = acc.login_type ? normalizeLoginType(acc.login_type) : null;
+            return targets.some(t => {
+                if (!keys.includes(t.rawId)) return false;
+                if (t.loginType && accLoginType && accLoginType !== t.loginType) return false;
+                return true;
+            });
+        });
+
         return filtered.map(acc => ({
             account: acc,
-            status: { loginState: acc.loginState || 1, onlineTime: acc.last_checked_at || 0, device: acc.avatar || '' }
+            status: { loginState: 1, onlineTime: 0, device: acc.avatar || '' }
         }));
     }
 
     async printOnlineStatus() {
         const online = await this.getOnlineAccounts();
-        console.log(`\n当前有 ${online.length} 个账号在线 (${this.protocolType})`);
-        
+        console.log(`\n当前有 ${online.length} 个账号在线 (@ ${this.serverUrl})`);
         for (const { account } of online) {
             const name = account.nickname || account.alias || account.wxid?.slice(0, 12) || '未知';
-            console.log(`  ${name}`);
+            const lt = loginTypeLabel(account.login_type);
+            console.log(`  [${lt}] ${name} (id=${account.id}, openid=${account.openid})`);
         }
     }
 
-    _isYybOpenid(identifier) {
-        const rawId = String(identifier).split('#')[0].trim();
-        if (!rawId) return false;
-        if (/^\d+$/.test(rawId)) return true;
-        if (/^o[a-zA-Z0-9_-]{20,}$/.test(rawId)) return true;
-        return false;
-    }
-
-    /**
-     * 根据 identifier 判断应该使用哪个协议
-     * 应用宝 openid → yyb
-     * 其余（含不以 wxid_ 开头的真实微信 wxid）→ wechat
-     */
-    _detectProtocolForIdentifier(identifier) {
-        const rawId = String(identifier).split('#')[0].trim();
-        
-        // 先查预解析的映射表（来自 WX_ID 环境变量）
-        for (const [id, proto] of this._idProtocolMap.entries()) {
-            if (String(id).split('#')[0].trim() === rawId || id === identifier) {
-                return proto;
-            }
-        }
-        
-        // 兜底：根据格式推断
-        return this._isYybOpenid(rawId) ? 'yyb' : 'wechat';
-    }
-
-    /**
-     * 获取单个账号的code（智能路由，无需无谓重试）
-     * - wxid_* 格式 → 直接走牛子
-     * - openid 格式 → 直接走应用宝
-     * - 仅当目标适配器失败时才 fallback 到另一个
-     */
     async getAppletCode(appId, identifier) {
-        // 防御：identifier 为空时提前报错，避免路由到具体适配器后再崩溃
-        if (identifier === undefined || identifier === null || identifier === '') {
+        if (!identifier) {
             throw new Error('identifier 未提供，请检查 WX_ID 环境变量或调用参数');
         }
-        const targetProtocol = this._detectProtocolForIdentifier(identifier);
-        console.log(`[getCode] 路由: ${identifier} → ${targetProtocol}`);
-
-        // 按需健康检查：只检查目标协议的服务是否可用（按协议分别缓存）
-        const cacheKey = `hc_${targetProtocol}`;
-        if (!this._healthCache || this._healthCache[cacheKey] === undefined) {
-            this._healthCache = this._healthCache || {};
-            if (targetProtocol === 'yyb') {
-                const ok = await new YYBAdapter(this.yybServer).healthCheck();
-                this._healthCache.hc_yyb = ok;
-            } else {
-                const ok = await new WechatAdapter(this.wechatServer, this.adminKey).healthCheck();
-                this._healthCache.hc_wechat = ok;
-            }
-        }
-        const isHealthy = this._healthCache[cacheKey];
-
-        let primary, primaryName;
-        
-        if (targetProtocol === 'yyb') {
-            primary = new YYBAdapter(this.yybServer);
-            primaryName = '应用宝';
-        } else {
-            primary = new WechatAdapter(this.wechatServer, this.adminKey);
-            primaryName = '牛子';
-        }
-
-        // 目标服务不可用，直接报错（不再跨协议fallback，因为格式不兼容）
-        if (!isHealthy) {
-            throw new Error(`${primaryName}服务不可用 (${targetProtocol === 'yyb' ? this.yybServer : this.wechatServer})`);
-        }
-
-        try {
-            const code = await primary.getCode(identifier, appId);
-            console.log(`[getCode] ✓ ${primaryName}获取成功`);
-            return code;
-        } catch (primaryError) {
-            console.log(`[getCode] ⚠ ${primaryName}获取失败: ${primaryError.message}`);
-            throw primaryError;
-        }
+        const parsed = parseIdentifier(identifier);
+        return this.adapter.getCode(identifier, appId, parsed.loginType);
     }
 
-    /**
-     * 获取单个账号的手机号Code（智能路由）
-     * - wxid_* 格式 → 直接走牛子（暂不支持）
-     * - openid 格式 → 直接走应用宝
-     */
     async getAppletPhoneNumber(appId, identifier) {
-        const targetProtocol = this._detectProtocolForIdentifier(identifier);
-        console.log(`[getCode] 手机号路由: ${identifier} → ${targetProtocol}`);
-
-        // 按需健康检查：只检查目标协议的服务是否可用（按协议分别缓存）
-        const cacheKey = `hc_${targetProtocol}`;
-        if (!this._healthCache || this._healthCache[cacheKey] === undefined) {
-            this._healthCache = this._healthCache || {};
-            if (targetProtocol === 'yyb') {
-                const ok = await new YYBAdapter(this.yybServer).healthCheck();
-                this._healthCache.hc_yyb = ok;
-            } else {
-                const ok = await new WechatAdapter(this.wechatServer, this.adminKey).healthCheck();
-                this._healthCache.hc_wechat = ok;
-            }
-        }
-        const isHealthy = this._healthCache[cacheKey];
-
-        let primary, primaryName;
-        
-        if (targetProtocol === 'yyb') {
-            primary = new YYBAdapter(this.yybServer);
-            primaryName = '应用宝';
-        } else {
-            primary = new WechatAdapter(this.wechatServer, this.adminKey);
-            primaryName = '牛子';
-        }
-
-        if (!isHealthy) {
-            throw new Error(`${primaryName}服务不可用 (${targetProtocol === 'yyb' ? this.yybServer : this.wechatServer})`);
-        }
-
-        try {
-            let code;
-            if (targetProtocol === 'yyb') {
-                code = await primary.getPhoneNumber(identifier, appId);
-            } else {
-                throw new Error(`${primaryName}(牛子协议暂不支持手机号code)`);
-            }
-            console.log(`[getCode] ✓ ${primaryName}获取手机号成功`);
-            return code;
-        } catch (primaryError) {
-            console.log(`[getCode] ⚠ ${primaryName}获取手机号失败: ${primaryError.message}`);
-            throw primaryError;
-        }
+        if (!identifier) return null;
+        const parsed = parseIdentifier(identifier);
+        return this.adapter.getPhoneNumber(identifier, appId, parsed.loginType);
     }
 
-    /**
-     * 获取单个账号的手机号加密数据（encryptedData/iv，智能路由）
-     * 目前仅应用宝(YYB)协议支持
-     */
     async getAppletPhoneEncrypted(appId, identifier) {
-        if (identifier === undefined || identifier === null || identifier === '') {
-            throw new Error('identifier 未提供，请检查 WX_ID 环境变量或调用参数');
-        }
-        const targetProtocol = this._detectProtocolForIdentifier(identifier);
-        console.log(`[getCode] 手机号加密数据路由: ${identifier} → ${targetProtocol}`);
-
-        const cacheKey = `hc_${targetProtocol}`;
-        if (!this._healthCache || this._healthCache[cacheKey] === undefined) {
-            this._healthCache = this._healthCache || {};
-            if (targetProtocol === 'yyb') {
-                const ok = await new YYBAdapter(this.yybServer).healthCheck();
-                this._healthCache.hc_yyb = ok;
-            } else {
-                const ok = await new WechatAdapter(this.wechatServer, this.adminKey).healthCheck();
-                this._healthCache.hc_wechat = ok;
-            }
-        }
-        const isHealthy = this._healthCache[cacheKey];
-
-        let primary, primaryName;
-        if (targetProtocol === 'yyb') {
-            primary = new YYBAdapter(this.yybServer);
-            primaryName = '应用宝';
-        } else {
-            primary = new WechatAdapter(this.wechatServer, this.adminKey);
-            primaryName = '牛子';
-        }
-
-        if (!isHealthy) {
-            throw new Error(`${primaryName}服务不可用 (${targetProtocol === 'yyb' ? this.yybServer : this.wechatServer})`);
-        }
-
-        try {
-            let result;
-            if (targetProtocol === 'yyb') {
-                result = await primary.getPhoneEncrypted(identifier, appId);
-            } else {
-                throw new Error(`${primaryName}(牛子协议暂不支持手机号加密数据)`);
-            }
-            console.log(`[getCode] ✓ ${primaryName}获取手机号加密数据成功`);
-            return result;
-        } catch (primaryError) {
-            console.log(`[getCode] ⚠ ${primaryName}获取手机号加密数据失败: ${primaryError.message}`);
-            throw primaryError;
-        }
+        if (!identifier) return null;
+        const parsed = parseIdentifier(identifier);
+        return this.adapter.getPhoneEncrypted(identifier, appId, parsed.loginType);
     }
 
     async getCodesForAllOnlineAccounts(appId) {
         const online = await this.getOnlineAccounts();
         const codes = {};
-        
+
         for (let i = 0; i < online.length; i++) {
             const acc = online[i].account;
             let baseName = acc.nickname || acc.alias || `账号_${i + 1}`;
-            
-            if (!baseName.trim() || baseName.trim() === '\u3164') {
-                baseName = acc.wxid ? `账号_${acc.wxid.slice(-6)}` : `账号_${i + 1}`;
-            }
-            
             let name = baseName;
             let counter = 1;
             while (codes[name] !== undefined) {
                 name = `${baseName}_${counter}`;
                 counter++;
             }
-            
-            const ref = acc._ref;
-            if (!ref) {
-                console.log(`[getCode] ${name}: 缺少标识符，跳过`);
-                continue;
-            }
-            
+
+            const ref = acc._ref || String(acc.id) || acc.openid;
             try {
                 const code = await this.getAppletCode(appId, ref);
                 codes[name] = code;
@@ -966,15 +622,65 @@ class WeChatCodeGetter {
                 console.log(`[getCode] ✗ ${name}: ${e.message}`);
             }
         }
-        
         return codes;
     }
 }
 
+// ============================================================
+//  全局进程兜底
+// ============================================================
+let _getCodeFatalHandlerInstalled = false;
+function installGetCodeFatalHandler() {
+    if (_getCodeFatalHandlerInstalled) return;
+    _getCodeFatalHandlerInstalled = true;
+    process.on('uncaughtException', (err) => {
+        console.log(`[getCode] 未捕获异常(已兜底，脚本安全退出): ${err && err.message ? err.message : err}`);
+    });
+    process.on('unhandledRejection', (reason) => {
+        console.log(`[getCode] 未处理的 Promise 拒绝(已兜底，脚本安全退出): ${reason && reason.message ? reason.message : reason}`);
+    });
+}
+installGetCodeFatalHandler();
 
 // ============================================================
-//  便捷函数（向后兼容）
+//  便捷导出函数
 // ============================================================
+
+/**
+ * 动态加载账号列表（支持从 yyb_go 服务端拉取存活账号）
+ * @param {string|null} filterEnvName 脚本专用环境变量名（可选白名单）
+ * @returns {Promise<Array<{id: number, ref: string, openid: string, nickname: string, loginType: string, login_type: string}>>}
+ */
+async function loadAccounts(filterEnvName = null) {
+    const getter = new WeChatCodeGetter();
+    await getter.init();
+    const onlineList = await getter.getOnlineAccounts();
+
+    const customFilter = (filterEnvName ? process.env[filterEnvName] : null) || process.env.WX_ID;
+    let result = onlineList.map(({ account }) => ({
+        id: account.id,
+        ref: account._ref || String(account.id) || account.openid,
+        openid: account.openid,
+        nickname: account.nickname || account.alias || `用户_${account.id}`,
+        loginType: normalizeLoginType(account.login_type),
+        login_type: normalizeLoginType(account.login_type),
+        status: account.status,
+    }));
+
+    if (customFilter) {
+        const filters = customFilter.split(/[\n&]+/).map(v => parseIdentifier(v)).filter(v => v.rawId);
+        result = result.filter(acc => {
+            return filters.some(f => {
+                const matchId = String(acc.id) === f.rawId || acc.openid === f.rawId || acc.ref === f.rawId;
+                if (!matchId) return false;
+                if (f.loginType && acc.loginType !== f.loginType) return false;
+                return true;
+            });
+        });
+    }
+
+    return result;
+}
 
 /**
  * 获取所有在线账号的code
@@ -995,34 +701,7 @@ async function printOnlineStatus() {
 }
 
 /**
- * 进程级兜底：阻断任何未被上游捕获的异常导致脚本进程崩溃。
- * 各签到脚本的 getSingleCode 调用方大多已有 try/catch 返回 null，
- * 但极少数调用方或异步链未覆盖时，这里统一兜底为“安全退出”，
- * 避免在 wx_server/YYB 登录中转服务异常（如返回 Not Found）时整脚本崩溃。
- */
-let _getCodeFatalHandlerInstalled = false;
-function installGetCodeFatalHandler() {
-    if (_getCodeFatalHandlerInstalled) return;
-    _getCodeFatalHandlerInstalled = true;
-    process.on("uncaughtException", (err) => {
-        console.log(`[getCode] 未捕获异常(已兜底，脚本安全退出): ${err && err.message ? err.message : err}`);
-    });
-    process.on("unhandledRejection", (reason) => {
-        console.log(`[getCode] 未处理的 Promise 拒绝(已兜底，脚本安全退出): ${reason && reason.message ? reason.message : reason}`);
-    });
-}
-installGetCodeFatalHandler();
-
-/**
- * 为单个账号获取code
- *
- * 注意：当上游 wx_server / YYB 登录中转服务异常（如返回 Not Found、空数据、
- * 连接失败）时，这里不再向上 throw，而是返回 null。调用方（各签到脚本的
- * getCode 包装）已对 null 做了“登录失败/跳过”的防御，从而实现自愈，
- * 避免在外部服务故障时出现 `Cannot read properties of undefined (reading 'access_token')`。
- *
- * Returns:
- *   code 字符串；失败返回 null
+ * 为单个账号获取code（失败返回 null，不会中断脚本）
  */
 async function getSingleCode(appId, identifier) {
     if (!identifier) {
@@ -1034,20 +713,13 @@ async function getSingleCode(appId, identifier) {
     try {
         return await getter.getAppletCode(appId, identifier);
     } catch (e) {
-        console.log(`[getCode] 获取失败（上游登录服务异常，返回 null 由调用方跳过）: ${e && e.message ? e.message : e}`);
+        console.log(`[getCode] 获取失败: ${e && e.message ? e.message : e}`);
         return null;
     }
 }
 
 /**
- * 为指定账号获取手机号Code（便捷函数）
- *
- * Args:
- *   appId: 小程序AppID
- *   identifier: 应用宝 id/uin/openid（目前仅YYB支持）
- *
- * Returns:
- *   手机号code；失败返回 null
+ * 为指定账号获取手机号Code
  */
 async function getSinglePhoneNumber(appId, identifier) {
     if (!identifier) return null;
@@ -1056,15 +728,13 @@ async function getSinglePhoneNumber(appId, identifier) {
     try {
         return await getter.getAppletPhoneNumber(appId, identifier);
     } catch (e) {
-        console.log(`[getCode] 获取手机号失败（可能需重新登录或账号不存在）: ${e && e.message ? e.message : e}`);
+        console.log(`[getCode] 获取手机号失败: ${e && e.message ? e.message : e}`);
         return null;
     }
 }
 
 /**
- * 为指定账号获取手机号加密数据（encryptedData/iv，便捷函数）
- * 目前仅 YYB 协议支持；若服务仅返回手机号 code，则返回 { encryptedData: null, iv: null, code }
- * 失败返回 null
+ * 为指定账号获取手机号加密数据（encryptedData/iv）
  */
 async function getSinglePhoneEncrypted(appId, identifier) {
     if (!identifier) return null;
@@ -1079,38 +749,24 @@ async function getSinglePhoneEncrypted(appId, identifier) {
 }
 
 /**
- * 为单个账号获取登录用的 operate 数据（encryptedData/iv/code，智能路由）
- * - 牛子(wxid_/真实wxid) → 调用 /wx/operatedata，返回完整 {code, encryptedData, iv}
- * - 应用宝(openid) → 仅返回 {code, encryptedData:null, iv:null}（应用宝协议不提供登录 operate 数据）
- * 任何上游异常均返回 null，交由调用方处理。
+ * 为单个账号获取登录用的 operate 数据
  */
 async function getSingleOperateWxData(appId, identifier) {
     if (!identifier) return null;
     const getter = new WeChatCodeGetter();
     await getter.init();
-    const targetProtocol = getter._detectProtocolForIdentifier(identifier);
-    if (targetProtocol === 'yyb') {
-        console.log(`[getCode] operate 路由: ${identifier} → 应用宝(仅返回code)`);
-        try {
-            const code = await getter.getAppletCode(appId, identifier);
-            return { code, encryptedData: null, iv: null };
-        } catch (e) {
-            console.log(`[getCode] 应用宝获取 operate code 失败: ${e && e.message ? e.message : e}`);
-            return null;
-        }
-    }
-    console.log(`[getCode] operate 路由: ${identifier} → 牛子`);
     try {
-        const adapter = new WechatAdapter(getter.wechatServer, getter.adminKey);
-        return await adapter.getOperateWxData(identifier, appId);
+        const code = await getter.getAppletCode(appId, identifier);
+        return { code, encryptedData: null, iv: null };
     } catch (e) {
-        console.log(`[getCode] 牛子获取 operate 数据失败: ${e && e.message ? e.message : e}`);
+        console.log(`[getCode] 获取 operate 数据失败: ${e && e.message ? e.message : e}`);
         return null;
     }
 }
 
 module.exports = {
     WeChatCodeGetter,
+    loadAccounts,
     getWechatCodes,
     printOnlineStatus,
     getSingleCode,
@@ -1118,5 +774,13 @@ module.exports = {
     getSinglePhoneEncrypted,
     getSingleOperateWxData,
     YYBAdapter,
-    WechatAdapter
+    WechatAdapter,
+    getGlobalServerUrl,
+    parseIdentifier,
+    stripScheme,
+    normalizeLoginType,
+    loginTypeLabel,
+    LOGIN_TYPE_WX,
+    LOGIN_TYPE_SYZS,
+    LOGIN_TYPE_WMPF
 };

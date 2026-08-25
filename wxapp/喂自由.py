@@ -15,7 +15,7 @@
                   该变量同时被 getCode 模块用于账号过滤
 
   （以下变量由共享模块 getCode 读取，按需在青龙环境变量中设置）
-  WECHAT_SERVER   牛子协议服务地址（默认 http://192.168.6.222:8011）
+  WX_SERVER      yyb_go 统一协议服务地址（例如：http://127.0.0.1:8000）
   YYB_SERVER      应用宝(YYB) 服务地址（默认 http://127.0.0.1:8000）
   ADMIN_KEY       牛子协议管理密钥（WeChatPadPro/iwechat 需要）
   SERVER_TYPE     强制指定协议：wechat / yyb / auto（默认 auto 智能路由）

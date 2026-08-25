@@ -25,3 +25,19 @@ Thumbs.db
 # 测试文件
 test/
 *.test.js
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# 运行期 Token / Cookie 临时缓存文件
+*cache*.json
+*cookie*.json
+*token*.json
+.*_token.json
+.*_ua.json
+.*_device.json
+env_check.json
+$null

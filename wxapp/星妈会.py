@@ -8,7 +8,7 @@
 
 环境变量:
 1. 微信协议服务地址:
-   export WECHAT_SERVER="http://127.0.0.1:8011"
+   export WX_SERVER='http://127.0.0.1:8000'
 2. 账号变量（多账号按换行分隔，可混填）:
    export FEIHE_DATA="wxid_xxx#156
 Authorization值1#133

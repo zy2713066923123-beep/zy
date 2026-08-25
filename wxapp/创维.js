@@ -11,7 +11,7 @@
  *
  * 环境变量：
  * - WX_ID                   多账号，换行或&分隔；格式：wxid_xxx#备注（兼容旧变量 chuangw）
- * - WECHAT_SERVER           微信协议服务地址（可选，在 getCode.js 中配置）
+ * - WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:8000）（可选，在 getCode.js 中配置）
  * - CHUANGW_APPID           默认 wxff438d3c60c63fb6
  * - CHUANGW_APP_PATH        默认 /pages/login/login
  * - CHUANGW_RUN_TASKS       默认1，0=只登录拿token

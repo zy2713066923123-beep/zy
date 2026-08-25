@@ -17,14 +17,12 @@ if (!WX_IDS.length) {
     process.exit(1);
 }
 
-const WECHAT_SERVER = (process.env.WECHAT_SERVER || "").trim();
-const YYB_SERVER = (process.env.YYB_SERVER || "").trim();
-if (!WECHAT_SERVER && !YYB_SERVER) {
-    console.error("未配置取码服务地址，请设置 WECHAT_SERVER 或 YYB_SERVER");
+const SERVER = (process.env.WX_SERVER || process.env.WECHAT_SERVER || process.env.YYB_SERVER || "").trim();
+if (!SERVER) {
+    console.error("未配置取码服务地址，请设置 WX_SERVER");
     process.exit(1);
 }
-if (WECHAT_SERVER) process.env.WECHAT_SERVER = WECHAT_SERVER;
-if (YYB_SERVER) process.env.YYB_SERVER = YYB_SERVER;
+if (!process.env.WX_SERVER) process.env.WX_SERVER = SERVER;
 
 console.log(`✅ 读取到 ${WX_IDS.length} 个微信账号，自动路由牛子/YYB 双协议`);
 

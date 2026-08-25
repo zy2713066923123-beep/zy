@@ -6,7 +6,7 @@
 # name: 小铛家
   WX_ID: wxid列表，格式: wxid#备注，多个账号用换行或@分隔
          （由共享 getCode 模块读取并智能路由 牛子/应用宝）
-  WECHAT_SERVER: 牛子协议地址（手机号加密包 get/all/mobile 使用，getCode 读取），默认: http://127.0.0.1:8011
+  WECHAT_SERVER: 牛子协议地址（手机号加密包 get/all/mobile 使用，getCode 读取），默认: http://127.0.0.1:8000
   YYB_SERVER: 应用宝(YYB) 服务地址（getCode 读取）
   SERVER_TYPE: 强制指定协议：wechat / yyb / auto（默认 auto 智能路由）
   PROXY_API: 品赞代理提取链接，可选
@@ -36,7 +36,7 @@ import getCode  # 共享的微信小程序 code 获取模块（自动路由 牛�
 
 
 
-DEFAULT_WECHAT_SERVER = "http://127.0.0.1:8011"
+DEFAULT_WECHAT_SERVER = "http://127.0.0.1:8000"
 DEFAULT_WECHAT_MINI_APPID = "wx7f5bc6f204abc629"
 DEFAULT_XIAODANJIA_APPID = "xiaodangjia"
 DEFAULT_XIAODANJIA_BASE_URL = "https://lm.api.sujh.net"

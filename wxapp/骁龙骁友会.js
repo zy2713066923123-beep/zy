@@ -7,7 +7,7 @@
  */
 
 const ckName = "WX_ID";
-const WECHAT_SERVER = (process.env.WECHAT_SERVER || "").trim();
+const WECHAT_SERVER = (process.env.WX_SERVER || process.env.WECHAT_SERVER || "").trim();
 const WX_APPID = (process.env.WX_APPID || "wx026c06df6adc5d06").trim();
 
 const axios = require("axios");

@@ -26,7 +26,7 @@ if not WX_IDS:
 WECHAT_SERVER = os.getenv("WECHAT_SERVER", "").strip()
 YYB_SERVER = os.getenv("YYB_SERVER", "").strip()
 if not WECHAT_SERVER and not YYB_SERVER:
-    print("❌ 未配置取码服务地址，请设置 WECHAT_SERVER 或 YYB_SERVER")
+    print("❌ 未配置取码服务地址，请设置 WX_SERVER")
     exit(1)
 if WECHAT_SERVER:
     os.environ["WECHAT_SERVER"] = WECHAT_SERVER

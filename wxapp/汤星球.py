@@ -11,7 +11,7 @@ name: ꧁༺ 汤汤༒星球 ༻꧂ (微信协议版)
 
 环境变量配置:
   WX_ID           账号配置，格式：wxid#备注，多账号换行 / & 分隔
-  WECHAT_SERVER   微信协议服务地址，默认 http://127.0.0.1:8011
+  WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:8000）
   txq             手动模式兼容，每行 备注#Authorization
 
 说明:
@@ -46,7 +46,7 @@ name = "꧁༺ 汤汤༒星球 ༻꧂"
 
 WX_APPID = "wx9bb6d5ac457bd69d"
 HOST = "https://vip.by-health.com"
-DEFAULT_WECHAT_SERVER = "http://127.0.0.1:8011"
+DEFAULT_WECHAT_SERVER = "http://127.0.0.1:8000"
 
 SIGN_PATH = "/vip-api/sign/daily/create"
 SIGN_ACTIVITY_ID = 11

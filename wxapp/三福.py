@@ -23,7 +23,7 @@ for env_key in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]:
 # ===================== 配置项 =====================
 APPID = "wxfe13a2a5df88b058"
 
-# 从环境变量 WX_ID 读取账号配置，格式：identifier#alias，多条换行或&分隔
+# 账号配置：默认自动拉取 yyb_go 存活账号；亦支持通过环境变量 WX_ID 进行白名单过滤
 ACCOUNTS = []
 _wx_id_raw = os.getenv("WX_ID", "")
 if _wx_id_raw:

@@ -14,7 +14,7 @@
   5. 青龙 notify 推送
 
 环境变量：
-  YYB_SERVER       YYB Go 服务地址，格式：server@wxid，多账号换行分隔
+  WX_SERVER      yyb_go 服务地址（例如：http://127.0.0.1:8000）
   STORE_NO         门店编号，默认 1017013258
   PROXY_API        品赞代理提取 API，可选
   PROXY_TYPE       http / socks5，默认 http
@@ -54,7 +54,7 @@ if not WX_IDS:
 WECHAT_SERVER = os.getenv("WECHAT_SERVER", "").strip()
 YYB_SERVER = os.getenv("YYB_SERVER", "").strip()
 if not WECHAT_SERVER and not YYB_SERVER:
-    print("❌ 未配置取码服务地址，请设置 WECHAT_SERVER 或 YYB_SERVER")
+    print("❌ 未配置取码服务地址，请设置 WX_SERVER")
     exit(1)
 if WECHAT_SERVER:
     os.environ["WECHAT_SERVER"] = WECHAT_SERVER

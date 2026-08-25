@@ -4,7 +4,7 @@
 name:  玛氏宠享会
 入口: 微信小程序 (https://a.c1ns.cn/9e0Lb) (进入后授权点击更新昵称)
 功能: 签到、分享、查询积分
-变量: WX_ID / soy_wxid_data (微信id) 多个账号用换行分割 
+变量: WX_SERVER (必填，yyb_go 服务地址)；WX_ID (可选白名单，留空自动拉取存活账号) 
     PROXY_API_URL (代理api，返回一条txt文本，内容为代理ip:端口)
 定时: 一天两次
 cron: 28 9,14 * * *

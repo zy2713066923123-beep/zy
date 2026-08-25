@@ -7,7 +7,7 @@
 第一次要 手动签到 一次
 环境变量：
   WX_ID          账号配置，格式：wxid#备注，多账号换行 / & 分隔
-  WECHAT_SERVER  微信协议服务地址，默认 http://127.0.0.1:8011
+  WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:8000）
   NISSAN_SKIP_COMMUNITY =1 跳过社区任务，只做签到+查询
 """
 
@@ -27,7 +27,7 @@ from getCode import get_single_code
 
 
 # ============ 常量配置 ============
-DEFAULT_WECHAT_SERVER = "http://127.0.0.1:8011"
+DEFAULT_WECHAT_SERVER = "http://127.0.0.1:8000"
 WECHAT_MINI_APPID = "wxe3fd49854884240e"          # 东风日产 人车生活 小程序 appid
 ARIYA_BASE = "https://ariya-api.dongfeng-nissan.com.cn"
 WXAPI_BASE = "https://wxapi.dongfeng-nissan.com.cn"

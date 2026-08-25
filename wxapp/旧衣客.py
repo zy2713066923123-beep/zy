@@ -5,7 +5,7 @@
 cron: 0 8,12,20 * * *
 
 变量:
-  export WECHAT_SERVER="http://127.0.0.1:8069"
+  export WX_SERVER='http://127.0.0.1:8000'
   export WX_ID="wxid#备注"
   多账号用换行 或 @ 分隔
 """
@@ -83,7 +83,7 @@ def resolve_local_path(name: str) -> Path:
 
 
 WECHAT_SERVER_RAW = (
-    os.getenv("WECHAT_SERVER") or os.getenv("YYB_SERVER") or os.getenv("YYB_WX_SERVER") or "http://127.0.0.1:8069"
+    os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or os.getenv("YYB_WX_SERVER") or "http://127.0.0.1:8069"
 )
 WECHAT_SERVER = normalize_wechat_server(WECHAT_SERVER_RAW)
 CACHE_FILE = resolve_local_path(os.getenv("JYK_CACHE_FILE") or (ENV_NAME + ".json"))

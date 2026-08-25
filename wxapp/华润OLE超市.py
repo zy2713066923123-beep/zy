@@ -9,7 +9,7 @@ cron: 56 11,13 * * *
   WX_ID           微信账号，格式 wxid#备注，多账号换行或 & / @ 分隔
                   （该变量同时被 getCode 模块用于账号过滤）
   ole_wxid        兼容旧变量名（可选）
-  WECHAT_SERVER   牛子协议服务，默认 http://127.0.0.1:8011
+  WECHAT_SERVER   牛子协议服务，默认 http://127.0.0.1:8000
                   （getCode 读取；仅手机号加密绑定使用 /get/all/mobile）
   YYB_SERVER      应用宝(YYB) 服务地址（getCode 读取，auto 模式自动路由）
   ADMIN_KEY       牛子协议管理密钥（WeChatPadPro/iwechat 需要）
@@ -58,7 +58,7 @@ DEFAULT_HEAD_IMG = (
 # 业务常量（一般不用改）
 # =========================
 WECHAT_MINI_APPID = "wx6c61aaeba1551439"  # OLE 超市小程序 appid（抓包 referer）
-DEFAULT_WECHAT_SERVER = "http://127.0.0.1:8011"
+DEFAULT_WECHAT_SERVER = "http://127.0.0.1:8000"
 API_BASE = "https://ole-app.crvole.com.cn"
 TENANT = "VGDT"
 TENANT_CHANNEL = "OLE"

@@ -16,7 +16,7 @@
 
 环境变量（在青龙面板 -> 环境变量中添加）：
 - WX_ID=wxid123#备注1@wxid456#备注2    (必填，支持多账号，用@分隔，支持 getcode 协议)
-- WECHAT_SERVER=http://127.0.0.1:8011  (微信协议服务地址)
+- WECHAT_SERVER=http://127.0.0.1:8000  (微信协议服务地址)
 - LMF_CASH=true              (是否开启自动提现，默认true)
 - LMF_CASH_AMOUNT=0          (指定提现金额，0表示全额提现)
 - LMF_NO_SIGN=false          (是否跳过签到，默认false)
@@ -69,7 +69,7 @@ SIGN_URL = f"{BASE_URL}/5dca57afa379e?m=toSign"
 CASH_CHECK_URL = f"{BASE_URL}/62b2bafcd77cc?m=cashCheck"
 CASH_APPLY_URL = f"{BASE_URL}/5e12a7e1848ba?m=cashApplyTwo"
 
-DEFAULT_WECHAT_SERVER = "http://127.0.0.1:8011"
+DEFAULT_WECHAT_SERVER = "http://127.0.0.1:8000"
 WX_APPID = "wx6fcde446296d9588"
 
 CACHE_FILE = "lmf_token.json"

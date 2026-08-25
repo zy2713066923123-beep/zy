@@ -25,8 +25,8 @@
  *
  * 【环境变量】
  *   WX_ID               微信账号标识（openid 或 wxid#备注），多账号换行 或 & 分隔（必填）
- *   WECHAT_SERVER       牛子协议服务地址，默认 http://192.168.6.222:8011（可选）
- *   YYB_SERVER          应用宝服务地址（可选）
+ *   WX_SERVER      yyb_go 统一协议服务地址（例如：http://127.0.0.1:8000）
+ *   YYB_SERVER     (兼容别名) yyb_go 服务地址
  *   ELEME_APPID         饿了么小程序 AppID，默认 wxece3a9a4c82f58c9（可选）
  *   ELEME_LOGIN_RESULT  直接注入有效登录态（可选，走方式 B）
  *   ELEME_COOKIE        H5 Cookie（可选，走方式 C）

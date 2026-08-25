@@ -31,7 +31,7 @@ const COOKIE_CACHE_FILE = pathMod.join(CACHE_DIR, 'pdd_cookie_cache.json');
 // 配置区
 let ckName = 'WX_ID';
 const WXID_RAW = (process.env.WX_ID || '').trim();
-const WECHAT_SERVER = (process.env.WECHAT_SERVER || '').replace(/\/$/, '');
+const WECHAT_SERVER = (process.env.WX_SERVER || process.env.WECHAT_SERVER || '').replace(/\/$/, '');
 const NO_RELOGIN = process.env.PDD_NO_RELOGIN !== '0' && process.env.PDD_NO_RELOGIN !== 'false';
 
 const SCRIPT_NAME = '拼多多果园';

@@ -10,7 +10,7 @@
 环境变量:
   WX_ID: 微信id，支持多账号，分隔符支持换行或@，格式支持 wxid 或 wxid#备注
          （由共享 getCode 模块读取并智能路由 牛子/应用宝）
-  WECHAT_SERVER: 牛子协议服务地址（getCode 读取，默认 http://127.0.0.1:8011）
+  WECHAT_SERVER: 牛子协议服务地址（getCode 读取，默认 http://127.0.0.1:8000）
   YYB_SERVER: 应用宝(YYB) 服务地址（getCode 读取）
   SERVER_TYPE: 强制指定协议：wechat / yyb / auto（默认 auto 智能路由）
 

@@ -18,7 +18,7 @@
  *                        1) bffToken#yaraUserId
  *                        2) bffToken#yaraUserId#consumerToken#accountId
  *                        3) consumerToken
- * - WECHAT_SERVER       微信协议服务地址（可选，在 getCode.js 中配置）
+ * - WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:8000）（可选，在 getCode.js 中配置）
  * - WWN_MAIN_APPID      默认 wx61a9d721d3396d1b
  * - WWN_MEMBER_APPID    默认 wxc5d513880ace81a4
  * - WWN_ACCOUNT_ID      默认 634f5f28a0e71c29500b0313
@@ -737,7 +737,7 @@ async function runOne(line, idx) {
   const needConsumerToken = ENABLE_TASKS || ENABLE_SIGNIN || ENABLE_SHARE;
 
   // 自动识别 wxid 模式（兼容非 wxid_ 开头）
-  const hasWechatServer = !!String(process.env.WECHAT_SERVER || '').trim();
+  const hasWechatServer = !!String(process.env.WX_SERVER || process.env.WECHAT_SERVER || '').trim();
   const explicitWx = head.startsWith('wxid_') || head.startsWith('wx:');
   const useWxMode = explicitWx || (hasWechatServer && isLikelyWxIdentifier(head) && !looksLikeToken(head));
 

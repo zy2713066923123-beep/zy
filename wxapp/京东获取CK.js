@@ -1,18 +1,19 @@
-﻿// name:京东获取CK
-// - export WECHAT_SERVER='http:ip:8011'
+// name:京东获取CK
+// - export WX_SERVER='http://127.0.0.1:8000'
 // - wxjd：wxid#备注
 // cron: 56 8,13 * * *
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const axios = require('axios');
+require('./getCode.js');
 
 // 多账号之间的延迟（毫秒）
 const ACCOUNT_DELAY_MS = 10000;
 
 const SCRIPT_NAME = '京东协议获取CK';
 const APPID = 'wx73247c7819d61796';
-const WECHAT_SERVER = (process.env.WECHAT_SERVER || 'http://172.17.0.7:8011').trim();
+const WECHAT_SERVER = (process.env.WX_SERVER || process.env.WECHAT_SERVER || 'http://127.0.0.1:8000').trim();
 const WXJD = (process.env.wxjd || process.env.WX_ID || '').trim();
 const CACHE_FILE = path.join(__dirname, 'jd_kd_ck.json');
 const CLIENT_VER = '2.0.2';

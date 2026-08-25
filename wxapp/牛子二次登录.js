@@ -5,7 +5,7 @@
 // cron: 44 11,16 * * *
 //
 // 青龙环境变量：
-// WX_STATUS_BASE   接口地址，默认：http://192.168.6.222:8011
+// WX_STATUS_BASE   接口地址，默认：http://127.0.0.1:8000
 // WX_STATUS_COOKIE 登录 Cookie，必填，例如：
 //                  language=zh-CN; fnos-token=xxx; fnos-long-token=xxx
 //
@@ -22,7 +22,7 @@ const https = require('https');
 const { URL } = require('url');
 
 const CONFIG = {
-  baseUrl: trimRightSlash(process.env.WX_STATUS_BASE || 'http://192.168.6.222:8011'),
+  baseUrl: trimRightSlash(process.env.WX_STATUS_BASE || 'http://127.0.0.1:8000'),
   cookie: process.env.WX_STATUS_COOKIE || 'token=eYd9ENLb+2mWdh92Hq/1DprgFWO9BEWYTFrNMnjCq/U=; fnos-long-token=j1KkTOgDAADSaCNqAAAAADDKh7JKPDMzPZyPQJ8r3zNlKOqwTCTDMQ==',
   notify: process.env.WX_STATUS_NOTIFY !== '0',
   notifyAll: process.env.WX_STATUS_NOTIFY_ALL !== '0',

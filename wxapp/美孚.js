@@ -3,7 +3,7 @@
 小程序：美孚臻享俱乐部（微信协议版）
 cron: 33 8,15 * * *
 必填变量：
-  WECHAT_SERVER  微信协议服务地址（getCode.js 读取，例如：http://127.0.0.1:8011）
+  WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:8000）（getCode.js 读取，例如：http://127.0.0.1:8000）
   WX_ID          微信账号，多账号支持换行、&、@ 分隔
                  格式：wxid#备注（备注可选）
 
@@ -36,7 +36,7 @@ const APP_VERSION = '4.8.9';
 const CACHE_FILE = path.join(__dirname, 'mfwx.json');
 
 const CONFIG = {
-  wechatServer: trimRightSlash(process.env.WECHAT_SERVER || process.env.MF_WECHAT_SERVER || ''),
+  wechatServer: trimRightSlash(process.env.WX_SERVER || process.env.WECHAT_SERVER || process.env.MF_WECHAT_SERVER || ''),
   wxAccountsRaw: process.env.WX_ID || '',
   tokenRaw: process.env.mftoken || process.env.MFTOKEN || '',
   timeout: toPositiveInt(process.env.MF_TIMEOUT, 20000),

@@ -12,9 +12,9 @@ cron: 53 9,14 * * *
 ------------------------------------------
 
 变量：
-  WX_ID          微信账号（openid/wxid），多账号换行 / & 分隔，必须配置
-  WECHAT_SERVER  牛子协议服务地址（可选，getCode.js 内配置）
-  YYB_SERVER     应用宝服务地址（可选）
+  WX_ID          (可选白名单) 微信账号，多账号换行/&分隔，留空自动拉取 yyb_go 所有存活账号
+  WX_SERVER      yyb_go 统一协议服务地址（例如：http://127.0.0.1:8000）
+  YYB_SERVER     (兼容别名) yyb_go 服务地址
 
 WX_ID 格式：
   wxid#备注  多个换行

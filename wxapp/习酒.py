@@ -16,8 +16,8 @@
                     wxid_abc123#李四
                     owNAX6v0xxx#张三
                     wxid_xyz456
-  WECHAT_SERVER   微信协议服务地址（getCode统一接口）
-                  默认：http://127.0.0.1:8011
+  WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:8000）（getCode统一接口）
+                  默认：http://127.0.0.1:8000
 
 选填：
   OCR_SERVER      滑块验证码识别服务地址（ddddocr）
@@ -117,7 +117,7 @@ WINE_STATUS = {0: "空坛", 1: "空坛", 2: "已酿好", 3: "酿造中", 4: "已
 BASE_URL = "https://apimallwm.exijiu.com"
 MAIN_BASE_URL = "https://xcx.exijiu.com/anti-channeling/public/index.php/api/v2"
 APPID = "wx489f950decfeb93e"
-DEFAULT_WECHAT_SERVER = "http://127.0.0.1:8011"
+DEFAULT_WECHAT_SERVER = "http://127.0.0.1:8000"
 
 # 环境变量
 _SEED_TYPE_FORCE = int(os.environ.get("GARDEN_SEED_TYPE", "0"))
