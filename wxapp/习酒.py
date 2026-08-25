@@ -926,7 +926,9 @@ def run(client, do_daily=True, suppress_token_error=False):
     log.info("   🌾高粱: %-6s斤  🌾小麦: %-6s斤  🍺酒曲: %-4s块  🍶酒: %sL" % (
         info.get("sorghum"), info.get("wheat"), info.get("wine_yeast"), info.get("wine")))
 
-    if do_daily:
+    has_crypto = getattr(client, "crypto", None) is not None
+
+    if do_daily and has_crypto:
         # ── 每日签到 ──
         log.info("📅 每日签到...")
         try:
@@ -946,6 +948,8 @@ def run(client, do_daily=True, suppress_token_error=False):
                 time.sleep(1)
             except Exception as e:
                 _handle_action_err(e, "分享"); break
+    elif not has_crypto:
+        log.info("ℹ️  该账号未提供独立加密密钥，跳过签到/分享写操作")
     else:
         log.info("ℹ️  签到/分享今日已完成，跳过")
 
@@ -955,15 +959,18 @@ def run(client, do_daily=True, suppress_token_error=False):
     active = [p for p in plots if p.get("status", -1) != -1]
     log.info("   共 %d 块地，已解锁 %d 块" % (len(plots), len(active)))
 
-    # 开垦新土地
-    try:
-        ss = len(active) + 1
-        log.info("   🔨 尝试开垦第 %d 块田地..." % ss)
-        client.extend({"serial_number": ss})
-        log.info("   ✅ 开垦新地块成功！")
-    except Exception as e:
-        if "4041" in str(e): log.warning("   ⚠️  开垦失败：收酒数量不足")
-        else: _handle_action_err(e, "开垦")
+    if has_crypto:
+        # 开垦新土地
+        try:
+            ss = len(active) + 1
+            log.info("   🔨 尝试开垦第 %d 块田地..." % ss)
+            client.extend({"serial_number": ss})
+            log.info("   ✅ 开垦新地块成功！")
+        except Exception as e:
+            if "4041" in str(e): log.warning("   ⚠️  开垦失败：收酒数量不足")
+            else: _handle_action_err(e, "开垦")
+    else:
+        log.info("   ℹ️  该通道为标准只读模式，展示地块生长状态，跳过种植/收获/浇水/施肥")
 
     seed_type = decide_seed_type(
         sorghum=int(info.get("sorghum") or 0), wheat=int(info.get("wheat") or 0),
@@ -984,6 +991,10 @@ def run(client, do_daily=True, suppress_token_error=False):
 
         # 收获分支
         if (status in (10, 11) and is_ready(ct)) or (status == 2 and is_ready(ct)):
+            if not has_crypto:
+                log.info("   🌾 地块 %s（%s）[可收获]（无密钥通道跳过收获）" % (sn, crop))
+                plot_summary_lines.append("🌾 地块%s(%s): 可收获" % (sn, crop))
+                continue
             log.info("   🌾 地块 %s（%s）[可收获] → 开始收获..." % (sn, crop))
             plot_summary_lines.append("🌾 地块%s(%s): 已收获并重新播种" % (sn, crop))
             harvested = False
@@ -1021,7 +1032,7 @@ def run(client, do_daily=True, suppress_token_error=False):
             try: remaining_secs = max(0, int((datetime.strptime(ct, "%Y-%m-%d %H:%M:%S") - datetime.now()).total_seconds())) if ct else 999
             except Exception: remaining_secs = 999
             if min_harvest_secs is None or remaining_secs < min_harvest_secs: min_harvest_secs = remaining_secs
-            if remaining_secs <= 120 and remaining_secs > 0:
+            if has_crypto and remaining_secs <= 120 and remaining_secs > 0:
                 log.info("   ⏳ 地块 %s（%s）[即将成熟] 剩余 %d 秒，等待后收获..." % (sn, crop, remaining_secs))
                 time.sleep(remaining_secs + 2)
                 try:
@@ -1041,18 +1052,22 @@ def run(client, do_daily=True, suppress_token_error=False):
                 time.sleep(1); continue
             log.info("   🌱 地块 %s（%s）[生长中]  剩余: %s  💧已浇 %s次  🌿已施 %s次" % (sn, crop, fmt_remaining(ct), wn, mn))
             plot_summary_lines.append("🌱 地块%s(%s): 还需 %s" % (sn, crop, fmt_remaining(ct)))
-            if allow_water and water > 0:
+            if has_crypto and allow_water and water > 0:
                 try: client.watering({"id": pid}); log.info("      💧 浇水成功"); water -= 1
                 except Exception as e: _handle_action_err(e, "浇水")
             elif not allow_water: log.info("      💧 临近成熟,跳过浇水以节水")
             else: log.info("      💧 水滴不足，跳过浇水")
             time.sleep(1)
-            if manure > 0:
+            if has_crypto and manure > 0:
                 try: client.manuring({"id": pid}); log.info("      🌿 施肥成功"); manure -= 1
                 except Exception as e: _handle_action_err(e, "施肥")
             else: log.info("      🌿 肥料不足，跳过施肥")
             time.sleep(1)
         elif status == 0:
+            if not has_crypto:
+                log.info("   🟫 地块 %s [空地]（无密钥通道跳过播种）" % sn)
+                plot_summary_lines.append("🟫 地块%s: 空地" % sn)
+                continue
             log.info("   🟫 地块 %s [空地] → 播种 %s" % (sn, CROP_TYPE.get(seed_type)))
             plot_summary_lines.append("🟫 地块%s: 空地已播种%s" % (sn, CROP_TYPE.get(seed_type)))
             try:
