@@ -51,6 +51,10 @@ import requests
 from datetime import datetime, timedelta
 from pathlib import Path
 
+_THIS_DIR = str(Path(__file__).resolve().parent)
+if _THIS_DIR not in sys.path:
+    sys.path.insert(0, _THIS_DIR)
+
 # ==================== 统一微信协议 ====================
 # 支持两种模式：
 # 1. getCode.py 标准模式（推荐）：获取微信code
@@ -59,10 +63,18 @@ try:
     from getCode import get_single_code, get_single_operate_wx_data, get_single_phone_number, load_accounts
     _HAS_GETCODE = True
 except ImportError:
-    get_single_code = None
-    get_single_operate_wx_data = None
-    get_single_phone_number = None
-    _HAS_GETCODE = False
+    try:
+        import getCode
+        get_single_code = getattr(getCode, "get_single_code", None)
+        get_single_operate_wx_data = getattr(getCode, "get_single_operate_wx_data", None)
+        get_single_phone_number = getattr(getCode, "get_single_phone_number", None)
+        load_accounts = getattr(getCode, "load_accounts", None)
+        _HAS_GETCODE = True
+    except ImportError:
+        get_single_code = None
+        get_single_operate_wx_data = None
+        get_single_phone_number = None
+        _HAS_GETCODE = False
 
 logging.basicConfig(level=logging.INFO,
     format="%(asctime)s │ %(levelname)-7s │ %(message)s", datefmt="%H:%M:%S")
@@ -161,7 +173,7 @@ class DdddOcr:
 # ============================================================
 #  AES 加密（AesCrypto.js 对应）
 # ============================================================
-class TokenInvalidError(BaseException):
+class TokenInvalidError(Exception):
     """Token or encryption key invalid, needs re-login"""
     pass
 
@@ -505,7 +517,10 @@ class GardenClient:
         self.session = requests.Session()
         self.session.headers.update({
             "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 MicroMessenger MiniProgram",
+            "User-Agent": "Mozilla/5.0 (Linux; Android 14; 22011211C Build/UKQ1.230917.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/126.0.6478.188 Mobile Safari/537.36 XWEB/1260083 MMWEBSDK/20240501 MMWEBID/2387 MicroMessenger/8.0.50.2700(0x2800325B) UnifiedPCWindowsWechat(0xf2800325) MiniProgramEnv/windows",
+            "Referer": "https://servicewechat.com/wx489f950decfeb93e/110/page-frame.html",
+            "Accept": "*/*",
+            "Accept-Language": "zh-CN,zh;q=0.9",
         })
         self.token = token
         self.crypto = None
@@ -542,31 +557,18 @@ class GardenClient:
         self._wx = wx
         self._wx_appid = appid
 
-        # Step 1: 获取 login_code（主系统）
-        code_res1 = wx.get_wx_code(wxid, appid)
-        if not code_res1["success"]:
-            raise RuntimeError(f"获取code失败: {code_res1['error']}")
-        main_login_url = f"{MAIN_BASE_URL}/auth/session?code={code_res1['code']}"
-        resp = self.session.get(main_login_url, timeout=15)
-        resp.raise_for_status()
-        main_body = resp.json()
-        if main_body.get("code") == 0:
-            login_code = main_body["data"].get("login_code")
-            if login_code:
-                self.session.headers["login_code"] = login_code
-                log.info("login_code 获取成功")
-
-        # Step 2: 再获取一个 code → garden authorized_token
-        code_res2 = wx.get_wx_code(wxid, appid)
-        if not code_res2["success"]:
-            raise RuntimeError(f"获取garden code失败: {code_res2['error']}")
-        login_result = self.login(code_res2["code"])
+        # 获取微信登录 code
+        code_res = wx.get_wx_code(wxid, appid)
+        if not code_res["success"]:
+            raise RuntimeError(f"获取code失败: {code_res['error']}")
+        
+        login_result = self.login(code_res["code"])
         token = login_result.get("authorized_token") or login_result.get("token") or login_result.get("access_token")
         if not token:
             raise RuntimeError(f"登录未返回token，响应: {login_result}")
         self.set_token(token)
 
-        # Step 3: 获取加密密钥
+        # 获取加密密钥
         env_key = os.environ.get("GARDEN_ENCRYPT_KEY", "")
         env_iv = os.environ.get("GARDEN_ENCRYPT_IV", "")
         if env_key and env_iv:
@@ -579,8 +581,8 @@ class GardenClient:
             if enc_key_res.get("success"):
                 self.set_crypto(enc_key_res["encrypt_key"], enc_key_res["iv"], version=enc_key_res.get("version", 3))
                 return {"token": token, "crypto_ready": True}
-        except Exception as e:
-            log.warning(f"webapi_getuserencryptkey 异常: {e}")
+        except Exception:
+            pass
 
         # 方式 c: session_id 备选
         try:
@@ -591,6 +593,8 @@ class GardenClient:
                     self.set_crypto(sk_hex[:16], sk_hex[16:32], version=1)
         except Exception:
             pass
+
+        return {"token": token, "crypto_ready": self.crypto is not None}
 
         # 方式 d/d2: userinfo → mobile → getAuth
         encrypted_data, iv = self._try_encrypted_data_via_userinfo(wx, wxid, appid)
@@ -879,7 +883,7 @@ def run(client, do_daily=True):
         try:
             r = client.daily_sign()
             log.info("   ✅ 签到成功  💧+%s  🌿+%s  %s" % (r.get("water", 0), r.get("manure", 0), r.get("tips", "")))
-        except RuntimeError as e:
+        except Exception as e:
             log.warning("   ⚠️  签到失败: %s" % e)
         # ── 每日分享 ──
         log.info("📤 每日分享...")
@@ -891,7 +895,7 @@ def run(client, do_daily=True):
                     log.info("   ℹ️  分享已达上限"); break
                 log.info("   ✅ 第%d次分享  💧+%s  🌿+%s" % (i + 1, w, m))
                 time.sleep(1)
-            except RuntimeError as e:
+            except Exception as e:
                 log.warning("   ⚠️  分享失败: %s" % e); break
     else:
         log.info("ℹ️  签到/分享今日已完成，跳过")
@@ -941,7 +945,7 @@ def run(client, do_daily=True):
                     r = client.harvest({"id": pid}); got = int(r.get("volumn") or r.get("sorghum") or r.get("wheat") or 0)
                     log.info("      ✅ 收获成功：+%s 斤" % got if got > 0 else "      ✅ 收获成功（0斤）")
                     harvested = True; break
-                except RuntimeError as e:
+                except Exception as e:
                     err_str = str(e)
                     if attempt < 26 and ("未成熟" in err_str or "not mature" in err_str.lower() or "时间" in err_str):
                         log.info("      ⏳ 未成熟，5秒后重试（%d/26）..." % (attempt + 1)); time.sleep(5)
@@ -955,14 +959,14 @@ def run(client, do_daily=True):
                     allow_water = water > 0  # 重新播种后为新苗,距成熟远,必浇
                     if allow_water and water > 0:
                         try: client.watering({"id": pid}); log.info("      💧 浇水成功"); water -= 1
-                        except RuntimeError as e: log.warning("      ⚠️  浇水失败：%s" % e)
+                        except Exception as e: log.warning("      ⚠️  浇水失败：%s" % e)
                         time.sleep(1)
                     elif not allow_water: log.info("      💧 临近成熟,跳过浇水以节水")
                     else: log.info("      💧 水滴不足，跳过浇水")
                     if manure > 0:
                         try: client.manuring({"id": pid}); log.info("      🌿 施肥成功"); manure -= 1
-                        except RuntimeError as e: log.warning("      ⚠️  施肥失败：%s" % e)
-                except RuntimeError as e: log.warning("      ❌ 播种失败：%s" % e)
+                        except Exception as e: log.warning("      ⚠️  施肥失败：%s" % e)
+                except Exception as e: log.warning("      ❌ 播种失败：%s" % e)
                 time.sleep(1)
         elif status in (10, 11, 2) and not is_ready(ct):
             try: remaining_secs = max(0, int((datetime.strptime(ct, "%Y-%m-%d %H:%M:%S") - datetime.now()).total_seconds())) if ct else 999
@@ -979,24 +983,24 @@ def run(client, do_daily=True):
                     allow_water = water > 0  # 重新播种后为新苗,距成熟远,必浇
                     if allow_water and water > 0:
                         try: client.watering({"id": pid}); log.info("      💧 浇水成功"); water -= 1
-                        except RuntimeError as e: log.warning("      ⚠️  浇水失败：%s" % e)
+                        except Exception as e: log.warning("      ⚠️  浇水失败：%s" % e)
                     elif not allow_water: log.info("      💧 临近成熟,跳过浇水以节水")
                     if manure > 0:
                         try: client.manuring({"id": pid}); log.info("      🌿 施肥成功"); manure -= 1
-                        except RuntimeError as e: log.warning("      ⚠️  施肥失败：%s" % e)
-                except RuntimeError as e: log.warning("      ❌ 等待后收获失败：%s" % e)
+                        except Exception as e: log.warning("      ⚠️  施肥失败：%s" % e)
+                except Exception as e: log.warning("      ❌ 等待后收获失败：%s" % e)
                 time.sleep(1); continue
             log.info("   🌱 地块 %s（%s）[生长中]  剩余: %s  💧已浇 %s次  🌿已施 %s次" % (sn, crop, fmt_remaining(ct), wn, mn))
             plot_summary_lines.append("🌱 地块%s(%s): 还需 %s" % (sn, crop, fmt_remaining(ct)))
             if allow_water and water > 0:
                 try: client.watering({"id": pid}); log.info("      💧 浇水成功"); water -= 1
-                except RuntimeError as e: log.warning("      ⚠️  浇水失败：%s" % e)
+                except Exception as e: log.warning("      ⚠️  浇水失败：%s" % e)
             elif not allow_water: log.info("      💧 临近成熟,跳过浇水以节水")
             else: log.info("      💧 水滴不足，跳过浇水")
             time.sleep(1)
             if manure > 0:
                 try: client.manuring({"id": pid}); log.info("      🌿 施肥成功"); manure -= 1
-                except RuntimeError as e: log.warning("      ⚠️  施肥失败：%s" % e)
+                except Exception as e: log.warning("      ⚠️  施肥失败：%s" % e)
             else: log.info("      🌿 肥料不足，跳过施肥")
             time.sleep(1)
         elif status == 0:
@@ -1006,15 +1010,15 @@ def run(client, do_daily=True):
                 client.seeds({"id": pid, "type": seed_type}); log.info("      ✅ 播种成功"); time.sleep(1)
                 if allow_water and water > 0:
                     try: client.watering({"id": pid}); log.info("      💧 浇水成功"); water -= 1
-                    except RuntimeError as e: log.warning("      ⚠️  浇水失败：%s" % e)
+                    except Exception as e: log.warning("      ⚠️  浇水失败：%s" % e)
                 elif not allow_water: log.info("      💧 临近成熟,跳过浇水以节水")
                 else: log.info("      💧 水滴不足，跳过浇水")
                 time.sleep(1)
                 if manure > 0:
                     try: client.manuring({"id": pid}); log.info("      🌿 施肥成功"); manure -= 1
-                    except RuntimeError as e: log.warning("      ⚠️  施肥失败：%s" % e)
+                    except Exception as e: log.warning("      ⚠️  施肥失败：%s" % e)
                 else: log.info("      🌿 肥料不足，跳过施肥")
-            except RuntimeError as e: log.warning("      ❌ 播种失败：%s" % e)
+            except Exception as e: log.warning("      ❌ 播种失败：%s" % e)
             time.sleep(1)
         else:
             log.info("   ❓ 地块 %s（%s）[%s]" % (sn, crop, PLOT_STATUS.get(status, "状态%s" % status)))
@@ -1050,7 +1054,7 @@ def run(client, do_daily=True):
             if can_put >= 200:
                 log.info("   📭 无酒坛 → 制酒 %s 斤高粱（消耗酒曲 %s 块）" % (can_put, can_put // 200))
                 try: r = client.discharge_grain({"volumn": can_put}); log.info("      ✅ 制酒成功: %s" % r); sorghum -= can_put; wine_yeast -= can_put // 200
-                except RuntimeError as e: log.warning("      ❌ 制酒失败：%s" % e)
+                except Exception as e: log.warning("      ❌ 制酒失败：%s" % e)
                 time.sleep(1)
             elif sorghum < 200: log.info("   📭 无酒坛，高粱不足（有 %s 斤）" % sorghum)
             else: log.info("   📭 无酒坛，酒曲不足（有 %s 块）" % wine_yeast)
@@ -1066,12 +1070,12 @@ def run(client, do_daily=True):
                     log.info("      ✅ 收获成功%s" % ("：+%sL" % got if got else ""))
                     info = client.member_info() or info; sorghum = int(info.get("sorghum") or 0)
                     wine_vol = int(info.get("wine") or 0); wine_yeast = int(info.get("wine_yeast") or 0)
-                except RuntimeError as e: log.warning("      ❌ 收获失败：%s" % e); time.sleep(1); continue
+                except Exception as e: log.warning("      ❌ 收获失败：%s" % e); time.sleep(1); continue
                 time.sleep(1); can_put = min((sorghum // 200) * 200, 5000, wine_yeast * 200)
                 if can_put >= 200:
                     log.info("      🌾 立即投粮：%s 斤高粱（消耗酒曲 %s 块）" % (can_put, can_put // 200))
                     try: r = client.discharge_grain({"volumn": can_put}); log.info("      ✅ 投粮成功: %s" % r); sorghum -= can_put; wine_yeast -= can_put // 200
-                    except RuntimeError as e: log.warning("      ❌ 投粮失败：%s" % e)
+                    except Exception as e: log.warning("      ❌ 投粮失败：%s" % e)
                     time.sleep(1)
                 else:
                     if sorghum < 200: log.info("      ⚠️  高粱不足（有 %s 斤），跳过投粮" % sorghum)
@@ -1086,12 +1090,12 @@ def run(client, do_daily=True):
                         log.info("      ✅ 收获成功%s" % ("：+%sL" % got if got else ""))
                         info = client.member_info() or info; sorghum = int(info.get("sorghum") or 0)
                         wine_vol = int(info.get("wine") or 0); wine_yeast = int(info.get("wine_yeast") or 0)
-                    except RuntimeError as e: log.warning("      ❌ 收获失败：%s" % e); time.sleep(1); continue
+                    except Exception as e: log.warning("      ❌ 收获失败：%s" % e); time.sleep(1); continue
                     time.sleep(1); can_put = min((sorghum // 200) * 200, 5000, wine_yeast * 200)
                     if can_put >= 200:
                         log.info("      🌾 立即投粮：%s 斤高粱（消耗酒曲 %s 块）" % (can_put, can_put // 200))
                         try: r = client.discharge_grain({"volumn": can_put}); log.info("      ✅ 投粮成功: %s" % r); sorghum -= can_put; wine_yeast -= can_put // 200
-                        except RuntimeError as e: log.warning("      ❌ 投粮失败：%s" % e)
+                        except Exception as e: log.warning("      ❌ 投粮失败：%s" % e)
                         time.sleep(1)
                     else:
                         if sorghum < 200: log.info("      ⚠️  高粱不足（有 %s 斤），跳过投粮" % sorghum)
@@ -1109,7 +1113,7 @@ def run(client, do_daily=True):
                 if can_put >= 200:
                     log.info("   🍶 酒坛 %s [空坛] → 投粮 %s 斤高粱（消耗酒曲 %s 块）" % (wid, can_put, can_put // 200))
                     try: r = client.discharge_grain({"id": wid, "volumn": can_put}); log.info("      ✅ 投粮成功: %s" % r); sorghum -= can_put; wine_yeast -= can_put // 200
-                    except RuntimeError as e: log.warning("      ❌ 投粮失败：%s" % e)
+                    except Exception as e: log.warning("      ❌ 投粮失败：%s" % e)
                     time.sleep(1)
                 else:
                     if sorghum < 200: log.info("   🍶 酒坛 %s [空坛]  ⚠️  高粱不足（有 %s 斤）" % (wid, sorghum))
@@ -1128,9 +1132,9 @@ def run(client, do_daily=True):
                 if can_put >= 200:
                     log.info("   🌾 制曲后投粮：%s 斤高粱（消耗酒曲 %s 块）" % (can_put, can_put // 200))
                     try: r2 = client.discharge_grain({"volumn": can_put}); log.info("      ✅ 投粮成功: %s" % r2)
-                    except RuntimeError as e: log.warning("      ❌ 投粮失败：%s" % e)
+                    except Exception as e: log.warning("      ❌ 投粮失败：%s" % e)
                     time.sleep(1)
-            except RuntimeError as e: log.warning("   ❌ 制曲失败：%s" % e)
+            except Exception as e: log.warning("   ❌ 制曲失败：%s" % e)
             time.sleep(1)
         elif wheat > 0: log.info("🍺 小麦 %s 斤不足 100 斤，跳过制曲" % wheat)
 
@@ -1140,7 +1144,7 @@ def run(client, do_daily=True):
         if _AUTO_EXCHANGE:
             log.info("💰 酒兑换积分：%sL → +%s 积分" % (wine_vol, wine_vol))
             try: r = client.exchange_wine(wine_vol); log.info("   ✅ 兑换成功: %s" % r)
-            except RuntimeError as e: log.warning("   ❌ 兑换失败：%s" % e)
+            except Exception as e: log.warning("   ❌ 兑换失败：%s" % e)
             time.sleep(1)
         else: log.info("💰 酒 %sL 未兑换（自动兑换已关闭，设置 GARDEN_AUTO_EXCHANGE=1 开启）" % wine_vol)
 
@@ -1153,9 +1157,9 @@ def run(client, do_daily=True):
             for q in todo:
                 qid, answer = q.get("id"), q.get("answer", ""); log.info("   ❓ [%s] %s  →  %s" % (qid, q.get("title", "")[:25], answer))
                 try: time.sleep(3); r = client.answer_results(qid, answer); log.info("      ✅ 答题成功: %s" % r)
-                except RuntimeError as e: log.warning("      ❌ 答题失败：%s" % e)
+                except Exception as e: log.warning("      ❌ 答题失败：%s" % e)
                 time.sleep(1)
-        except RuntimeError as e: log.warning("   ❌ 获取题目失败：%s" % e)
+        except Exception as e: log.warning("   ❌ 获取题目失败：%s" % e)
 
     # ── 抽奖 ──
     if do_daily:
@@ -1165,9 +1169,9 @@ def run(client, do_daily=True):
             log.info("   剩余免费次数: %d" % free_count)
             for i in range(free_count):
                 try: r = client.draw(); prize = r.get("prize_name") or r.get("name") or r.get("prize") or str(r); log.info("   🎁 第 %d 次：%s" % (i + 1, prize))
-                except RuntimeError as e: log.warning("   ❌ 抽奖失败：%s" % e); break
+                except Exception as e: log.warning("   ❌ 抽奖失败：%s" % e); break
                 time.sleep(2)
-        except RuntimeError as e: log.warning("   ❌ 抽奖异常：%s" % e)
+        except Exception as e: log.warning("   ❌ 抽奖异常：%s" % e)
 
     # ── 刷新统计 ──
     try:
@@ -1430,8 +1434,8 @@ if __name__ == "__main__":
                 if enc.get("success"):
                     client.set_crypto(enc["encrypt_key"], enc["iv"], version=enc.get("version", 3))
                     log.info("   🔐 加密密钥已获取  version=%s" % enc.get("version"))
-                else: cached_token = ""
-            except Exception as e: log.warning("   ⚠️  获取加密密钥异常: %s" % e); cached_token = ""
+            except Exception:
+                pass
 
         if not cached_token or not token_valid(cached_token):
             log.info("   🔄 token 无效或已过期，重新登录...")
@@ -1442,12 +1446,10 @@ if __name__ == "__main__":
 
             log.info("   🔑 登录结果: token=%s  加密=%s" % (
                 "✅ 已获取" if result.get("token") else "❌ 失败",
-                "✅ 就绪" if result.get("crypto_ready") else "❌ 未就绪"))
+                "✅ 就绪" if result.get("crypto_ready") else "ℹ️ 标准模式"))
 
             if not result.get("token"): log.error("   ❌ 登录失败，跳过"); continue
             cache[wxid] = client.token; save_cache(cache)
-
-        if not client.crypto: log.error("   ❌ 加密未就绪，跳过"); continue
 
         try:
             today = datetime.now().strftime("%Y-%m-%d"); do_daily = cache.get(wxid + "_daily") != today
