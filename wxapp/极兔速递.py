@@ -12,6 +12,7 @@
 """
 
 from __future__ import annotations
+import getCode  # 自动同步 yyb_go 存活账号
 
 import hashlib
 import os
@@ -22,7 +23,6 @@ from typing import Any, Optional
 
 import requests
 
-import getCode
 
 
 APP_ID = "wxe37801988179d0a5"

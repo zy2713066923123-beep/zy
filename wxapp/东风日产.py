@@ -1,3 +1,4 @@
+import getCode  # 自动同步 yyb_go 存活账号
 # cron: 42 9,15 * * *
 #!/usr/bin/env python3
 # name: 东风日产
@@ -23,7 +24,6 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
-from getCode import get_single_code
 
 
 # ============ 常量配置 ============

@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 /*
 米面油百科 - 微信协议登录 + 内容积分
 
@@ -45,7 +46,6 @@ const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
 const { URL, URLSearchParams } = require('url');
-const { getSingleCode } = require('./getCode.js');
 
 const $ = new Env('米面油百科');
 const log = console.log;

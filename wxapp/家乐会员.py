@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+import getCode  # 自动同步 yyb_go 存活账号
 # name: 家乐会员
 # cron: 1 9,22 * * *
 """
@@ -99,7 +100,6 @@ DEFAULT_RECIPE_ARTID = "content/ufs/zh/recipes/sgslszj/jcr:content"
 
 # 统一取码 (与项目其它脚本一致: WX_ID + getCode 双协议自动路由)
 try:
-    from getCode import get_single_code
 except Exception as exc:
     print(f"[警告] getCode.py 导入失败：{exc}，WX_ID 取码不可用，仅支持环境变量 token 兜底")
     get_single_code = None

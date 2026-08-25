@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+import getCode  # 自动同步 yyb_go 存活账号
 # cron: 9 9,14 * * *
 """
 # name: 天机观
@@ -24,7 +25,6 @@ import os
 import time
 import random
 import requests
-import getCode  # 共享的微信小程序 code 获取模块（自动路由 牛子/应用宝，读取 WX_ID 过滤）
 
 # 屏蔽 SSL 告警
 import warnings

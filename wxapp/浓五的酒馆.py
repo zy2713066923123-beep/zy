@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import getCode  # 自动同步 yyb_go 存活账号
 # name: 浓五的酒馆
 # -*- coding: utf-8 -*-
 """
@@ -43,7 +44,6 @@ from typing import Any, Dict, List, Tuple
 from urllib.parse import quote
 
 import requests
-from getCode import get_single_code
 
 
 APP_NAME = "浓五的酒馆小程序"

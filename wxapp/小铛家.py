@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import getCode  # 自动同步 yyb_go 存活账号
 """
 小铛家小程序
  cron: 48 8,14 * * *
@@ -32,7 +33,6 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
 import requests
-import getCode  # 共享的微信小程序 code 获取模块（自动路由 牛子/应用宝，读取 WX_ID 过滤）
 
 
 

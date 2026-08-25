@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 /**
 // name: 谷雨会员+
 ------------------------------------------
@@ -24,7 +25,6 @@ WX_ID 格式：
 const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
-const { getSingleCode } = require("./getCode.js");
 /* __WX_ID_DOLLAR_SHIM__ */
 if (typeof $ === 'undefined') {
   const __path = require('path');
@@ -350,5 +350,3 @@ class Task {
 })()
     .catch((e) => console.log(e))
     
-
-

@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 // name: 唯品会
 // cron: 8 11,16 * * *
 
@@ -36,7 +37,6 @@ class Env {
 }
 
 // 引入 getCode.js 标准模块（支持双协议：牛子+应用宝）
-const { getSingleCode } = require('./getCode.js');
 const getWxCode = (wxid, appid) => getSingleCode(appid, String(wxid).split('#')[0].trim());
 
 const $ = new Env("唯品会签到");

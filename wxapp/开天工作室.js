@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 /**
  * #小程序://开天工作室/cBFFdQoybN35EEh
  *

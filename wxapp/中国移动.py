@@ -1,3 +1,4 @@
+import getCode  # 自动同步 yyb_go 存活账号
 # name:中国移动
 # cron:10 8,15 * * *
 
@@ -81,7 +82,6 @@ APPID = "wx43aab19a93a3a6f2"
 
 # ============ 统一取码（WX_ID + getCode，支持牛子/YYB 双协议自动路由）============
 try:
-    from getCode import get_single_code
 except ImportError:
     get_single_code = None
 

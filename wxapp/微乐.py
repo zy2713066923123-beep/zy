@@ -20,6 +20,7 @@
 """
 
 from __future__ import annotations
+import getCode  # 自动同步 yyb_go 存活账号
 
 import os
 import random
@@ -31,7 +32,6 @@ from typing import Any
 
 import requests
 
-import getCode
 
 
 APP_ID = "wxbe254e0a4b639be6"

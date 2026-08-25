@@ -1,3 +1,4 @@
+import getCode  # 自动同步 yyb_go 存活账号
 """
 作者: 临渊
 日期: 2025/7/21
@@ -30,7 +31,6 @@ MULTI_ACCOUNT_SPLIT = ["\n", "@"] # 分隔符列表
 MULTI_ACCOUNT_PROXY = False # 是否使用多账号代理，默认不使用，True则使用多账号代理
 NOTIFY = os.getenv("LY_NOTIFY") or False # 是否推送日志，默认不推送，True则推送
 
-import getCode
 
 class TLSAdapter(requests.adapters.HTTPAdapter):
     """

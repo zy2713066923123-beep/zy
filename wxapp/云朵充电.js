@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 /*
 cron: 19 9,16 * * *
 name: 云朵充电

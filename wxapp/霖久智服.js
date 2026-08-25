@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 ﻿// name:霖久智服
 /** cron: 35 8,17 * * *
 霖久智服 微信协议版
@@ -22,7 +23,6 @@ WX_ID 格式：
   LJZF_NOTIFY            通知开关，默认 1；填 0 关闭 sendNotify
 */
 
-const { getSingleCode } = require('./getCode.js');
 const getWxCode = (wxid, appid) => getSingleCode(appid, String(wxid).split('#')[0].trim());
 const fs = require('fs');
 const path = require('path');

@@ -1,3 +1,4 @@
+import getCode  # 自动同步 yyb_go 存活账号
 # 当前脚本来自于 http://script.345yun.cn 脚本库下载！
 # 当前脚本来自于 http://2.345yun.cn 脚本库下载！
 # 当前脚本来自于 http://2.345yun.cc 脚本库下载！
@@ -36,9 +37,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # ── getCode 模块（标准方式获取微信 code） ──
 # 与习酒等脚本一致：分开导入，避免某个函数不存在导致整体失败
 try:
-    from getCode import get_single_code
     try:
-        from getCode import get_single_phone_number
     except ImportError:
         get_single_phone_number = None
     _HAS_GETCODE = True

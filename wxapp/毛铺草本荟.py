@@ -1,3 +1,4 @@
+import getCode  # 自动同步 yyb_go 存活账号
 
 # cron: 39 10,14 * * *
 
@@ -14,7 +15,6 @@
 #小程序://毛铺草本荟/lxJAUyTkGwBivyj
 """
 import requests, json, re, os, sys, time, random, datetime, hashlib, base64
-from getCode import get_single_code
 
 try:
     from notify import send as notify_send

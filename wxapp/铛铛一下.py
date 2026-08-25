@@ -1,3 +1,4 @@
+import getCode  # 自动同步 yyb_go 存活账号
 # name: 铛铛一下 (微信协议版)
 """
 作者: 临渊
@@ -26,7 +27,6 @@ import requests
 import os
 import traceback
 
-from getCode import get_single_code
 
 try:
     from notify import send as notify_send

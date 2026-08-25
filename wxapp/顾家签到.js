@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 /*
 ------------------------------------------
 @Author: sm
@@ -20,7 +21,6 @@ WX_ID 格式：
   openid#手机号  或  openid  多个换行
 */
 
-const { getSingleCode } = require('./getCode.js');
 
 class WeChatServer {
   constructor(config) { this.config = config; }

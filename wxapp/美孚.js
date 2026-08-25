@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 ﻿// name:美孚
 /*
 小程序：美孚臻享俱乐部（微信协议版）
@@ -26,7 +27,6 @@ const http = require('http');
 const https = require('https');
 const zlib = require('zlib');
 const { URL } = require('url');
-const { getSingleCode } = require('./getCode.js'); // 共享微信小程序 code 获取模块（自动路由牛子/应用宝，读取 WX_ID）
 
 const APP_NAME = '美孚臻享俱乐部';
 const WX_APPID = 'wx46f9572cac706c22';

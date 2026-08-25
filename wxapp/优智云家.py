@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+import getCode  # 自动同步 yyb_go 存活账号
 # name: 优智云家
 # cron: 23 9,21 * * *
 
@@ -51,7 +52,6 @@ UA = (
 
 # YYB_SERVER 解析
 # ============ 统一取码（WX_ID + getCode，支持牛子/YYB 双协议自动路由）============
-from getCode import get_single_code
 
 WX_IDS = [s.strip() for s in os.getenv("WX_ID", "").replace("&", "\n").splitlines() if s.strip()]
 if not WX_IDS:
@@ -59,8 +59,8 @@ if not WX_IDS:
     print("格式：wxid#备注 或 openid，多账号换行或 & 分隔")
     exit(1)
 
-WECHAT_SERVER = os.getenv("WECHAT_SERVER", "").strip()
-YYB_SERVER = os.getenv("YYB_SERVER", "").strip()
+WECHAT_SERVER = (os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or "").strip()
+YYB_SERVER = (os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or "").strip()
 if not WECHAT_SERVER and not YYB_SERVER:
     print("❌ 未配置取码服务地址，请设置 WX_SERVER")
     exit(1)

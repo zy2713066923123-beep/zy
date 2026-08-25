@@ -21,6 +21,7 @@ cron: 25 10,13 * * *
 """
 
 from __future__ import annotations
+import getCode  # 自动同步 yyb_go 存活账号
 
 import argparse
 import asyncio
@@ -35,7 +36,6 @@ import inspect
 import json
 import os
 import requests
-import getCode
 import re
 import sys
 import time

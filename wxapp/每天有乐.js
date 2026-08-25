@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 // name:每天有乐
 // cron:57 9,13 * * *
 
@@ -22,7 +23,6 @@ const { createHash } = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const dayjs = require('dayjs');
-const { getSingleCode } = require('./getCode.js');
 
 const APP_NAME = '每天有乐';
 const APPID = 'wxd84920ac8965ee21';

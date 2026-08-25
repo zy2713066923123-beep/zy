@@ -1,3 +1,4 @@
+import getCode  # 自动同步 yyb_go 存活账号
 # name: DT生活
 # cron: 10 9,15 * * *
 import os
@@ -7,7 +8,6 @@ import json
 import requests
 from datetime import datetime
 
-import getCode
 
 try:
     from notify import send as notify_send

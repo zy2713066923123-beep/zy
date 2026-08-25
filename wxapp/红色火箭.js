@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 ﻿// name:红色火箭
 // cron: 6 10,17 * * * 
 //  红色火箭（华泰基金指慧家）
@@ -10,7 +11,6 @@
 
 'use strict';
 
-const { getSingleCode } = require('./getCode.js');
 const getWxCode = (wxid, appid) => getSingleCode(appid, String(wxid).split('#')[0].trim());
 const axios = require('axios');
 const fs = require('fs');
@@ -334,7 +334,6 @@ async function getPhoneCodeInfo(wxid) {
     let respData;
     if (isYyb) {
         // 使用 YYB 协议获取手机号 code
-        const { WeChatCodeGetter, YYBAdapter } = require('./getCode.js');
         const getter = new WeChatCodeGetter();
         await getter.init();
         
@@ -592,7 +591,6 @@ async function getEncryptKey(wxid) {
     const isYyb = /^\d+$/.test(cleanWxid) || /^o[a-zA-Z0-9_-]{20,}$/.test(cleanWxid);
 
     if (isYyb) {
-        const { WeChatCodeGetter, YYBAdapter } = require('./getCode.js');
         const getter = new WeChatCodeGetter();
         await getter.init();
         

@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 // name: 幸运星
 // cron: 12 11,16 * * *
 /**
@@ -220,7 +221,6 @@ const path = require('path');
 // 共享微信小程序 code 获取模块（同目录 wxapp/getCode.js），自动路由牛子/应用宝
 let getSingleCode = null;
 try {
-  getSingleCode = require('./getCode.js').getSingleCode;
 } catch (e) {
   try { getSingleCode = require('./wxapp/getCode.js').getSingleCode; } catch (e2) { getSingleCode = null; }
 }

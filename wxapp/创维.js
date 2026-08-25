@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 // name:创维小程序
 /**
  * 创维小程序
@@ -19,7 +20,6 @@
 
 'use strict';
 
-const { getSingleCode } = require('./getCode');
 const crypto = require('crypto');
 const vm = require('vm');
 

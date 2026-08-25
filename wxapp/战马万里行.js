@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 // name: 战马万里行
 // cron: 16 7,17 * * *
 
@@ -5,7 +6,6 @@ const axios = require('axios');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { getSingleCode, getSinglePhoneEncrypted, getSingleOperateWxData } = require('./getCode.js');
 
 const BASE_URL = 'https://whjourney.campaign-design.com';
 const APP_API = 'https://warhorsechina.cojoy.com.cn/app/api';

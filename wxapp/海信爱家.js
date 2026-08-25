@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 ﻿// name:海信爱家
 /**
  * 海信爱家任务中心 - 青龙自动化脚本
@@ -26,7 +27,6 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { getSingleCode } = require('./getCode');
 const sign = (() => {
   const module = { exports: {} };
   const exports = module.exports;
@@ -2639,4 +2639,3 @@ main().catch(async (err) => {
   await sendNotifySafe(`${SCRIPT_NAME} 执行异常`, `时间: ${fmtTime(Date.now())}\n错误: ${err.message || err}`);
   process.exit(1);
 });
-

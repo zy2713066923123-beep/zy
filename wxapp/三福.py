@@ -1,3 +1,4 @@
+import getCode  # 自动同步 yyb_go 存活账号
 # name: 三福
 # cron: 51 11,13 * * *
 import os
@@ -6,7 +7,6 @@ import random
 import requests
 import asyncio
 
-import getCode
 
 try:
     from notify import send as notify_send

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 // name:期云积签兑
 // cron: 47 11,16 * * *
 'use strict';
@@ -22,7 +23,6 @@
  *   QYQD_SKIP_LOTTERY=1  跳过抽奖
  */
 
-const { getSingleCode } = require('./getCode.js');
 const http = require('http');
 const https = require('https');
 const { URL } = require('url');

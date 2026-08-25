@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 // name: 飞蚂蚁旧衣回收
 // cron: 2 10,13 * * *
 class Env {
@@ -44,7 +45,6 @@ async function loadProxyAgents() {
     HttpProxyAgent = hpm.HttpProxyAgent || hpm.default;
 }
 
-const { getSingleCode } = require('./getCode.js');
 const getWxCode = (wxid, appid) => getSingleCode(appid, String(wxid).split('#')[0].trim());
 
 const $ = new Env("飞蚂蚁旧衣回收");

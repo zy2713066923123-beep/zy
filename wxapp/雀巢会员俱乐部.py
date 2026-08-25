@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+import getCode  # 自动同步 yyb_go 存活账号
 # cron:52 8,16 * * *
 """
 # name: 雀巢会员俱乐部
@@ -473,7 +474,6 @@ class QueChaoBot:
         print(f"🔐 [{self.server}] 请求获取 code | wxid: {mask_text(self.wxid)}")
         
         try:
-            from getCode import get_single_code
             code = await asyncio.to_thread(get_single_code, APPID, self.wxid)
             if not code:
                 print(f"❌ [{self.server}] 获取 code 失败")

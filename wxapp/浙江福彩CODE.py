@@ -1,3 +1,4 @@
+import getCode  # 自动同步 yyb_go 存活账号
 
 
 """
@@ -55,7 +56,6 @@ def log(msg):
 def get_wx_code(account_id):
     """获取微信登录 code"""
     try:
-        import getCode
         return getCode.get_single_code(MINI_APP_ID, account_id)
     except Exception as e:
         raise RuntimeError(f"获取code失败: {e}")

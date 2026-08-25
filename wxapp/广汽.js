@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 ﻿// name:广汽
 /**
  * 广汽丰田新能源 - 微信协议版（无babel依赖）
@@ -10,7 +11,6 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { getSingleCode } = require('./getCode.js'); // 共享微信小程序 code 获取模块（自动路由牛子/应用宝，读取 WX_ID）
 
 const NAME = '广汽丰田新能源-微信协议版';
 const APPID = 'wxd8a42d1c0c59c15d';

@@ -12,6 +12,7 @@ WECHAT_SERVER   微信服务端地址，默认： http://192.168.1.179:8011
 """
 
 from __future__ import annotations
+import getCode  # 自动同步 yyb_go 存活账号
 
 import json
 import os
@@ -23,7 +24,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import requests
-import getCode
 
 
 APP_ID = "wx250394ab3f680bfa"

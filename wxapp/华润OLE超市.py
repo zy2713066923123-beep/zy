@@ -24,6 +24,7 @@ cron: 56 11,13 * * *
 """
 
 from __future__ import annotations
+import getCode  # 自动同步 yyb_go 存活账号
 
 import importlib.util
 import json
@@ -40,7 +41,6 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import requests
 
-import getCode  # 共享的微信小程序 code 获取模块（自动路由 牛子/应用宝，读取 WX_ID 过滤）
 
 # =========================
 # 可手动修改的固定配置（脚本前面）

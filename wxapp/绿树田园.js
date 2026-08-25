@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 /*
  * 
  *
@@ -25,7 +26,6 @@ const { sendNotify } = require('../sendNotify');
 // 统一微信协议（牛子/应用宝双协议，复用仓库 getCode）
 let getSingleCode = null;
 try {
-    ({ getSingleCode } = require('./getCode'));
 } catch (e) {
     getSingleCode = null;
 }

@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 /**
 // name: 三得利
 ------------------------------------------
@@ -24,7 +25,6 @@ WX_ID 格式：
 const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
-const { getSingleCode } = require("./getCode.js");
 const { SocksProxyAgent } = require('socks-proxy-agent');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 const { HttpProxyAgent } = require('http-proxy-agent');

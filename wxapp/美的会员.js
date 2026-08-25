@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 // name: 美的会员
 // cron: 25 8,16 * * *
 //
@@ -41,7 +42,6 @@ const APPID = "wx49a622805968d156";
 //              - 由统一 getCode 模块按标识格式自动路由，无需手动指定
 //   YYB_SERVER YYB 应用宝取码服务地址（YYB 账号时使用，如 http://127.0.0.1:8088）
 //   WECHAT_SERVER 牛子取码服务地址（牛子账号时使用）
-const getCode = require('./getCode.js');
 const WX_IDS = (process.env.WX_ID || "")
     .split(/\r?\n|&/)
     .map(s => s.trim())

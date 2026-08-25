@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import getCode  # 自动同步 yyb_go 存活账号
 # name: 绿动新球
 # cron: 11 10,13 * * *
 # -*- coding: utf-8 -*-
@@ -55,7 +56,6 @@ APPID = "wxa61a45f180dec800"
 #   YYB_SERVER YYB 应用宝取码服务地址（YYB 账号时使用，如 http://127.0.0.1:8088）
 #   WECHAT_SERVER 牛子取码服务地址（牛子账号时使用）
 import asyncio
-from getCode import get_single_code
 
 WX_IDS = [
     s.strip()
@@ -68,8 +68,8 @@ if not WX_IDS:
     print("格式：wxid#备注 或 openid，多账号换行或 & 分隔")
     exit(1)
 
-YYB_SERVER = os.getenv("YYB_SERVER", "").strip()
-WECHAT_SERVER = os.getenv("WECHAT_SERVER", "").strip()
+YYB_SERVER = (os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or "").strip()
+WECHAT_SERVER = (os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or "").strip()
 
 if not YYB_SERVER and not WECHAT_SERVER:
     print("❌ 未配置取码服务地址，请设置 YYB_SERVER 或 WECHAT_SERVER 后重试")

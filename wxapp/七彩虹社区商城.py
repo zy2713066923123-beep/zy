@@ -1,3 +1,4 @@
+import getCode  # 自动同步 yyb_go 存活账号
 # cron: 35 9,16 * * *
 # 1 环境变量 WX_SERVER 填 yyb_go 服务地址（例如：http://127.0.0.1:8000）
 # name: 七彩虹社区商城
@@ -18,7 +19,6 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import requests
-from getCode import get_single_code, get_single_phone_number
 
 # 通知模块
 try:

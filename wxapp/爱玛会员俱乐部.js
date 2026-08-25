@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 /*
 爱玛会员俱乐部 - 自动签到脚本
 变量名：aima
@@ -24,7 +25,6 @@ class Env {
   msg(text) { console.log(text); }
   async done() { try { const notify = require('../sendNotify'); await notify.sendNotify(this.name, this.logs.join('\n')); } catch(e) { console.log('通知发送失败', e); } }
 }
-const { getSingleCode } = require('./getCode.js');
 const getWxCode = (wxid, appid) => getSingleCode(appid, String(wxid).split('#')[0].trim());
 const $ = new Env("爱玛会员俱乐部");
 const axios = require("axios");

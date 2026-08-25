@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+import getCode  # 自动同步 yyb_go 存活账号
 """
 ------------------------------------------
 @Author: sm
@@ -45,7 +46,6 @@ except ImportError:
     sys.exit(1)
 
 try:
-    from getCode import get_single_code
 except ImportError:
     get_single_code = None
 
@@ -313,5 +313,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-

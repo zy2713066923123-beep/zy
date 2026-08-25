@@ -1,3 +1,4 @@
+require('./getCode.js'); // 自动同步 yyb_go 存活账号
 /*
 君品荟签到
 
@@ -133,7 +134,6 @@ let user_phone = '';
     .catch((e) => log(e))
     .finally(() => $.done())
 
-const { getSingleCode } = require('./getCode.js');
 
 // 获取code
 async function get_code(hd) {
