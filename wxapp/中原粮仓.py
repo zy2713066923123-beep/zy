@@ -8,6 +8,7 @@ import sys
 import json
 import time
 import random
+from urllib.parse import quote
 
 import requests
 import urllib3
@@ -96,21 +97,32 @@ def get_yyb_accounts():
 
 
 def get_yyb_oauth_code(account):
-    """通过 yyb 获取公众号网页授权 code（snsapi_userinfo）"""
+    """通过 yyb 获取公众号网页授权 code（snsapi_userinfo）
+
+    使用 yyb_go 新版路由 /wxapp/oauth/authorize（旧版 /wx/oauth 已不存在）。
+    oauth_authorize 内部会按 ref 解析账号并请求微信授权，返回原始授权结果
+    （含 code / openid / unionid / 等微信字段，或 redirect_url）。
+    """
     ref = str(account.get("id") or account.get("openid") or account.get("wxid"))
-    res = _yyb_client._request("POST", "/wx/oauth", json_data={
-        "ref": ref,
-        "appid": APPID,
-        "scope": "snsapi_userinfo",
-        "state": "",
-    })
-    if isinstance(res, dict):
-        code = res.get("code")
-        openid = res.get("openid")
-        unionid = res.get("unionid")
-        nickname = res.get("nickname")
-    else:
+    oauth_url = (
+        "https://open.weixin.qq.com/connect/oauth2/authorize"
+        "?appid=" + APPID +
+        "&redirect_uri=" + quote("https://wechat.zygfpt.com:8090/grain-bag-api/user/wechatLogin", safe="") +
+        "&response_type=code&scope=snsapi_userinfo&state=&connect_redirect=1#wechat_redirect"
+    )
+    res = _yyb_client.oauth_authorize(ref, APPID, oauth_url)
+    if not isinstance(res, dict):
         raise Exception(f"获取公众号授权失败: {res}")
+    # code 优先取返回里的 code，其次从 redirect_url 的 query 解析
+    code = res.get("code")
+    redirect_url = res.get("redirect_url") or ""
+    if not code and redirect_url:
+        from urllib.parse import urlparse, parse_qs
+        q = parse_qs(urlparse(redirect_url).query)
+        code = (q.get("code") or [None])[0]
+    openid = res.get("openid")
+    unionid = res.get("unionid")
+    nickname = res.get("nickname") or account.get("nickname") or account.get("remark") or ""
     if not code:
         raise Exception(f"未获取到授权 code: {res}")
     return code, openid, unionid, nickname

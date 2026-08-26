@@ -1425,14 +1425,16 @@ if __name__ == "__main__":
     WX_SERVER = os.environ.get("WX_SERVER") or os.environ.get("WECHAT_SERVER") or os.environ.get("YYB_SERVER") or DEFAULT_WECHAT_SERVER
     WX_ID_RAW = (os.getenv("WX_ID") or os.getenv("WXIDXJ", "")).strip()
 
-    accounts = parse_accounts(WX_ID_RAW)
+    # 优先从 yyb 服务拉取账号列表（用 id 主键，最稳），环境变量 WX_ID 仅作兜底
+    accounts = []
+    try:
+        accs = load_accounts()
+        if accs:
+            accounts = [{"id": str(acc.get("id")), "note": acc.get("nickname") or acc.get("alias") or f"账号_{acc.get('id')}"} for acc in accs]
+    except Exception:
+        pass
     if not accounts:
-        try:
-            accs = load_accounts()
-            if accs:
-                accounts = [{"id": acc.get("openid") or str(acc.get("id")), "note": acc.get("nickname") or acc.get("alias") or f"账号_{acc.get('id')}"} for acc in accs]
-        except Exception:
-            pass
+        accounts = parse_accounts(WX_ID_RAW)
 
     CACHE_FILE = Path(__file__).parent / "xijiutoken.json"
 
