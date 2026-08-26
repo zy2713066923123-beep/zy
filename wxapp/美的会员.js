@@ -1,4 +1,4 @@
-require('./yyb.js'); // 自动同步 yyb_go 存活账号
+const yyb = require('./yyb.js'); // 自动同步 yyb_go 存活账号
 // name: 美的会员
 // cron: 25 8,16 * * *
 //
@@ -23,9 +23,7 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 //   npm install axios http-proxy-agent https-proxy-agent socks-proxy-agent
 
 const axios = require("axios");
-const { SocksProxyAgent } = require("socks-proxy-agent");
 const { HttpsProxyAgent } = require("https-proxy-agent");
-const { HttpProxyAgent } = require("http-proxy-agent");
 
 delete process.env.HTTP_PROXY;
 delete process.env.HTTPS_PROXY;
@@ -108,11 +106,11 @@ function preview(value, limit = 800) {
     }
 }
 
-function logTitle() {
+function logTitle(count) {
     console.log("\n╔══════════════════════════════════════════════╗");
     console.log("║ 🔷 美的会员动态 code 签到                   ║");
     console.log(`║ 🕒 ${nowText()}`);
-    console.log(`║ 🔢 账号数量: ${WX_IDS.length}`);
+    console.log(`║ 🔢 账号数量: ${count}`);
     console.log("╚══════════════════════════════════════════════╝");
 }
 
@@ -167,7 +165,7 @@ function parseProxyResponse(text) {
     return null;
 }
 
-function buildProxyAgent(proxyInfo) {
+async function buildProxyAgent(proxyInfo) {
     if (!proxyInfo) return null;
 
     const { host, port, username, password } = proxyInfo;
@@ -181,6 +179,8 @@ function buildProxyAgent(proxyInfo) {
         if (PROXY_TYPE === "socks5") {
             const proxyUrl = `socks5://${auth}${host}:${port}`;
             console.log(`🛠️ [代理] 生成 SOCKS5 代理 ${host}:${port}`);
+            // socks-proxy-agent 是 ES Module，需动态 import
+            const { SocksProxyAgent } = await import("socks-proxy-agent");
             return {
                 httpAgent: new SocksProxyAgent(proxyUrl),
                 httpsAgent: new SocksProxyAgent(proxyUrl),
@@ -190,6 +190,8 @@ function buildProxyAgent(proxyInfo) {
 
         const proxyUrl = `http://${auth}${host}:${port}`;
         console.log(`🛠️ [代理] 生成 HTTP 代理 ${host}:${port}`);
+        // http-proxy-agent 是 ES Module，需动态 import
+        const { HttpProxyAgent } = await import("http-proxy-agent");
         return {
             httpAgent: new HttpProxyAgent(proxyUrl),
             httpsAgent: new HttpsProxyAgent(proxyUrl),
@@ -248,7 +250,7 @@ async function getValidProxy(accountName) {
 
             console.log(`✅ [代理] 提取到 ${proxyInfo.host}:${proxyInfo.port}`);
 
-            const agent = buildProxyAgent(proxyInfo);
+            const agent = await buildProxyAgent(proxyInfo);
             const valid = await validateProxy(agent);
 
             if (valid.ok) {
@@ -619,7 +621,7 @@ async function signIn2(ucAccessToken, proxyAgent, server) {
 }
 
 async function runAccount(index, total, openid) {
-    const proxyKey = YYB_SERVER + "@" + openid;
+    const proxyKey = SERVER + "@" + openid;
     const result = {
         server: openid,
         success: false,
@@ -744,13 +746,12 @@ ${icon} 结果：${res.success ? "成功" : "失败"}
 }
 
 (async () => {
-    logTitle();
-
     const wxIds = await getAccountList();
     if (!wxIds.length) {
         console.log("未配置或同步到可用账号 WX_ID，脚本退出");
         return;
     }
+    logTitle(wxIds.length);
     console.log(`✅ 读取到 ${wxIds.length} 个微信账号，自动路由牛子/YYB 双协议`);
     const results = [];
 
@@ -762,7 +763,7 @@ ${icon} 结果：${res.success ? "成功" : "失败"}
             console.log(`❌ [主程序] ${wxIds[i]} 执行异常: ${e.message}`);
 
             results.push({
-                server: WX_IDS[i],
+                server: wxIds[i],
                 success: false,
                 proxyStatus: "-",
                 proxyIp: "-",
@@ -777,7 +778,7 @@ ${icon} 结果：${res.success ? "成功" : "失败"}
             });
         }
 
-        if (i < WX_IDS.length - 1) {
+        if (i < wxIds.length - 1) {
             console.log("⏳ [间隔] 等待 2s 后处理下一个账号");
             await sleep(2000);
         }

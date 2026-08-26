@@ -25,9 +25,7 @@ WX_ID 格式：
 const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
-const { SocksProxyAgent } = require('socks-proxy-agent');
 const { HttpsProxyAgent } = require('https-proxy-agent');
-const { HttpProxyAgent } = require('http-proxy-agent');
 
 // 强制全局禁用系统代理环境变量，避免干扰
 delete process.env.HTTP_PROXY;
@@ -143,7 +141,7 @@ function parseProxyResponse(text) {
 }
 
 // 生成代理Agent（支持HTTP/SOCKS5）
-function buildProxyAgent(proxyInfo) {
+async function buildProxyAgent(proxyInfo) {
     if (!proxyInfo) return null;
     
     const { host, port, username, password } = proxyInfo;
@@ -156,6 +154,8 @@ function buildProxyAgent(proxyInfo) {
         if (PROXY_TYPE === "socks5") {
             const proxyUrl = `socks5://${auth}${host}:${port}`;
             console.log(`🔧 生成SOCKS5代理：socks5://${auth}${host}:${port}`);
+            // socks-proxy-agent 是 ES Module，需动态 import
+            const { SocksProxyAgent } = await import('socks-proxy-agent');
             return {
                 httpAgent: new SocksProxyAgent(proxyUrl),
                 httpsAgent: new SocksProxyAgent(proxyUrl)
@@ -165,6 +165,8 @@ function buildProxyAgent(proxyInfo) {
             const httpProxyUrl = `http://${auth}${host}:${port}`;
             const httpsProxyUrl = `http://${auth}${host}:${port}`;
             console.log(`🔧 生成HTTP代理：${httpProxyUrl}`);
+            // http-proxy-agent 是 ES Module，需动态 import
+            const { HttpProxyAgent } = await import('http-proxy-agent');
             return {
                 httpAgent: new HttpProxyAgent(httpProxyUrl),
                 httpsAgent: new HttpsProxyAgent(httpsProxyUrl)
@@ -225,7 +227,7 @@ async function getValidProxy(accountName) {
             console.log(`✅ [${accountName}] 提取到专属代理：${proxyInfo.host}:${proxyInfo.port}`);
             
             // 生成代理Agent并验证
-            const agent = buildProxyAgent(proxyInfo);
+            const agent = await buildProxyAgent(proxyInfo);
             const isValid = await validateProxy(agent);
             if (isValid) {
                 return agent;

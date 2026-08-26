@@ -517,6 +517,7 @@ def run_account(entry, allow_env=True):
 
 
 def main():
+    global YYB_GO_RAW
     print("=" * 50)
     print("  宝妈上班 自动赚取贡献值 (多账号版, 含自动续期)")
     print("=" * 50)

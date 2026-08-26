@@ -248,11 +248,18 @@ class AutoTask:
             url = f"https://{self.host}/api/user"
             response = session.post(url, timeout=5)
             response_json = response.json()
-            if int(response_json['status']) == 1:
-                self.log(f"[积分余额] {response_json['data']['userinfo']['integral']}")
-                return response_json['data']['userinfo']['integral']
+            if not isinstance(response_json, dict):
+                self.log(f"[积分余额] 接口返回异常: {response_json}", level="error")
+                return False
+            if int(response_json.get('status', 0)) == 1:
+                data = response_json.get('data', {})
+                user_info = data.get('userinfo', {}) if isinstance(data, dict) else {}
+                if not isinstance(user_info, dict):
+                    user_info = {}
+                self.log(f"[积分余额] {user_info.get('integral')}")
+                return user_info.get('integral')
             else:
-                self.log(f"[积分余额] 发生错误: {response_json['msg']}", level="error")
+                self.log(f"[积分余额] 发生错误: {response_json.get('msg')}", level="error")
                 return False
         except Exception as e:
             self.log(f"[积分余额] 发生错误: {str(e)}\n{traceback.format_exc()}", level="error")

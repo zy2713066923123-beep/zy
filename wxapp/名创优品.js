@@ -1,4 +1,4 @@
-require('./yyb.js'); // 自动同步 yyb_go 存活账号
+const yyb = require('./yyb.js'); // 自动同步 yyb_go 存活账号
 // name: 名创优品
 // cron: 30 8 * * *
 const axios = require('axios');
@@ -12,13 +12,6 @@ let WX_IDS = (process.env.WX_ID || "")
     .split(/[\r\n|&]+/)
     .map(s => s.trim())
     .filter(Boolean);
-
-const SERVER = (process.env.WX_SERVER || process.env.WX_SERVER || process.env.WECHAT_SERVER || process.env.YYB_SERVER || "").trim();
-if (!SERVER) {
-    console.error("未配置取码服务地址，请设置 WX_SERVER");
-    process.exit(1);
-}
-if (!process.env.WX_SERVER) process.env.WX_SERVER = SERVER;
 
 console.log(`✅ 读取到 ${WX_IDS.length} 个微信账号，自动路由牛子/YYB 双协议`);
 
@@ -79,7 +72,7 @@ function saveCache(cache) {
 
 async function getWxCode(identifier) {
     // 走 yyb.js 统一取码：自动识别 wxid/openid、剥 #手机号、模糊匹配 ref、健康检查
-    return await getSingleCode(APPID, identifier);
+    return await yyb.getSingleCode(APPID, identifier);
 }
 
 async function loginByCode(code) {
@@ -553,7 +546,7 @@ async function main() {
     // 未配置 WX_ID 时，自动从 yyb_go 拉取所有存活账号
     if (!WX_IDS.length) {
         try {
-            const _accs = await loadAccounts();
+            const _accs = await yyb.loadAccounts();
             WX_IDS = _accs.map(a => a.openid || a.wxid || a._ref || String(a.id)).filter(Boolean);
         } catch (e) {
             console.log(`从 yyb_go 拉取账号失败: ${e.message || e}`);

@@ -1,4 +1,4 @@
-require('./yyb.js'); // 自动同步 yyb_go 存活账号
+const yyb = require('./yyb.js'); // 自动同步 yyb_go 存活账号
 /**
  * 多账号：账号来源 / wx code / 手机号加密数据(encryptedData/iv) 全部统一走 yyb.js
  * （自动路由牛子/应用宝，读取 WX_ID 筛选账号）。不再直接依赖 8000 服务。

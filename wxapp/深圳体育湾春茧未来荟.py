@@ -43,6 +43,8 @@ class TLSAdapter(requests.adapters.HTTPAdapter):
         ctx = ssl.create_default_context()
         ctx.set_ciphers("DEFAULT@SECLEVEL=1")
         ctx.options |= 0x4   # <-- the key part here, OP_LEGACY_SERVER_CONNECT
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
         kwargs["ssl_context"] = ctx
         return super(TLSAdapter, self).init_poolmanager(*args, **kwargs)
 

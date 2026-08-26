@@ -44,8 +44,18 @@ class TLSAdapter(requests.adapters.HTTPAdapter):
         ctx = ssl.create_default_context()
         ctx.set_ciphers("DEFAULT@SECLEVEL=1")
         ctx.options |= 0x4   # <-- the key part here, OP_LEGACY_SERVER_CONNECT
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
         kwargs["ssl_context"] = ctx
         return super(TLSAdapter, self).init_poolmanager(*args, **kwargs)
+
+
+def make_session():
+    """创建带 TLS 兼容与证书校验关闭的 session（目标服务器证书过期）"""
+    session = requests.Session()
+    session.mount("https://", TLSAdapter())
+    session.verify = False
+    return session
 
 class AutoTask:
     def __init__(self, script_name):
@@ -420,16 +430,16 @@ class AutoTask:
                 if MULTI_ACCOUNT_PROXY:
                     proxy = self.get_proxy()
                     if proxy:
-                        session = requests.Session()
+                        session = make_session()
                         session.proxies.update({"http": f"http://{proxy}", "https": f"http://{proxy}"})
                         # 检查代理，不可用重新获取
                         while not self.check_proxy(proxy, session):
                             proxy = self.get_proxy()
                             session.proxies.update({"http": f"http://{proxy}", "https": f"http://{proxy}"})
                     else:
-                        session = requests.Session()
+                        session = make_session()
                 else:
-                    session = requests.Session()
+                    session = make_session()
                     
                 headers = {
                     "User-Agent": self.user_agent,

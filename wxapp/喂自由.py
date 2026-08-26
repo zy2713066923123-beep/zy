@@ -191,6 +191,8 @@ class WzyClient:
 
         log.info("获取登录code...")
         code = get_wx_code(wxid)
+        if not code:
+            raise RuntimeError("获取code失败: 取码返回空，跳过")
         log.info(f"code获取成功: {code[:8]}...")
 
         log.info("登录...")
