@@ -146,6 +146,13 @@ function mergeSetCookie(setCookie = [], current = {}) {
   return cookies;
 }
 
+function parseYybGoEntry(rawValue) {
+  const value = String(rawValue || "").trim();
+  if (!value) return { server: "", ref: "" };
+  const ref = value.split("#")[0].trim();
+  return { server: "", ref };
+}
+
 function parseAccount(raw) {
   const text = String(raw || "").trim();
   if (!text) return { openid: "", cookie: "", secret: "" };
