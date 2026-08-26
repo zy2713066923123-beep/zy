@@ -96,7 +96,14 @@ def parse_accounts():
     accounts = []
     wx_id_raw = os.getenv("WX_ID", "").strip()
     if not wx_id_raw:
-        print("⭕ 未找到环境变量 WX_ID，请设置账号变量")
+        # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        try:
+            for ref in yyb.resolve_accounts():
+                accounts.append({"id": ref, "note": ref})
+        except Exception as exc:
+            print(f"⭕ 自动拉取 yyb_go 账号失败: {exc}")
+        if not accounts:
+            print("⭕ 未找到环境变量 WX_ID，且 yyb_go 无存活账号")
         return accounts
 
     for sep in MULTI_ACCOUNT_SPLIT:

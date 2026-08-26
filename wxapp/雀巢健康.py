@@ -450,7 +450,11 @@ def parse_accounts() -> List[Tuple[str, str]]:
     accounts: List[Tuple[str, str]] = []
     for line in raw.replace("&", "\n").splitlines():
         line = line.strip()
-        if not line or line.startswith("#") or "#" not in line:
+        if not line or line.startswith("#"):
+            continue
+        if "#" not in line:
+            # 无备注时，直接用标识本身作为别名
+            accounts.append((line, line))
             continue
         # 兼容两种格式：wxid#备注 或 备注#wxid
         parts = line.split("#", 1)
@@ -461,6 +465,13 @@ def parse_accounts() -> List[Tuple[str, str]]:
             alias, wxid = part_b, part_a
         if alias and wxid:
             accounts.append((alias, wxid))
+    if not accounts:
+        # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        try:
+            for ref in yyb.resolve_accounts():
+                accounts.append((ref, ref))
+        except Exception as exc:
+            print(f"自动拉取 yyb_go 账号失败：{exc}")
     return accounts
 
 

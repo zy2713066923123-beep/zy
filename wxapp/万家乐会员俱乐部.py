@@ -135,11 +135,11 @@ class AutoTask:
         """
         try:
             # 从环境变量获取cookie
-                        if not (os.getenv("WX_ID") or os.getenv("soy_wxid_data")):
+            if not (os.getenv("WX_ID") or os.getenv("soy_wxid_data")):
                 for _yyb_acc in yyb.resolve_accounts("soy_wxid_data"):
                     yield _yyb_acc
                 return
-soy_wxid_data = os.getenv("WX_ID") or os.getenv("soy_wxid_data")
+            soy_wxid_data = os.getenv("WX_ID") or os.getenv("soy_wxid_data")
             if not soy_wxid_data:
                 self.log("[检查环境变量] 没有找到环境变量 WX_ID / soy_wxid_data，请检查环境变量", level="error")
                 return None

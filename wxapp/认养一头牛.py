@@ -613,13 +613,15 @@ def fetch_all_accounts_from_service() -> list:
         ref = str(acc_id)
         print(f"[LOGIN] 正在为 {nickname} 获取 token...")
 
-        # 登录前先校验 YYB 在线状态
+        # 登录前尝试校验 YYB 在线状态；该接口并非所有服务端版本都提供，
+        # 只有在接口明确返回“成功但无数据”时才判定离线，避免 404/错误码被误判为全部离线。
         try:
             state_resp = requests.get(f"http://{YYB_HOST}/state?id={ref}", timeout=10)
-            state_data = state_resp.json()
-            if state_data.get("code") != 0 or not state_data.get("data"):
-                print(f"  [SKIP] 账号 {nickname} 在 YYB 服务中未在线，跳过")
-                continue
+            if state_resp.status_code == 200:
+                state_data = state_resp.json()
+                if state_data.get("code") == 0 and not state_data.get("data"):
+                    print(f"  [SKIP] 账号 {nickname} 在 YYB 服务中未在线，跳过")
+                    continue
         except Exception:
             pass  # 服务不支持 state 接口时直接尝试登录
 

@@ -171,18 +171,33 @@ class YYBClient {
             return raw;
         }
 
-        // 精确匹配 openid / wxid
-        for (const acc of accounts) {
-            const accLt = normalizeLoginType(acc.login_type);
-            if (targetLt && accLt !== targetLt) continue;
+        const candidates = accounts.filter((acc) => {
+            if (!targetLt) return true;
+            return normalizeLoginType(acc.login_type) === targetLt;
+        });
+        const pool = candidates.length > 0 ? candidates : accounts;
+
+        // 精确匹配 openid / wxid / id
+        for (const acc of pool) {
             if (acc.openid === raw || acc.wxid === raw || String(acc.id) === raw) {
                 return String(acc.id);
             }
         }
 
-        // 若只有一个账号，默认使用它
-        if (accounts.length === 1 && (!targetLt || normalizeLoginType(accounts[0].login_type) === targetLt)) {
-            return String(accounts[0].id);
+        // 再按备注(alias)/昵称匹配：WX_ID 里常写的是 "156" 这类备注而非 openid
+        const lower = raw.toLowerCase();
+        for (const acc of pool) {
+            const labels = [acc.alias, acc.remark, acc.nickname]
+                .filter((v) => typeof v === 'string' && v.trim())
+                .map((v) => v.trim().toLowerCase());
+            if (labels.includes(lower)) {
+                return String(acc.id);
+            }
+        }
+
+        // 若只有一个候选账号，默认使用它
+        if (pool.length === 1) {
+            return String(pool[0].id);
         }
 
         return raw;
@@ -713,6 +728,7 @@ module.exports = {
     normalizeLoginType,
     loginTypeLabel,
     loadAccounts,
+    resolveAccounts,
     getAccounts,
     getWechatCodes,
     printOnlineStatus,

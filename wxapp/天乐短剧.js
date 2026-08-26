@@ -56,6 +56,7 @@ const fs = require('fs');
 const path = require('path');
 require('events').defaultMaxListeners = 50;
 
+const yyb = require('./yyb.js');
 const getSingleCode = yyb.getSingleCode;
 
 const ENV_NAME = 'REELIX_AUTH';

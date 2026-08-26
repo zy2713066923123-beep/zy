@@ -760,9 +760,14 @@ class XLXYH {
 }
 
 async function main() {
-  const raw = process.env[ckName] || "";
+  let raw = process.env[ckName] || "";
+  if (!raw && typeof global.resolveAccounts === 'function') {
+    // 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+    const list = await global.resolveAccounts(ckName);
+    raw = (list || []).join('\n');
+  }
   if (!raw) {
-    $.log(`未找到变量 ${ckName}`);
+    $.log(`未找到变量 ${ckName}，且 yyb_go 无存活账号`);
     return;
   }
   if (!WECHAT_SERVER) {

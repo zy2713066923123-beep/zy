@@ -173,16 +173,31 @@ class YYBClient:
         if not accounts:
             return raw
 
-        for acc in accounts:
-            acc_lt = normalize_login_type(acc.get("login_type"))
-            if target_lt and acc_lt != target_lt:
-                continue
+        candidates = [
+            acc for acc in accounts
+            if not target_lt or normalize_login_type(acc.get("login_type")) == target_lt
+        ]
+        pool = candidates or accounts
+
+        # 精确匹配 openid / wxid / id
+        for acc in pool:
             if acc.get("openid") == raw or acc.get("wxid") == raw or str(acc.get("id")) == raw:
                 return str(acc.get("id"))
 
-        if len(accounts) == 1:
-            if not target_lt or normalize_login_type(accounts[0].get("login_type")) == target_lt:
-                return str(accounts[0].get("id"))
+        # 再按备注(alias)/昵称匹配：WX_ID 里常写的是 "156" 这类备注而非 openid
+        lower = raw.lower()
+        for acc in pool:
+            labels = [
+                str(acc.get(k)).strip().lower()
+                for k in ("alias", "remark", "nickname")
+                if isinstance(acc.get(k), str) and acc.get(k).strip()
+            ]
+            if lower in labels:
+                return str(acc.get("id"))
+
+        # 若只有一个候选账号，默认使用它
+        if len(pool) == 1:
+            return str(pool[0].get("id"))
 
         return raw
 

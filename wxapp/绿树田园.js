@@ -24,17 +24,27 @@ const axios = require('axios');
 const { sendNotify } = require('../sendNotify');
 
 // 统一微信协议（牛子/应用宝双协议，复用仓库 getCode）
-// 优先加载 ./getCode；仓库未单独提供时，回退到 yyb.js 暴露的 get_single_code（牛子/应用宝双协议）
-let getSingleCode = null;
-try {
-  getSingleCode = require('./getCode');
-} catch (e) {
-  try {
-    getSingleCode = require('./yyb.js').get_single_code || global.get_single_code;
-  } catch (e2) {
-    getSingleCode = null;
-  }
+// 优先加载 ./getCode；仓库未单独提供时，回退到 yyb.js 暴露的 getSingleCode（牛子/应用宝双协议）
+// 注意：yyb.js 的导出名为驼峰 getSingleCode，历史上误写为 get_single_code 导致回退失效
+function resolveSingleCode() {
+    const pick = (mod) => {
+        if (!mod) return null;
+        if (typeof mod === 'function') return mod;
+        return mod.getSingleCode || mod.get_single_code || mod.default || null;
+    };
+    for (const path of ['./getCode', './yyb.js']) {
+        try {
+            const fn = pick(require(path));
+            if (typeof fn === 'function') return fn;
+        } catch (e) {
+            // 继续尝试下一个来源
+        }
+    }
+    return typeof global.getSingleCode === 'function'
+        ? global.getSingleCode
+        : (typeof global.get_single_code === 'function' ? global.get_single_code : null);
 }
+const getSingleCode = resolveSingleCode();
 
 // 青龙通知汇总
 const notifyLines = [];
@@ -167,7 +177,7 @@ async function getOneProxyFromPool() {
 // 带失败重试：广告领奖每次需新 code（一次性凭证），故仅重试不缓存，避免「code 已使用」
 async function getWxCode(identifier, maxRetry = 3) {
     if (!getSingleCode) {
-        throw new Error("未找到 ./getCode（请将其放在同一目录）");
+        throw new Error("未找到取 code 能力（缺少 ./getCode 或 ./yyb.js）");
     }
     const id = identifier || ENV_OPENID || '';
     let lastErr;

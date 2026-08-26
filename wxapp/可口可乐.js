@@ -187,7 +187,7 @@ class Task {
 !(async () => {
     await getNotice()
     await $.checkEnv(ckName);
-    if (process.env['WECHAT_SERVER'] && process.env['WX_ID']) {
+    if ($.userList && $.userList.length) {
         for (let user of $.userList) {
             await new Task(user).run();
         }

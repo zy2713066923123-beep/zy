@@ -874,10 +874,19 @@ def main() -> int:
     share_code_raw = os.environ.get("WINONA_SHARE_CODE", "").strip()
 
     if not wxid_env.strip():
-        message = '未设置环境变量 WX_ID，例如：wxid_xxx#备注'
-        log(message, "error")
-        send_ql_notification(notify_title, message)
-        return 1
+        # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        try:
+            refs = yyb.resolve_accounts()
+        except Exception as exc:
+            refs = []
+            log(f"自动拉取 yyb_go 账号失败：{exc}", "error")
+        if refs:
+            wxid_env = "\n".join(refs)
+        else:
+            message = '未设置环境变量 WX_ID，例如：wxid_xxx#备注'
+            log(message, "error")
+            send_ql_notification(notify_title, message)
+            return 1
 
     accounts = parse_wxid(wxid_env)
     if not accounts:

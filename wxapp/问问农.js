@@ -205,11 +205,18 @@ async function httpJson(url, { method = 'GET', headers = {}, body, timeout = 200
 }
 
 async function getWxCode(wxid, appid) {
+  let code;
   try {
-    return await getSingleCode(appid, wxid);
+    code = await getSingleCode(appid, wxid);
   } catch (e) {
     throw new Error(`wx.login失败: ${e.message || e}`);
   }
+  // getSingleCode 内部会吞掉异常并返回 null，这里必须显式判空，
+  // 否则后续会带着 code=null 去请求接口并打印“获取成功”的误导日志。
+  if (!code) {
+    throw new Error(`wx.login失败: 未取到 code (wxid=${wxid}, appid=${appid})，请检查账号是否在 yyb_go 中在线`);
+  }
+  return code;
 }
 
 async function preLoginByCode(code) {

@@ -38,6 +38,7 @@ const path = require('path');
 const crypto = require('crypto');
 require('events').defaultMaxListeners = 50;
 
+const yyb = require('./yyb.js');
 const getSingleCode = yyb.getSingleCode;
 const getSinglePhoneEncrypted = yyb.getSinglePhoneEncrypted;
 const { sendNotify } = require('../sendNotify.js');
