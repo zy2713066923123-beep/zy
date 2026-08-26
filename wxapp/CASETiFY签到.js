@@ -35,8 +35,21 @@ class Env {
     log(...args) { console.log(...args); this.logs.push(args.join(" ")); }
     checkEnv(ckName) {
         const val = process.env.WX_ID || process.env[ckName];
-        if (val) this.userList = val.split(/[\n&]+/).map(v => String(v).split('#')[0].trim()).filter(Boolean);
-        else console.log('未找到环境变量 WX_ID');
+        if (val) {
+            this.userList = val.split(/[\n&]+/).map(v => String(v).split('#')[0].trim()).filter(Boolean);
+        } else {
+            // WX_ID 未配置时，自动从 yyb_go 拉取所有存活账号（与其他脚本一致）
+            try {
+                const accs = global.load_accounts ? global.load_accounts() : [];
+                if (accs && accs.length) {
+                    this.userList = accs.map(a => String(a.openid || a.wxid || a.id)).filter(Boolean);
+                    console.log(`✅ 从 yyb_go 自动同步到 ${this.userList.length} 个存活账号`);
+                }
+            } catch (e) {
+                console.log('从 yyb_go 拉取账号失败: ' + (e && e.message ? e.message : e));
+            }
+            if (!this.userList.length) console.log('未找到环境变量 WX_ID，且 yyb_go 无存活账号');
+        }
     }
     async done() { try { const notify = require('../sendNotify'); await notify.sendNotify(this.name, this.logs.join('\n')); } catch(e) { console.log('通知发送失败', e); } }
 }

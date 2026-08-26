@@ -204,9 +204,11 @@ class YYBClient {
 
     async getOnlineAccounts() {
         const accounts = await this.getAccounts(true);
+        // 黑名单：仅排除明确离线/失效的账号；其余（含空值、非标准值）均视为可用，避免误杀
+        const OFFLINE = new Set(['offline', 'expired', 'invalid', 'disabled', 'error', 'dead', 'logout']);
         return accounts.filter(acc => {
             const st = (acc.status || '').toLowerCase();
-            return st === 'online' || st === 'valid' || st === 'active' || !st;
+            return !OFFLINE.has(st);
         });
     }
 

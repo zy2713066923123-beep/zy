@@ -71,9 +71,27 @@ def random_delay(min_s=1, max_s=3):
 # =====================================================================
 def get_yyb_accounts():
     """从 yyb_go 拉取存活账号（统一使用 yyb.load_accounts）"""
-    accounts = yyb.load_accounts()
+    server = yyb.get_global_server_url()
+    log(f"[yyb] 连接 yyb_go 服务端: {server}")
+    # 诊断：打印原始在线账号数，便于排查“拉不到”问题
+    try:
+        raw = yyb.YYBClient().get_online_accounts()
+        log(f"[yyb] get_online_accounts 原始返回 {len(raw) if isinstance(raw, list) else '非数组'} 个")
+        if isinstance(raw, list) and raw:
+            log(f"[yyb] 首个账号字段: {','.join(raw[0].keys())}")
+            log(f"[yyb] 示例: {json.dumps(raw[0], ensure_ascii=False)[:200]}")
+    except Exception as e:
+        log(f"[yyb] get_online_accounts 诊断异常: {e}")
+    try:
+        accounts = yyb.load_accounts()
+    except Exception as e:
+        log(f"[yyb] 拉取账号失败: {e}")
+        log("[yyb] 请确认环境变量 WX_SERVER / WECHAT_SERVER 指向可用的 yyb_go 服务，且该服务有在线账号")
+        return []
+    log(f"[yyb] load_accounts 返回 {len(accounts) if isinstance(accounts, list) else '非数组'} 个")
     if not accounts:
-        log("[yyb] 未获取到任何在线账号，请检查 WX_SERVER / WX_ID")
+        log("[yyb] 未获取到任何在线账号")
+        log("[yyb] 请确认：1) WX_SERVER/WECHAT_SERVER 已配置且可达；2) yyb_go 中存在 status=online 的存活账号")
     return accounts
 
 

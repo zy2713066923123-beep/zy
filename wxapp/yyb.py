@@ -209,10 +209,13 @@ class YYBClient:
     def get_online_accounts(self) -> List[Dict[str, Any]]:
         accounts = self.get_accounts(force_refresh=True)
         valid = []
+        # 黑名单：仅排除明确离线/失效的账号；其余（含空值、非标准值）均视为可用，避免误杀
+        OFFLINE = {"offline", "expired", "invalid", "disabled", "error", "dead", "logout"}
         for acc in accounts:
             st = str(acc.get("status") or "").lower()
-            if st in ("online", "valid", "active", ""):
-                valid.append(acc)
+            if st in OFFLINE:
+                continue
+            valid.append(acc)
         return valid
 
     # ---------- 小程序核心能力 ----------

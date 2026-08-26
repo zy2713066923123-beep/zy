@@ -88,8 +88,67 @@ main().catch(async (error) => {
   process.exitCode = 1;
 });
 
+// 当 WX_ID 未配置时，自动从 yyb_go 服务端拉取存活账号（与文件头注释一致）
+async function buildYybGoAccounts() {
+  // 诊断：打印服务端地址与原始账号数，便于排查“拉不到”问题
+  try {
+    const client = new (require('./yyb.js').YYBClient)();
+    log(`[yyb] 服务端地址: ${client.serverUrl}`);
+    const raw = await client.getOnlineAccounts();
+    log(`[yyb] getOnlineAccounts 原始返回 ${Array.isArray(raw) ? raw.length : '非数组'} 个`);
+    if (Array.isArray(raw) && raw.length) {
+      log(`[yyb] 首个账号字段: ${Object.keys(raw[0]).join(',')}`);
+      log(`[yyb] 示例: ${JSON.stringify(raw[0]).slice(0, 200)}`);
+    }
+  } catch (e) {
+    log(`[yyb] getOnlineAccounts 诊断异常: ${e.message || e}`);
+  }
+
+  let list = [];
+  try {
+    list = await global.loadAccounts(); // WX_ID 留空时返回 yyb_go 所有存活账号
+  } catch (e) {
+    log(`⚠️ 从 yyb_go 拉取账号失败: ${e.message || e}`);
+    return [];
+  }
+  log(`[yyb] loadAccounts 返回 ${Array.isArray(list) ? list.length : '非数组'} 个`);
+  if (!Array.isArray(list) || !list.length) return [];
+
+  const mapped = list
+    .map((acc, i) => {
+      // openid 优先（应用宝），其次 wxid，再次数字 id；缓存键与 getWxCode 解析保持一致
+      const wxid = acc.openid || acc.wxid || (acc.id != null ? String(acc.id) : '');
+      if (!wxid) {
+        log(`[yyb] 账号 ${i + 1} 缺少 openid/wxid/id，跳过: ${JSON.stringify(acc).slice(0, 120)}`);
+        return null;
+      }
+      return {
+        mobile: acc.mobile || acc.phone || '',
+        wxid,
+        appid: acc.appid || DEFAULT_APPID,
+        remark: acc.remark || acc.nickname || acc.alias || `yyb_${i + 1}`,
+        ua: acc.ua || '',
+      };
+    })
+    .filter(Boolean);
+  log(`[yyb] 映射后可用账号 ${mapped.length} 个`);
+  return mapped;
+}
+
 async function main() {
-  const wxAccounts = parseAccounts(CONFIG.rawAccounts);
+  let wxAccounts = parseAccounts(CONFIG.rawAccounts);
+
+  // WX_ID 未配置（或解析为空）时，自动同步 yyb_go 存活账号
+  let yybGoAccounts = [];
+  if (!wxAccounts.length) {
+    log('📡 WX_ID 未配置，自动从 yyb_go 服务端同步存活账号...');
+    yybGoAccounts = await buildYybGoAccounts();
+    wxAccounts = yybGoAccounts;
+    if (yybGoAccounts.length) {
+      log(`✅ 从 yyb_go 同步到 ${yybGoAccounts.length} 个存活账号`);
+    }
+  }
+
   const manualAccounts = parseManualAccounts(CONFIG.ljzfData);
   const accounts = [...wxAccounts, ...manualAccounts];
 
@@ -98,7 +157,7 @@ async function main() {
     return;
   }
   wxAccounts
-    .filter((account) => !account.mobile)
+    .filter((account) => !account.isManual && !account.mobile)
     .forEach((account) => log(`⚠️ 账号 ${account.remark} 未从变量解析到手机号，将尝试使用 quickLogin/缓存返回的手机号`));
   if (manualAccounts.length) {
     log(`✅ 成功从 ljzfData 读取到 ${manualAccounts.length} 个抓包配置`);

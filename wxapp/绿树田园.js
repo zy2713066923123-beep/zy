@@ -24,10 +24,16 @@ const axios = require('axios');
 const { sendNotify } = require('../sendNotify');
 
 // 统一微信协议（牛子/应用宝双协议，复用仓库 getCode）
+// 优先加载 ./getCode；仓库未单独提供时，回退到 yyb.js 暴露的 get_single_code（牛子/应用宝双协议）
 let getSingleCode = null;
 try {
+  getSingleCode = require('./getCode');
 } catch (e) {
+  try {
+    getSingleCode = require('./yyb.js').get_single_code || global.get_single_code;
+  } catch (e2) {
     getSingleCode = null;
+  }
 }
 
 // 青龙通知汇总
