@@ -1,4 +1,4 @@
-require('./getCode.js'); // 自动同步 yyb_go 存活账号
+require('./yyb.js'); // 自动同步 yyb_go 存活账号
 // name: 优点云创
 // cron: 10 11,17 * * *
 
@@ -16,7 +16,7 @@ class Env {
     async done() { try { const notify = require('../sendNotify'); await notify.sendNotify(this.name, this.logs.join('\n')); } catch(e) { console.log('通知发送失败', e); } }
 }
 
-// ====== 引入 getCode.js 模块（支持双协议：牛子+应用宝）======
+// ====== 引入 yyb.js 模块（支持双协议：牛子+应用宝）======
 const getWxCode = (wxid, appid) => getSingleCode(appid, String(wxid).split('#')[0].trim());
 
 const $ = new Env("优点云创");

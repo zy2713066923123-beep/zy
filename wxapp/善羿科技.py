@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 """
 ------------------------------------------
 @Author: sm
@@ -24,7 +24,7 @@ WX_ID 格式：
   wxid#备注  多个换行
 
 说明：
-  经本目录 getCode.py 统一接口（牛子/应用宝双协议）使用 WX_ID 自动获取
+  经本目录 yyb.py 统一接口（牛子/应用宝双协议）使用 WX_ID 自动获取
   wx.login code，无需手动抓包；登录 token 按 wxid 持久化到 .shanm_token.json，
   失效自动重新登录。
 ------------------------------------------
@@ -238,7 +238,7 @@ class ShanmApi:
 def do_login(wxid: str, account_key: str) -> str:
     """通过微信协议(getCode)获取 code 并完成登录，返回 token。"""
     if get_single_code is None:
-        raise RuntimeError("未找到 getCode.py，请将其放在同一目录后再运行")
+        raise RuntimeError("未找到 yyb.py，请将其放在同一目录后再运行")
     device_id = get_device_id(wxid)
     invite_code = os.getenv("SHANM_INVITE_CODE", "29EA21E9").strip()
     try:

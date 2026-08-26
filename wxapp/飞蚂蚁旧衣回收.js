@@ -1,4 +1,4 @@
-require('./getCode.js'); // 自动同步 yyb_go 存活账号
+require('./yyb.js'); // 自动同步 yyb_go 存活账号
 // name: 飞蚂蚁旧衣回收
 // cron: 2 10,13 * * *
 class Env {
@@ -391,7 +391,7 @@ async function runAccount(wxid, globalProxyAgent) {
         $.log(`[${alias}] 启动延迟 ${startDelay / 1000}s`);
         await sleep(startDelay);
 
-        // 1. 获取code（使用标准 getCode.js 模块）
+        // 1. 获取code（使用标准 yyb.js 模块）
         let code = await getWxCode(wxid, APPID);
         if (!code) {
             result.error = "获取code失败";

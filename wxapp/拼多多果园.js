@@ -1,4 +1,4 @@
-require('./getCode.js'); // 自动同步 yyb_go 存活账号
+require('./yyb.js'); // 自动同步 yyb_go 存活账号
 ﻿// name:拼多多果园
 /** cron: 26 9,13 * * *
  * 拼多多果园（微信协议版）
@@ -221,7 +221,7 @@ async function jsonPost(url, headers, bodyObj) {
 }
 
 // ==================== 微信协议：获取 code ====================
-// 使用 getCode.js 统一接口
+// 使用 yyb.js 统一接口
 
 // ==================== PDD 登录（单步登录）====================
 async function pddSingleLogin(wxid) {

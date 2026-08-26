@@ -1,4 +1,4 @@
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 # name: DT生活
 # cron: 10 9,15 * * *
 import os
@@ -215,7 +215,7 @@ def get_valid_proxy(account_name):
 def get_wx_code(identifier):
     """通过 getCode 模块获取对应账号的微信Code"""
     try:
-        return getCode.get_single_code(APPID, identifier)
+        return yyb.get_single_code(APPID, identifier)
     except Exception as e:
         print(f"获取code失败: {e}")
         return None

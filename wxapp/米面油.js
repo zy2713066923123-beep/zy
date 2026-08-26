@@ -1,8 +1,8 @@
-require('./getCode.js'); // 自动同步 yyb_go 存活账号
+require('./yyb.js'); // 自动同步 yyb_go 存活账号
 /*
 米面油百科 - 微信协议登录 + 内容积分
 
-环境变量（微信协议账号统一走 ./getCode.js 路由，与其他脚本共用 WX_ID）：
+环境变量（微信协议账号统一走 ./yyb.js 路由，与其他脚本共用 WX_ID）：
   WX_ID='wxid_xxx#备注&yyb:openid#备注'         // 推荐
   mmy / MMY                                     // 兼容旧变量，格式同 WX_ID
   WX_ID='user_id:token#备注'                    // 业务 token 直登，推荐写法，不需要 mmy: 前缀
@@ -27,8 +27,8 @@ require('./getCode.js'); // 自动同步 yyb_go 存活账号
   MMY_AD_SDK_NAME='gdt'          // SDK 名；来自 HAR 的 reportShow
 
 说明：
-  - 微信协议账号（wxid_ / yyb:openid / openid / 自定义微信号）统一走 ./getCode.js 智能路由，
-    WECHAT_SERVER / YYB_SERVER 在 getCode.js 中配置，本脚本不再直连协议服务。
+  - 微信协议账号（wxid_ / yyb:openid / openid / 自定义微信号）统一走 ./yyb.js 智能路由，
+    WECHAT_SERVER / YYB_SERVER 在 yyb.js 中配置，本脚本不再直连协议服务。
   - user_id:token / user_id#token 会跳过微信协议登录，直接检测 /api/user/index。
   - mmy:user_id:token / ck:user_id#token 是旧格式，仍然兼容。
   - bearer:token / token:token 会跳过微信协议登录，直接用抓包里的 Authorization Bearer token。
@@ -698,7 +698,7 @@ function isWechatProtocolId(x) {
   if (!s) return false;
   if (s.startsWith('wxid_') || s.startsWith('yyb:') || s.startsWith('wx:')) return true;
   if (parseBearerToken(s) || parseMmyTokenAccount(s, [])) return true;
-  // 与 ./getCode.js 路由一致：应用宝 openid（o 开头 20+ 位）当协议账号
+  // 与 ./yyb.js 路由一致：应用宝 openid（o 开头 20+ 位）当协议账号
   if (/^o[a-zA-Z0-9_-]{20,}$/.test(s)) return true;
   // 微信自定义号（alias）：字母开头 6-20 位
   if (/^[a-zA-Z][-_a-zA-Z0-9]{5,19}$/.test(s)) return true;
@@ -760,7 +760,7 @@ function maskCode(code) {
   return s.length <= 10 ? s : s.slice(0, 6) + '...' + s.slice(-4);
 }
 
-// 剥离协议前缀，得到传给 getCode.js 的真实 identifier（yyb:openid → openid 自动路由应用宝）
+// 剥离协议前缀，得到传给 yyb.js 的真实 identifier（yyb:openid → openid 自动路由应用宝）
 function normalizeProtocolWxid(x) {
   const s = String(x || '').trim();
   if (s.startsWith('wx:')) return s.slice(3);

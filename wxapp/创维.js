@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-require('./getCode.js'); // 自动同步 yyb_go 存活账号
+require('./yyb.js'); // 自动同步 yyb_go 存活账号
 // name:创维小程序
 /**
  * 创维小程序
@@ -12,7 +12,7 @@ require('./getCode.js'); // 自动同步 yyb_go 存活账号
  *
  * 环境变量：
  * - WX_ID                   多账号，换行或&分隔；格式：wxid_xxx#备注（兼容旧变量 chuangw）
- * - WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:8000）（可选，在 getCode.js 中配置）
+ * - WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:8000）（可选，在 yyb.js 中配置）
  * - CHUANGW_APPID           默认 wxff438d3c60c63fb6
  * - CHUANGW_APP_PATH        默认 /pages/login/login
  * - CHUANGW_RUN_TASKS       默认1，0=只登录拿token

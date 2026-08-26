@@ -19,12 +19,12 @@ cron: 56 11,13 * * *
   - 登录 code 通过共享模块 getCode 获取（自动路由 牛子/应用宝）。
   - 手机号授权数据同样按账号协议自动路由：
       牛子账号 → WECHAT_SERVER 的 /get/all/mobile（返回 encryptedData/iv 或 code）
-      应用宝账号 → getCode.get_single_phone_number（返回手机号授权 code）
+      应用宝账号 → yyb.get_single_phone_number（返回手机号授权 code）
 
 """
 
 from __future__ import annotations
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 
 import importlib.util
 import json
@@ -141,13 +141,7 @@ def parse_wxid_list(raw_value: str) -> List[WxAccount]:
     return accounts
 
 
-def build_code_url(raw_url: str) -> str:
-    value = (raw_url or "").strip().rstrip("/")
-    if not value:
-        return ""
-    if value.endswith("/get/code") or value.endswith("/code"):
-        return value
-    return f"{value}/api/v1/wx/app/get/code"
+
 
 
 def build_unique() -> str:
@@ -226,9 +220,6 @@ def push_notify(title: str, content: str) -> None:
 
 class OleSign:
     def __init__(self) -> None:
-        self.wechat_code_url = build_code_url(
-            os.environ.get("WX_SERVER") or os.environ.get("WECHAT_SERVER") or os.environ.get("YYB_SERVER") or DEFAULT_WECHAT_SERVER
-        )
         self.session = requests.Session()
         self.session.trust_env = False
         self.unique = build_unique()
@@ -247,128 +238,24 @@ class OleSign:
     def get_code(self, wxid: str) -> Optional[str]:
         """通过共享 getCode 模块获取登录 code（自动路由 牛子/应用宝，读取 WX_ID 过滤）。"""
         try:
-            return getCode.get_single_code(WECHAT_MINI_APPID, wxid)
+            return yyb.get_single_code(WECHAT_MINI_APPID, wxid)
         except Exception as exc:
             print(f"微信: 获取 code 失败: {exc}")
             return None
 
-    def _phone_proto(self, wxid: str) -> str:
-        """与 getCode 一致的协议判定：应用宝 openid / 纯数字 → yyb，其余 → wechat。"""
-        raw = str(wxid).split('#')[0].strip()
-        if not raw:
-            return 'wechat'
-        if raw.isdigit():
-            return 'yyb'
-        if re.match(r'^o[a-zA-Z0-9_-]{20,}$', raw):
-            return 'yyb'
-        return 'wechat'
-
     def get_phone(self, wxid: str) -> Optional[Dict[str, Any]]:
-        """获取手机号授权数据（按账号协议自动路由，与登录 code 同协议）。
-
-        返回字典（统一为以下两种之一）：
-          - 牛子: {encryptedData, iv, show_mobile}  或  {code, show_mobile}
-          - 应用宝: {code}   （YYB getPhoneNumber 返回手机号授权 code）
-        返回 None 表示获取失败。
-        """
-        proto = self._phone_proto(wxid)
-        if proto == 'yyb':
-            try:
-                code = getCode.get_single_phone_number(WECHAT_MINI_APPID, wxid)
-            except Exception as exc:
-                print(f"微信: YYB 获取手机号失败: {exc}")
-                return None
-            if not code:
-                print("微信: YYB 获取手机号 code 为空")
-                return None
-            print(f"✅ phone code ok (len={len(code)})")
-            return {"code": code}
-        return self._get_phone_niuzi(wxid)
-
-    def _get_phone_niuzi(self, wxid: str) -> Optional[Dict[str, Any]]:
-        """牛子协议获取手机号（兼容 encryptedData/iv 与 code 两种返回结构）。"""
-        url = self.wechat_code_url.replace("/get/code", "/get/all/mobile")
-        if url == self.wechat_code_url and not url.endswith("/get/all/mobile"):
-            # 完整 code URL 被错误配置时兜底
-            base = self.wechat_code_url.rsplit("/api/", 1)[0] if "/api/" in self.wechat_code_url else self.wechat_code_url
-            url = f"{base.rstrip('/')}/api/v1/wx/app/get/all/mobile"
-
-        payload = {
-            "wxid": wxid,
-            "appid": WECHAT_MINI_APPID,
-            "data": json.dumps(
-                {"api_name": "webapi_getuserwxphone", "with_credentials": True},
-                ensure_ascii=False,
-            ),
-            "opt": 0,
-        }
+        """获取手机号授权数据（统一 getCode 模块）。"""
         try:
-            resp = self.session.post(
-                url,
-                json=payload,
-                timeout=30,
-                proxies={"http": None, "https": None},
-            )
-            result = resp.json()
-        except Exception as exc:
-            print(f"微信: 获取手机号异常: {exc}")
-            return None
-
-        if result.get("Success") is False:
-            print(f"微信: 获取手机号失败: {result.get('Message', 'unknown')}")
-            return None
-
-        # 兼容多种返回结构：Data.Data / data.Data / Data / data
-        data: Any = result.get("Data")
-        if not isinstance(data, dict):
-            data = result.get("data") if isinstance(result.get("data"), dict) else {}
-        raw = data
-        if isinstance(data, dict):
-            raw = data.get("Data", data.get("data", data))
-            if data.get("wx_phone"):
-                raw = data
-
-        info: Any = {}
-        if isinstance(raw, str):
-            try:
-                info = json.loads(raw) if raw else {}
-            except Exception:
-                info = {}
-        elif isinstance(raw, dict):
-            info = raw
-
-        if not isinstance(info, dict):
-            info = {}
-
-        # 方式A：直接含 encryptedData/iv（老式加密包）
-        enc = info.get("encryptedData") or info.get("encrypted_data")
-        iv = info.get("iv")
-        if enc and iv:
-            show = str(info.get("show_mobile") or info.get("mobile") or "")
-            return {"encryptedData": enc, "iv": iv, "show_mobile": show}
-
-        # 方式B：含 wx_phone 子对象（可能含 encryptedData/iv 或 code）
-        wx_phone = info.get("wx_phone")
-        if isinstance(wx_phone, dict):
-            enc = wx_phone.get("encryptedData") or wx_phone.get("encrypted_data")
-            iv = wx_phone.get("iv")
-            if enc and iv:
-                show = str(wx_phone.get("show_mobile") or wx_phone.get("mobile") or "")
-                return {"encryptedData": enc, "iv": iv, "show_mobile": show}
-            if wx_phone.get("code"):
-                return {"code": str(wx_phone["code"])}
-
-        # 方式C：ALLMobile[0].code 或 Data.code（手机号授权 code）
-        all_mobile = info.get("ALLMobile") or (info.get("Data", {}) or {}).get("ALLMobile")
-        if isinstance(all_mobile, list) and all_mobile:
-            code = all_mobile[0].get("code")
+            info = get_single_phone_encrypted(WECHAT_MINI_APPID, wxid)
+            if info and (info.get("code") or info.get("encryptedData")):
+                return info
+            code = get_single_phone_number(WECHAT_MINI_APPID, wxid)
             if code:
-                return {"code": str(code)}
-        if info.get("code"):
-            return {"code": str(info["code"])}
-
-        print(f"微信: 手机号数据包为空: {result}")
-        return None
+                return {"code": code}
+            return None
+        except Exception as exc:
+            print(f"微信: 获取手机号失败: {exc}")
+            return None
 
     # ---------- OLE 业务请求 ----------
     def build_headers(

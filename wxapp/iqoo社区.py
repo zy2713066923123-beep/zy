@@ -21,7 +21,7 @@ cron: 25 10,13 * * *
 """
 
 from __future__ import annotations
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 
 import argparse
 import asyncio
@@ -723,7 +723,7 @@ def build_login_headers(
 def get_wx_code(wxid: str, log: LogFunc) -> str:
     log(f"自动登录：正在为 {wxid} 请求微信登录码")
     try:
-        code = getCode.get_single_code(LOGIN_CONFIG["wxAppid"], wxid)
+        code = yyb.get_single_code(LOGIN_CONFIG["wxAppid"], wxid)
         log(f"自动登录：登录码={mask_text(code, 6, 6)}")
         return str(code)
     except Exception as e:
@@ -748,36 +748,8 @@ def get_wx_user_info(wxid: str, log: LogFunc) -> Dict[str, Any]:
     }
 
     if is_yyb:
-        yyb_server = (os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or os.getenv("YINGYOGBAO_SERVER") or "http://127.0.0.1:8000").rstrip('/')
-        resolved_ref = raw_id
-        try:
-            r = requests.get(f"{yyb_server}/accounts", timeout=15)
-            data = r.json()
-            if data.get("code") == 0 and isinstance(data.get("data"), list):
-                accounts = data["data"]
-                for acc in accounts:
-                    if acc.get("openid") == raw_id:
-                        resolved_ref = str(acc.get("id", "") or raw_id)
-                        break
-                    elif raw_id.isdigit() and str(acc.get("id", "")) == raw_id:
-                        resolved_ref = raw_id
-                        break
-                else:
-                    if len(accounts) == 1:
-                        resolved_ref = str(accounts[0].get("id", "") or raw_id)
-        except Exception as e:
-            log(f"YYB 获取账号列表失败: {e}")
-
-        url = f"{yyb_server}/wxapp/operateWxData"
-        body = {
-            "ref": resolved_ref,
-            "app_id": appid,
-            "payload": payload
-        }
-        resp = requests.post(url, json=body, timeout=15)
-        resp.raise_for_status()
-        res = resp.json()
-        if res.get("code") != 0:
+        res = get_single_operate_wx_data(appid, raw_id, payload)
+        if not res or res.get("code") != 0:
             raise RuntimeError(f"YYB operateWxData 失败: {res}")
         inner = res.get("data", {}).get("result", {})
         if not isinstance(inner, dict):

@@ -1,4 +1,4 @@
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 """
  name: 南方电网
  cron: 17 8,22 * * *

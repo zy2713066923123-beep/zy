@@ -1,4 +1,4 @@
-require('./getCode.js'); // 自动同步 yyb_go 存活账号
+require('./yyb.js'); // 自动同步 yyb_go 存活账号
 /**
  日期：2026-4-15
  软件：全棉时代

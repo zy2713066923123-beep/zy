@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 # cron: 9 9,14 * * *
 """
 # name: 天机观
@@ -104,7 +104,7 @@ def parse_multi_accounts(env_text):
 def get_code_from_wechat_loader(wxid):
     """通过共享 getCode 模块按 wxid 获取微信登录 code（自动路由牛子/应用宝，读取 WX_ID 过滤）"""
     try:
-        code = getCode.get_single_code(WX_APPID, wxid)
+        code = yyb.get_single_code(WX_APPID, wxid)
         if code:
             return code
         Log.err("获取 code 失败: getCode 返回为空")

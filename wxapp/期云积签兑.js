@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-require('./getCode.js'); // 自动同步 yyb_go 存活账号
+require('./yyb.js'); // 自动同步 yyb_go 存活账号
 // name:期云积签兑
 // cron: 47 11,16 * * *
 'use strict';
@@ -87,7 +87,7 @@ function makeDeviceId(seed) {
   return `d_${Math.abs(hash).toString(36)}_${Date.now().toString(36)}`;
 }
 
-/** 兼容基址或完整 code 接口的微信协议地址。（已废弃：现使用 getCode.js 统一接口） */
+/** 兼容基址或完整 code 接口的微信协议地址。（已废弃：现使用 yyb.js 统一接口） */
 function buildWechatCodeUrl(rawUrl) {
   return '';
 }
@@ -172,7 +172,7 @@ function parseAccounts() {
 }
 
 /**
- * 通过 getCode.js 统一接口获取微信小程序 login code
+ * 通过 yyb.js 统一接口获取微信小程序 login code
  * 支持 YYB(应用宝) / Wechat(牛子) 双协议自动检测
  */
 function getWxCode(wxid) {

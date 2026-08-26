@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 # cron: 30 9,16 * * *
 # @Time     : 2025-12-25
 # name: 蒙娜丽莎

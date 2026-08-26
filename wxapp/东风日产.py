@@ -1,4 +1,4 @@
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 # cron: 42 9,15 * * *
 #!/usr/bin/env python3
 # name: 东风日产
@@ -117,7 +117,7 @@ def parse_accounts(raw_wxid: str, raw_val: str) -> List[NissanAccount]:
 
 
 def build_code_url(raw_url: str) -> str:
-    """已废弃：现使用 getCode.py 统一接口"""
+    """已废弃：现使用 yyb.py 统一接口"""
     return ""
 
 
@@ -377,7 +377,7 @@ class NissanSign:
 
     # ---------- 微信协议服务 ----------
     def get_code(self, wxid: str) -> Optional[str]:
-        """通过 getCode.py 统一接口获取微信 login code"""
+        """通过 yyb.py 统一接口获取微信 login code"""
         try:
             return get_single_code(WECHAT_MINI_APPID, wxid)
         except Exception as exc:
@@ -385,35 +385,15 @@ class NissanSign:
             return None
 
     def get_phone_encrypted(self, wxid: str) -> Optional[Dict]:
-        """获取微信手机号 encryptedData/iv（与海天同款协议接口）。"""
-        url = self.wechat_server.replace("/get/code", "/get/all/mobile")
-        payload = {
-            "wxid": wxid,
-            "appid": WECHAT_MINI_APPID,
-            "data": json.dumps(
-                {"api_name": "webapi_getuserwxphone", "with_credentials": True},
-                ensure_ascii=False,
-            ),
-            "opt": 0,
-        }
+        """获取微信手机号 encryptedData/iv（统一 getCode 模块）"""
         try:
-            resp = requests.post(url, json=payload, timeout=30,
-                                 proxies={"http": None, "https": None})
-            result = resp.json()
+            res = get_single_phone_encrypted(WECHAT_MINI_APPID, wxid)
+            if res and (res.get("encryptedData") or res.get("code") or res.get("mobile")):
+                return res
+            return None
         except Exception as exc:
             print(f"微信: 获取手机号异常: {exc}")
             return None
-        if not result.get("Success"):
-            print(f"微信: 获取手机号失败: {result.get('Message', 'unknown')}")
-            return None
-        raw = result.get("Data", {}).get("Data", "")
-        if isinstance(raw, str):
-            info = json.loads(raw) if raw else {}
-        elif isinstance(raw, dict):
-            info = raw
-        else:
-            info = {}
-        return info.get("wx_phone", {}) if isinstance(info.get("wx_phone"), dict) else info
 
     # ---------- 东风日产登录 ----------
     def login(self, account: NissanAccount, summary: AccountSummary) -> bool:

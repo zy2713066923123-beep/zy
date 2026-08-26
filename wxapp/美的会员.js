@@ -1,4 +1,4 @@
-require('./getCode.js'); // 自动同步 yyb_go 存活账号
+require('./yyb.js'); // 自动同步 yyb_go 存活账号
 // name: 美的会员
 // cron: 25 8,16 * * *
 //
@@ -638,7 +638,7 @@ async function runAccount(index, total, openid) {
     console.log(`⏳ [延迟] 启动延迟 ${(delay / 1000).toFixed(1)}s`);
     await sleep(delay);
 
-    const code = await getCode.getSingleCode(APPID, openid);
+    const code = await yyb.getSingleCode(APPID, openid);
     if (!code) {
         result.error = "获取 code 失败";
         return result;

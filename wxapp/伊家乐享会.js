@@ -1,4 +1,4 @@
-require('./getCode.js'); // 自动同步 yyb_go 存活账号
+require('./yyb.js'); // 自动同步 yyb_go 存活账号
 // name:伊家乐享会
 // cron:38 11,16 * * *
 
@@ -11,7 +11,7 @@ require('./getCode.js'); // 自动同步 yyb_go 存活账号
  *    说明：
  *    - 签到、分享仅依赖 wxid + WECHAT_SERVER
  * 2. WECHAT_SERVER
- *    协议服务（可选，在 getCode.js 中配置）
+ *    协议服务（可选，在 yyb.js 中配置）
  *
  * 逻辑：
  * 1. 微信 code 服务换取 wx.login code

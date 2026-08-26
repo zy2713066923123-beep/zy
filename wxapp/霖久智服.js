@@ -1,4 +1,4 @@
-require('./getCode.js'); // 自动同步 yyb_go 存活账号
+require('./yyb.js'); // 自动同步 yyb_go 存活账号
 ﻿// name:霖久智服
 /** cron: 35 8,17 * * *
 霖久智服 微信协议版
@@ -275,11 +275,27 @@ async function getAuth(account, cache) {
   log(`🔐 重新 quickLogin 登录，以获取/刷新指定手机号的正确凭证`);
 
   const code = await getWxCode(account.wxid, account.appid);
+  if (!code) {
+    throw new Error('获取微信 jsCode 失败，请检查 yyb_go 中该账号登录态是否失效');
+  }
   log(`🔑 获取 jsCode 成功：${mask(code, 5, 4)}`);
 
   const quick = await quickLogin(account, code);
   let auth = normalizeAuth({ ...cached, ...quick, appid: account.appid });
   auth.mobile = account.mobile || auth.mobile || cached.mobile || '';
+
+  if (!account.mobile && !auth.mobile) {
+    try {
+      const phoneEncrypted = await getSinglePhoneEncrypted(account.appid, account.wxid);
+      if (phoneEncrypted && phoneEncrypted.mobile) {
+        account.mobile = phoneEncrypted.mobile;
+        auth.mobile = phoneEncrypted.mobile;
+        log(`📱 从 yyb_go 自动获取到手机号：${maskPhone(auth.mobile)}`);
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
 
   if (!auth.memberId && auth.mobile) {
     const member = await autoMember(account, auth.mobile);
@@ -336,7 +352,7 @@ async function withAuthRetry(account, auth, cache, action, label) {
   }
 }
 
-// 微信 code 获取已统一走顶部的 getWxCode(getCode.js)，此处旧实现已废弃删除
+// 微信 code 获取已统一走顶部的 getWxCode(yyb.js)，此处旧实现已废弃删除
 
 async function quickLogin(account, jsCode) {
   const body = { appId: account.appid, jsCode, tenantId: DEFAULT_TENANT_ID, skipRequest: true };

@@ -1,4 +1,4 @@
-require('./getCode.js'); // 自动同步 yyb_go 存活账号
+require('./yyb.js'); // 自动同步 yyb_go 存活账号
 ﻿// name:白马智选
 /**
  * 白马智选（白马严选）
@@ -129,7 +129,7 @@ async function commonPost(action, body = '') {
 }
 
 // ==================== 微信协议 ====================
-// 使用 getCode.js 统一接口
+// 使用 yyb.js 统一接口
 
 // ==================== 登录逻辑 ====================
 async function loginByCode(code) {

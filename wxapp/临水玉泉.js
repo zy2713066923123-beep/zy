@@ -1,11 +1,11 @@
-require('./getCode.js'); // 自动同步 yyb_go 存活账号
+require('./yyb.js'); // 自动同步 yyb_go 存活账号
 ﻿// name:临水玉泉
 /**
-微信协议-临水玉泉（getCode.js 统一版）
+微信协议-临水玉泉（yyb.js 统一版）
 变量：WX_ID  wxid#备注 多号换行
 cron: 10 10,13 * * *
-  WX_ID 由共享 getCode.js 读取并智能路由 牛子/应用宝
-  WECHAT_SERVER / YYB_SERVER / SERVER_TYPE 在 getCode.js 中配置
+  WX_ID 由共享 yyb.js 读取并智能路由 牛子/应用宝
+  WECHAT_SERVER / YYB_SERVER / SERVER_TYPE 在 yyb.js 中配置
  */
 
 const axios = require('axios');
@@ -20,7 +20,7 @@ const CACHE_NAME = 'lsyq';
 const CACHE_FILE = path.join(__dirname, `${CACHE_NAME}.json`);
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36 MicroMessenger/7.0.20.1781(0x6700143B) NetType/WIFI MiniProgramEnv/Windows WindowsWechat/WMPF WindowsWechat(0x63090a13) UnifiedPCWindowsWechat(0xf254181d) XWEB/19201';
 
-const WXLSYQ = (process.env.WX_ID || '').trim(); // wxid#备注（由 getCode.js 读取并智能路由牛子/应用宝）
+const WXLSYQ = (process.env.WX_ID || '').trim(); // wxid#备注（由 yyb.js 读取并智能路由牛子/应用宝）
 
 let notifyMsg = '';
 

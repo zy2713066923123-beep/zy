@@ -1,4 +1,4 @@
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 """
 
 变量: WX_SERVER (必填，yyb_go 服务地址)；WX_ID (可选白名单，留空自动拉取存活账号) 

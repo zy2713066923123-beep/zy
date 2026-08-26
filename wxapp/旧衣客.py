@@ -11,7 +11,7 @@ cron: 0 8,12,20 * * *
 """
 
 from __future__ import annotations
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 
 import json
 import os
@@ -257,7 +257,7 @@ def get_wx_code(account: AccountCtx, label: str) -> Optional[str]:
         log("[" + label + "] 账号标识缺失")
         return None
     try:
-        code = getCode.get_single_code(TARGET_APPID, protocol_wxid)
+        code = yyb.get_single_code(TARGET_APPID, protocol_wxid)
     except Exception as exc:
         log("[" + label + "] 获取 code 异常：" + str(exc)[:160])
         return None

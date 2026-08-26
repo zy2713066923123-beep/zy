@@ -1,23 +1,23 @@
-require('./getCode.js'); // 自动同步 yyb_go 存活账号
+require('./yyb.js'); // 自动同步 yyb_go 存活账号
 /*
  * name: 芝秋堂
  * cron: 16 9,17 * * *
  * 芝秋堂 小程序（appId: wxaf8488e1dfc13384）积分任务脚本
  * 能力：每日签到、看视频时长(taskType=2)、看课程时长(taskType=3) 等所有可自动化奖励接口
  *
- * 依赖微信协议服务获取 wx.login code（统一走 getCode.js，自动路由 牛子/应用宝），
+ * 依赖微信协议服务获取 wx.login code（统一走 yyb.js，自动路由 牛子/应用宝），
  * 再用业务接口 authLogin 换 token。
  * 账号变量 WX_ID（与其他脚本统一），支持换行 或 @ 分隔，格式：
  *     wxid_xxxx#备注
- *     openid#备注         <-- 应用宝协议虚拟 wxid，由 getCode.js 自动路由
+ *     openid#备注         <-- 应用宝协议虚拟 wxid，由 yyb.js 自动路由
  *
  * 青龙环境：只用 axios，不使用 fetch。中文日志，UTF-8。
  *
  * 环境变量：
- *   WX_ID          账号列表（换行 或 @，由 getCode.js 读取并智能路由）
+ *   WX_ID          账号列表（换行 或 @，由 yyb.js 读取并智能路由）
  *   ZQT_VIDEO_MAX  看视频最多领取次数（默认按接口 remainNum 自动，全领）
  *   ZQT_DELAY      每次领取间隔毫秒（默认 1500）
- *   协议服务地址（WECHAT_SERVER / YYB_SERVER / SERVER_TYPE）在 getCode.js 中配置
+ *   协议服务地址（WECHAT_SERVER / YYB_SERVER / SERVER_TYPE）在 yyb.js 中配置
  */
 
 const axios = require('axios');
@@ -59,7 +59,7 @@ function writeCache(obj) {
   try { fs.writeFileSync(CACHE_FILE, JSON.stringify(obj, null, 2), 'utf8'); } catch (e) {}
 }
 
-// 账号解析：兼容 wxid_ / yyb: / wx: / openid#备注，统一由 getCode.js 智能路由
+// 账号解析：兼容 wxid_ / yyb: / wx: / openid#备注，统一由 yyb.js 智能路由
 function parseWxAccount(line) {
   const raw = String(line || '').trim();
   const parts = raw.split('#');
@@ -117,7 +117,7 @@ async function bizRequest(baseUrl, apiPath, data, opt) {
   return r.data;
 }
 
-// 账号统一来自 WX_ID，由 getCode.js 智能路由（牛子/应用宝）获取 wx.login code
+// 账号统一来自 WX_ID，由 yyb.js 智能路由（牛子/应用宝）获取 wx.login code
 async function getWxCode(wxid) {
   const code = await getSingleCode(APPID, wxid);
   if (!code) throw new Error('未提取到 wx.login code (WX_ID=' + wxid + ')');
@@ -287,7 +287,7 @@ async function runAccount(acc, cache) {
     }
   }
 
-  // 2) 缓存无效 → 协议登录（统一走 getCode.js 路由 牛子/应用宝）
+  // 2) 缓存无效 → 协议登录（统一走 yyb.js 路由 牛子/应用宝）
   if (!logged) {
     try {
       log('调用协议服务获取 wx.login code (WX_ID=' + id + ')…');

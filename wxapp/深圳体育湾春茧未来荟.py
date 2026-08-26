@@ -1,4 +1,4 @@
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 """
 作者: 临渊
 日期: 2025/6/26
@@ -66,7 +66,7 @@ class AutoTask:
 
     def get_wx_code(self, wx_id):
         try:
-            return getCode.get_single_code(self.wx_appid, wx_id)
+            return yyb.get_single_code(self.wx_appid, wx_id)
         except Exception as e:
             self.log(f"获取 code 失败: {e}", level="error")
             return None

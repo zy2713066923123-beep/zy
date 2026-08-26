@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 # cron:52 8,16 * * *
 """
 # name: 雀巢会员俱乐部
 脚本名称：雀巢会员俱乐部
 说明：
-  通过 getCode.py 获取 code，再调用雀巢登录接口换 token 后执行签到。
+  通过 yyb.py 获取 code，再调用雀巢登录接口换 token 后执行签到。
 
 环境变量：
   WX_ID           wxid 列表，格式：wxid#备注 或 备注#wxid，多个账号用换行、@或&分隔 (兼容 Nestle_wxid)
-  WECHAT_SERVER   微信服务端地址（由 getCode.py 使用）
+  WECHAT_SERVER   微信服务端地址（由 yyb.py 使用）
   PROXY_API       品赞代理提取链接，可选
   PROXY_TYPE      代理类型：http / socks5，默认：http
   IPZAN_CONFIG    品赞自动加白名单，可选，推荐格式：

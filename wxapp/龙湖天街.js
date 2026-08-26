@@ -1,4 +1,4 @@
-require('./getCode.js'); // 自动同步 yyb_go 存活账号
+require('./yyb.js'); // 自动同步 yyb_go 存活账号
 /**
 // name: 龙湖天街
 ------------------------------------------
@@ -31,8 +31,7 @@ const path = require("path");
 function buildServers() {
     const raw = String(process.env.WX_ID || "").trim();
     if (!raw) {
-        console.error("未配置环境变量 WX_ID，请设置后重试（格式：wxid#备注，换行或&）");
-        process.exit(1);
+        return [];
     }
     console.log("WX_ID 原始内容(前200字): " + raw.slice(0, 200).replace(/\r/g, "").replace(/\n/g, "\\n"));
     return raw
@@ -47,11 +46,7 @@ function buildServers() {
             return true;
         });
 }
-const SERVERS = buildServers();
-if (!SERVERS.length) {
-    console.error("未配置有效的 WX_ID 账号（每行格式：wxid#备注）");
-    process.exit(1);
-}
+let SERVERS = buildServers();
 function parseYybGoEntry(rawValue) {
     const value = String(rawValue || "").trim();
     if (!value) return { server: "", ref: "" };
@@ -583,6 +578,19 @@ class Task {
 }
 
 !(async () => {
+    // 未配置 WX_ID 时，自动从 yyb_go 拉取所有存活账号
+    if (!SERVERS.length) {
+        try {
+            const _accs = await loadAccounts();
+            SERVERS = _accs.map(a => a.openid || a.wxid || a._ref || String(a.id)).filter(Boolean);
+        } catch (e) {
+            console.log(`从 yyb_go 拉取账号失败: ${e.message || e}`);
+        }
+    }
+    if (!SERVERS.length) {
+        console.log(`未找到可用账号（WX_ID 未配置且 yyb_go 无存活账号）`);
+        return;
+    }
     for (const account of SERVERS) {
         const task = new Task(account);
         try {

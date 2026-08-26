@@ -1,4 +1,4 @@
-require('./getCode.js'); // 自动同步 yyb_go 存活账号
+require('./yyb.js'); // 自动同步 yyb_go 存活账号
 /*
 ================================================================================
 脚本名称: 飞鹤|北纬47度好物（原星妈优选）
@@ -11,7 +11,7 @@ require('./getCode.js'); // 自动同步 yyb_go 存活账号
 飞鹤|北纬47度好物小程序 每日签到、自动完成任务
 
 【使用方法】
-方式A（推荐，标准模式）：使用 WX_ID + getCode.js 自动获取 code
+方式A（推荐，标准模式）：使用 WX_ID + yyb.js 自动获取 code
    - 环境变量名：WX_ID
    - 变量值：每行一个 identifier（应用宝 openid 或 牛子 wxid），可加 #别名
      owNAX6uNaBK4eild3eAlrLrwn-CE#156
@@ -94,21 +94,21 @@ if ($.isNode()) {
   }
 }
 
-// ========== 引入 getCode.js 标准模块（牛子 + 应用宝 双协议） ==========
+// ========== 引入 yyb.js 标准模块（牛子 + 应用宝 双协议） ==========
 // 自动适配脚本所在目录（根目录或 wxapp 子目录）
 function __loadGetCode() {
   if (typeof require === 'undefined') return null; // 非 Node 环境（QuantumultX/Surge）无需加载
-  const candidates = ['./getCode.js', './wxapp/getCode.js'];
+  const candidates = ['./yyb.js', './wxapp/yyb.js'];
   for (const p of candidates) {
     try { return require(p); } catch (e) {}
   }
-  try { return require(require('path').join(__dirname, 'getCode.js')); } catch (e) {}
+  try { return require(require('path').join(__dirname, 'yyb.js')); } catch (e) {}
   return null;
 }
 const getCodeModule = __loadGetCode();
 const getSingleCode = getCodeModule ? getCodeModule.getSingleCode : null;
 if (!getCodeModule) {
-  console.log('⚠️ getCode.js 模块加载失败，WX_ID 模式将不可用（请确认 getCode.js 与本脚本同目录）');
+  console.log('⚠️ yyb.js 模块加载失败，WX_ID 模式将不可用（请确认 yyb.js 与本脚本同目录）');
 }
 
 let envSplitor = ["\n", "&", "@"]; //多账号分隔符，优先使用换行符
@@ -562,10 +562,10 @@ async function getWxToken(code) {
   }
 }
 
-//检查code服务器（标准模式：WX_ID + getCode.js 双协议）
+//检查code服务器（标准模式：WX_ID + yyb.js 双协议）
 async function checkCodeServer(appid) {
   if (!getSingleCode) {
-    $.log(`❌ getCode.js 模块加载失败，无法使用 WX_ID 模式`);
+    $.log(`❌ yyb.js 模块加载失败，无法使用 WX_ID 模式`);
     return [];
   }
   // 解析 WX_ID：支持换行 / & 分隔，每行格式 identifier#alias

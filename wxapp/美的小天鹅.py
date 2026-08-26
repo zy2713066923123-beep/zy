@@ -1,4 +1,4 @@
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 """
 cron: 12 11,17 * * *
 小天鹅任务自动化脚本

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 # name: 家乐会员
 # cron: 1 9,22 * * *
 """
@@ -28,7 +28,7 @@ import getCode  # 自动同步 yyb_go 存活账号
   - 部分任务需要真人交互 (看视频/答题/采样/邀请等), 无法通过 simple-complete 自动完成;
     脚本会对"已完成条件但未领取"的任务调用 reward 领积分, 并对可自动完成的
     普通浏览类任务调用 simple-complete。
-  - 登录依赖项目统一取码体系: WX_ID 环境变量 + getCode.get_single_code 双协议路由。
+  - 登录依赖项目统一取码体系: WX_ID 环境变量 + yyb.get_single_code 双协议路由。
 
 依赖环境变量:
   WX_ID               微信账号, 多账号换行或 & 分隔, 格式: wxid#备注 或 openid

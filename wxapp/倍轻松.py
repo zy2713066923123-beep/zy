@@ -1,4 +1,4 @@
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 #by:哆啦A梦
 #入口:http://mx.qrurl.net/h5/wxa/link?sid=26407uif5Oq
 #BREO变量填写wx_server里的openid/账号标识，多账号换行分割
@@ -91,7 +91,7 @@ def breo_task_headers(token):
 
 def get_wx_code(account_id):
     try:
-        return getCode.get_single_code(MINI_APP_ID, account_id)
+        return yyb.get_single_code(MINI_APP_ID, account_id)
     except Exception as e:
         raise RuntimeError(f"获取code失败: {e}")
 

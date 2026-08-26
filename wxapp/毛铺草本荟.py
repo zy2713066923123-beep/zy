@@ -1,4 +1,4 @@
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 
 # cron: 39 10,14 * * *
 
@@ -84,7 +84,7 @@ def parse_wxid_item(item):
     return first, second or first
 
 def build_code_url():
-    """已废弃：现使用 getCode.py 统一接口"""
+    """已废弃：现使用 yyb.py 统一接口"""
     return ""
 
 def extract_wx_code(data):
@@ -166,7 +166,7 @@ def remove_cached_auth_token(cache, wxid, save=True):
             save_token_cache(cache)
 
 def get_wx_code(wxid):
-    """通过 getCode.py 统一接口获取毛铺小程序 wx.login code。"""
+    """通过 yyb.py 统一接口获取毛铺小程序 wx.login code。"""
     try:
         code = get_single_code(WX_APPID, wxid)
         return code if code else ""

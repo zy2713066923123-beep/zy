@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 # -- coding: utf-8 --
 # -------------------------------
 # cron: 21 10,16 * * *
@@ -28,10 +28,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'wxa
 # 允许复用仓库根目录统一的通知模块 SendNotify（与根目录 ikuuu.py 共用一份）
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 try:
-    print("加载 getCode 成功！")
+    from yyb import get_single_code
+    print("加载 yyb 成功！")
 except Exception as _e:
     get_single_code = None
-    print(f"加载 getCode 失败，WX_ID 模式不可用: {_e}")
+    print(f"加载 yyb 失败，WX_ID 模式不可用: {_e}")
 
 IS_DEV = False
 if os.path.isfile('DEV_ENV.py'):

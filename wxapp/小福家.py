@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 # name: 小福家
 # cron: 30 7,15 * * *
 # -*- coding: utf-8 -*-

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 # name: 宝妈上班
 # -*- coding: utf-8 -*-
 """
@@ -30,7 +30,7 @@ WX_ID 格式：
   wxid#备注  多个换行
 
 说明：
-  经本目录 getCode.py 统一接口（牛子/应用宝双协议）使用 WX_ID 自动获取 wx.login code
+  经本目录 yyb.py 统一接口（牛子/应用宝双协议）使用 WX_ID 自动获取 wx.login code
   -> uni-id-co loginByWeixin -> 新 uniIdToken；token 按账号隔离缓存，失效自动续期。
 ------------------------------------------
 """
@@ -91,7 +91,7 @@ def parse_yyb_go_entry(raw):
     return ref, ref
 
 def get_yyb_go_code(entry):
-    """经 getCode.py 统一接口使用 WX_ID 获取微信登录 code (entry 格式: wxid#备注)"""
+    """经 yyb.py 统一接口使用 WX_ID 获取微信登录 code (entry 格式: wxid#备注)"""
     if not entry:
         return None
     server, ref = parse_yyb_go_entry(entry)

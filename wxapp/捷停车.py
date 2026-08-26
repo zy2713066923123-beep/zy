@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 """
 cron: 42 9,16 * * *
 脚本名称：捷停车自动任务
@@ -794,7 +794,7 @@ class JtcBot:
         print(f"🔐 [{self.server}] 请求 getCode 获取 code | wxid: {mask_text(self.wxid)}")
         for retry in range(3):
             try:
-                code = getCode.get_single_code(APPID, self.wxid)
+                code = yyb.get_single_code(APPID, self.wxid)
                 if not code:
                     print(f"⚠️ [{self.server}] 第{retry+1}次获取code失败 | 返回为空")
                     await sleep(1000)

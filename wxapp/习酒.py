@@ -1,4 +1,4 @@
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 #  修改脚本 563行的配置信息
 #  脚本同文件夹放青龙面板自带的notify.py推送脚本
 """
@@ -57,18 +57,18 @@ if _THIS_DIR not in sys.path:
 
 # ==================== 统一微信协议 ====================
 # 支持两种模式：
-# 1. getCode.py 标准模式（推荐）：获取微信code
+# 1. yyb.py 标准模式（推荐）：获取微信code
 # 2. 牛子协议高级模式（可选）：获取加密密钥/云函数/手机号等
 try:
-    from getCode import get_single_code, get_single_operate_wx_data, get_single_phone_number, load_accounts
+    from yyb import get_single_code, get_single_operate_wx_data, get_single_phone_number, load_accounts
     _HAS_GETCODE = True
 except ImportError:
     try:
-        import getCode
-        get_single_code = getattr(getCode, "get_single_code", None)
-        get_single_operate_wx_data = getattr(getCode, "get_single_operate_wx_data", None)
-        get_single_phone_number = getattr(getCode, "get_single_phone_number", None)
-        load_accounts = getattr(getCode, "load_accounts", None)
+        import yyb
+        get_single_code = getattr(yyb, "get_single_code", None)
+        get_single_operate_wx_data = getattr(yyb, "get_single_operate_wx_data", None)
+        get_single_phone_number = getattr(yyb, "get_single_phone_number", None)
+        load_accounts = getattr(yyb, "load_accounts", None)
         _HAS_GETCODE = True
     except ImportError:
         get_single_code = None
@@ -223,27 +223,14 @@ class WxAdapter:
         self.session.headers["Content-Type"] = "application/json"
     
     def get_wx_code(self, wxid, appid):
-        """获取微信code - 优先使用 getCode.py，避免无效404回退"""
-        if _HAS_GETCODE:
-            try:
-                code = get_single_code(appid, wxid)
-                if code:
-                    return {"success": True, "code": code}
-                return {"success": False, "error": "取码返回空（该账号协议类型暂未获得此小程序code）"}
-            except Exception as e:
-                return {"success": False, "error": str(e)}
-        
-        # 仅在非 yyb_go 且以 wxid_ 开头时尝试回退到牛子 API
-        if self._is_wxid_style(wxid):
-            try:
-                data = self.session.post(self.base + "app/get/code",
-                    json={"wxid": wxid, "appid": appid}, timeout=15).json()
-                if data.get("Code") == 0:
-                    return {"success": True, "code": data["Data"]["code"]}
-                return {"success": False, "error": data.get("Message", "获取code失败")}
-            except Exception as e:
-                return {"success": False, "error": str(e)}
-        return {"success": False, "error": "未获取到有效code"}
+        """获取微信code - 统一使用 yyb.py"""
+        try:
+            code = get_single_code(appid, wxid)
+            if code:
+                return {"success": True, "code": code}
+            return {"success": False, "error": "取码返回空"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
     def _raw_id(self, wxid):
         return str(wxid).split("#")[0].strip()
@@ -464,39 +451,17 @@ class WxAdapter:
         return {"success": False, "error": "当前协议通道不支持云函数调用"}
     
     def get_mobile(self, wxid, appid):
-        """获取手机号及加密数据 - 仅牛子支持"""
-        if not self._is_wxid_style(wxid):
-            return {"success": False, "error": "当前账号无需调用牛子手机号接口"}
+        """获取手机号及加密数据 - 统一走 getCode"""
         try:
-            body = {
-                "wxid": wxid, "appid": appid,
-                "data": '{"api_name":"webapi_getuserwxphone","with_credentials":true}', "opt": 1,
-            }
-            data = self._post("app/get/all/mobile", body)
-            if data.get("Code") != 0:
-                return {"success": False, "error": data.get("Message", "获取手机号失败")}
-            item = None
-            all_mobile = data["Data"].get("ALLMobile", [])
-            if all_mobile:
-                item = all_mobile[0]
-            elif data["Data"].get("Data"):
-                try:
-                    inner = json.loads(data["Data"]["Data"])
-                    phones = inner.get("custom_phone_list", [])
-                    item = next((p for p in phones if p.get("encryptedData")), phones[0] if phones else None)
-                    if item and not item.get("code") and item.get("data"):
-                        try: item["code"] = json.loads(item["data"]).get("code", "")
-                        except Exception: pass
-                except Exception as e:
-                    return {"success": False, "error": f"解析手机号数据失败: {e}"}
-            if not item:
-                return {"success": False, "error": "未找到手机号信息"}
-            return {
-                "success": True, "mobile": item.get("mobile"),
-                "encryptedData": item.get("encryptedData", ""), "iv": item.get("iv", ""), "code": item.get("code", ""),
-            }
+            res = get_single_phone_encrypted(appid, wxid)
+            if res and (res.get("encryptedData") or res.get("code") or res.get("mobile")):
+                return {"success": True, "data": res, "mobile": res.get("mobile"), "encryptedData": res.get("encryptedData", ""), "iv": res.get("iv", ""), "code": res.get("code", "")}
+            code = get_single_phone_number(appid, wxid)
+            if code:
+                return {"success": True, "data": {"code": code}, "code": code}
         except Exception as e:
             return {"success": False, "error": str(e)}
+        return {"success": False, "error": "未找到手机号信息"}
     
     def get_session_id(self, wxid, appid):
         """获取sessionid - 仅牛子支持"""

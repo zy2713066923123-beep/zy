@@ -1,4 +1,4 @@
-require('./getCode.js'); // 自动同步 yyb_go 存活账号
+require('./yyb.js'); // 自动同步 yyb_go 存活账号
 // name: 幸运星
 // cron: 12 11,16 * * *
 /**
@@ -14,7 +14,7 @@ require('./getCode.js'); // 自动同步 yyb_go 存活账号
  * ===================== 部署与运行说明 =====================
  *
  * 【目录依赖】本文件所在目录（wxapp/）需包含：
- *   - getCode.js      取码模块（连微信协议服务拉取 login code，必需）
+ *   - yyb.js      取码模块（连微信协议服务拉取 login code，必需）
  *   - eleme_assets/   阿里 fireye/AWSC 算法资源，生成 bx-ua/mini-janus 等风控头
  *                     （必需；缺少时 getcode 自动兑换会被风控拦截）
  *   运行前请确保整目录随本脚本一起部署（青龙脚本目录）。
@@ -52,7 +52,7 @@ require('./getCode.js'); // 自动同步 yyb_go 存活账号
  * ===================================================================== */
 const crypto = require('crypto');
 const https = require('https');
-const { getSingleCode } = require('./getCode.js');
+const { getSingleCode } = require('./yyb.js');
 
 const DEFAULT_CONFIG = {
   appKey: '12574478',
@@ -674,7 +674,7 @@ async function getCookieForWxid(wxid) {
   }
   // 2. 取码
   if (!getSingleCode) {
-    throw new Error('未找到 getCode.js，请确认脚本在 wxapp 目录下运行或已安装依赖');
+    throw new Error('未找到 yyb.js，请确认脚本在 wxapp 目录下运行或已安装依赖');
   }
   console.log(`  [${wxid}] 通过 getCode 获取微信 code...`);
   const code = await getSingleCode(ELEME_APPID, wxid);

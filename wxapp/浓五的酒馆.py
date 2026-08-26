@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 # name: 浓五的酒馆
 # -*- coding: utf-8 -*-
 """
@@ -26,7 +26,7 @@ WX_ID 格式：
   wxid#备注  多个换行
 
 说明：
-  经本目录 getCode.py 统一接口（牛子/应用宝双协议）使用 WX_ID 自动获取 wx.login code
+  经本目录 yyb.py 统一接口（牛子/应用宝双协议）使用 WX_ID 自动获取 wx.login code
   -> code 换 token -> 每日签到；业务请求优先走代理，失败直连兜底。
 
 依赖：

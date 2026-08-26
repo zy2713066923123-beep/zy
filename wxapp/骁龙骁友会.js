@@ -1,4 +1,4 @@
-require('./getCode.js'); // 自动同步 yyb_go 存活账号
+require('./yyb.js'); // 自动同步 yyb_go 存活账号
 /**
  * 骁龙骁友会 - 微信协议版（自动获取CK）
  * 变量: WX_ID (wxid#备注 多号@或换行)

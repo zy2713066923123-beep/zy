@@ -1,4 +1,4 @@
-require('./getCode.js'); // 自动同步 yyb_go 存活账号
+require('./yyb.js'); // 自动同步 yyb_go 存活账号
 // name:京东获取CK
 // - export WX_SERVER='http://127.0.0.1:8000'
 // - wxjd：wxid#备注

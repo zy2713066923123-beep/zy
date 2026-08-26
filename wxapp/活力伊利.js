@@ -1,4 +1,4 @@
-require('./getCode.js'); // 自动同步 yyb_go 存活账号
+require('./yyb.js'); // 自动同步 yyb_go 存活账号
 // name:活力伊利
 // cron:57 9,16 * * *
 
@@ -9,7 +9,7 @@ require('./getCode.js'); // 自动同步 yyb_go 存活账号
  *    格式：wxid#备注
  *    多账号用换行或 @ 分隔（兼容旧变量 wxhlyili）
  * 2. WECHAT_SERVER
- *    协议服务（可选，在 getCode.js 中配置）
+ *    协议服务（可选，在 yyb.js 中配置）
  *
  * 逻辑：
  * 1. 读取 hlylck.txt 缓存（格式：token#备注，每行一个）

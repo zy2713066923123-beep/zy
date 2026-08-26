@@ -1,4 +1,4 @@
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 # cron: 58 11,16 * * *
 # -*- coding: utf-8 -*-
 # name: 巅峰美缝师
@@ -221,7 +221,7 @@ def get_day_before_yesterday() -> str:
 # ============================================================
 
 def get_wx_code(wxid: str) -> Optional[str]:
-    """通过 getCode.py 统一接口获取微信登录 code（牛子/应用宝双协议）"""
+    """通过 yyb.py 统一接口获取微信登录 code（牛子/应用宝双协议）"""
     actual_wxid = str(wxid).split('#')[0].strip()
     try:
         return get_single_code(WX_APP_ID, actual_wxid)
@@ -231,70 +231,13 @@ def get_wx_code(wxid: str) -> Optional[str]:
 
 
 def get_wx_phone_code(wxid: str) -> Optional[str]:
-    """
-    从中转服务获取手机号授权 code（二号协议）
-    接口: POST {WECHAT_SERVER}/api/v1/wx/app/get/all/mobile
-    """
-    raw_server = os.environ.get(ENV_WECHAT_SERVER, "").strip()
-    if not raw_server:
+    """通过 yyb.py 统一接口获取手机号授权 code"""
+    actual_wxid = str(wxid).split('#')[0].strip()
+    try:
+        return get_single_phone_number(WX_APP_ID, actual_wxid)
+    except Exception as e:
+        print(f"⚠️ 获取手机号code异常: {e}")
         return None
-
-    base = raw_server.rstrip("/")
-    if base.endswith("/get/code"):
-        url = base.replace("/get/code", "/get/all/mobile")
-    elif base.endswith("/code"):
-        url = base.replace("/code", "/get/all/mobile")
-    else:
-        url = f"{base}/api/v1/wx/app/get/all/mobile"
-
-    payload = {"wxid": wxid, "appid": WX_APP_ID, "data": "", "opt": 0}
-
-    for attempt in range(MAX_RETRIES):
-        try:
-            resp = requests.post(
-                url,
-                json=payload,
-                timeout=REQUEST_TIMEOUT,
-                proxies={"http": None, "https": None},
-            )
-            if resp.status_code != 200:
-                time.sleep(RETRY_BACKOFF_BASE * attempt)
-                continue
-
-            data = resp.json()
-
-            # 方式1：Data.Data → wx_phone.code
-            data_str = data.get("Data", {}).get("Data")
-            if data_str:
-                try:
-                    inner = json.loads(data_str)
-                    code = inner.get("wx_phone", {}).get("code")
-                    if code:
-                        return str(code)
-                except (json.JSONDecodeError, AttributeError):
-                    pass
-
-            # 方式2：Data.ALLMobile[0].code
-            all_mobile = data.get("Data", {}).get("ALLMobile")
-            if all_mobile and len(all_mobile) > 0:
-                code = all_mobile[0].get("code")
-                if code:
-                    return str(code)
-
-            # 方式3：Data.code 兜底
-            code = data.get("Data", {}).get("code") if isinstance(data.get("Data"), dict) else None
-            if code:
-                return str(code)
-
-            debug_log(f"手机号code响应异常 (第{attempt+1}次)")
-
-        except Exception as e:
-            debug_log(f"获取手机号code异常: {e}")
-
-        if attempt < MAX_RETRIES - 1:
-            time.sleep(RETRY_BACKOFF_BASE * (2 ** attempt))
-
-    return None
 
 # ============================================================
 # 登录及业务函数

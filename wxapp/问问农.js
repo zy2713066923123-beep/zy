@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-require('./getCode.js'); // 自动同步 yyb_go 存活账号
+require('./yyb.js'); // 自动同步 yyb_go 存活账号
 // name:问问农
 /**
  * 问问农
@@ -19,7 +19,7 @@ require('./getCode.js'); // 自动同步 yyb_go 存活账号
  *                        1) bffToken#yaraUserId
  *                        2) bffToken#yaraUserId#consumerToken#accountId
  *                        3) consumerToken
- * - WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:8000）（可选，在 getCode.js 中配置）
+ * - WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:8000）（可选，在 yyb.js 中配置）
  * - WWN_MAIN_APPID      默认 wx61a9d721d3396d1b
  * - WWN_MEMBER_APPID    默认 wxc5d513880ace81a4
  * - WWN_ACCOUNT_ID      默认 634f5f28a0e71c29500b0313

@@ -1,4 +1,4 @@
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 
 # name:岚财承品
 # cron:10 9,15 * * *
@@ -354,69 +354,17 @@ class MobileAuthService:
         return result
 
     def get_mobile_info(self, account: "AccountSpec") -> Tuple[Dict[str, Any], str]:
-        if account.protocol == "yyb":
-            return self._get_yyb_mobile_info(account)
-
-        server = self.explicit_server or self.config.niuzi_server
-        url = server.rstrip("/") + "/api/v1/wx/app/get/all/mobile"
-        last_error = "协议服务未返回手机号授权包"
-        body = {
-            "wxid": account.identifier,
-            "appid": APPID,
-            "data": '{"api_name": "webapi_getuserwxphone", "with_credentials": true}',
-            "opt": 1,
-        }
-        try:
-            response = self.session.post(
-                url,
-                json=body,
-                timeout=self.config.timeout,
-                verify=self.config.verify_tls,
-            )
-            response.raise_for_status()
-            data = response.json()
-            if not isinstance(data, dict):
-                return {}, "手机号接口返回格式无效"
-            mobiles = self._extract_mobiles(data)
-            for item in mobiles:
-                if item.get("encryptedData") and item.get("iv"):
-                    return item, "牛子协议服务"
-            message = data.get("Message") or data.get("message") or data.get("msg")
-            last_error = str(message or "牛子服务未保存有效手机号授权包")
-        except requests.RequestException as exc:
-            last_error = f"手机号授权接口请求失败：{type(exc).__name__}: {exc}"
-        except (ValueError, TypeError) as exc:
-            last_error = f"手机号授权接口响应无效：{type(exc).__name__}: {exc}"
-        return {}, last_error
+        return self._get_yyb_mobile_info(account)
 
     def _get_yyb_mobile_info(self, account: "AccountSpec") -> Tuple[Dict[str, Any], str]:
-        """YYB 原生接口：POST /wxapp/getPhoneNumber。"""
-        url = self.config.yyb_server.rstrip("/") + "/wxapp/getPhoneNumber"
+        """YYB 原生接口：统一 yyb.py。"""
         try:
-            response = self.session.post(
-                url,
-                json={"ref": account.identifier, "app_id": APPID},
-                timeout=self.config.timeout,
-                verify=self.config.verify_tls,
-            )
-            response.raise_for_status()
-            data = response.json()
-            if not isinstance(data, dict):
-                return {}, "YYB 手机号接口返回格式无效"
-            if data.get("code") not in (0, "0"):
-                return {}, str(data.get("msg") or "YYB 获取手机号授权包失败")
-            payload = data.get("data")
-            result = payload.get("result") if isinstance(payload, dict) else None
-            if not isinstance(result, dict):
-                return {}, "YYB 响应缺少 data.result"
-            mobile = self._normalize_mobile(result)
-            if mobile.get("encryptedData") and mobile.get("iv"):
-                return mobile, "YYB /wxapp/getPhoneNumber"
-            return {}, "YYB 响应未包含 encryptedData/iv"
-        except requests.RequestException as exc:
+            res = get_single_phone_encrypted(APPID, account.identifier)
+            if res and res.get("encryptedData") and res.get("iv"):
+                return res, "YYB /wxapp/getPhoneNumber"
+            return {}, "未获取到有效 encryptedData/iv"
+        except Exception as exc:
             return {}, f"YYB 手机号接口请求失败：{type(exc).__name__}: {exc}"
-        except (ValueError, TypeError) as exc:
-            return {}, f"YYB 手机号接口响应无效：{type(exc).__name__}: {exc}"
 
 
 provider_config: Optional["ProviderConfig"] = None
@@ -943,7 +891,7 @@ def main() -> int:
         mobile_auth_service = MobileAuthService(provider_config)
         accounts = accounts_from_env()
         if get_single_code is None:
-            raise ConfigurationError("getCode 模块未加载，无法获取微信 code（请确认 getCode.py 与本脚本同目录）")
+            raise ConfigurationError("getCode 模块未加载，无法获取微信 code（请确认 yyb.py 与本脚本同目录）")
     except CodeProviderError as exc:
         message = f"❌ 配置错误：{exc}"
         logger.error(message)

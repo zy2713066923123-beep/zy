@@ -1,4 +1,4 @@
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 # cron: 35 9,15 * * * *
 import os
 # name: 申工社
@@ -36,7 +36,7 @@ CACHE_NAME = "sgs"
                     wxid_abc123#张三
                     wxid_xyz456
 
-  WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:8000）（可选，在 getCode.py 中配置）
+  WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:8000）（可选，在 yyb.py 中配置）
 
 ========================================
 """

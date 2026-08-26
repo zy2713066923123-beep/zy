@@ -1,4 +1,4 @@
-require('./getCode.js'); // 自动同步 yyb_go 存活账号
+require('./yyb.js'); // 自动同步 yyb_go 存活账号
 /**
 // name: OPPO
 ------------------------------------------
@@ -26,15 +26,11 @@ const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
 
-// ====================== 账号（环境变量 WX_ID = wxid#备注，换行或&） ======================
-const ACCOUNTS_RAW = (process.env.WX_ID || "")
+// ====================== 账号（环境变量 WX_ID = wxid#备注，换行或&；留空自动从 yyb_go 拉取存活账号） ======================
+let ACCOUNTS_RAW = (process.env.WX_ID || "")
     .split(/\r?\n|&/)
     .map(s => s.trim())
     .filter(Boolean);
-if (!ACCOUNTS_RAW.length) {
-    console.error("未配置环境变量 WX_ID，请设置后重试（格式：wxid#备注，换行或&）");
-    process.exit(1);
-}
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 let userIdx = 1;
 
@@ -380,9 +376,17 @@ class OppoTask {
 }
 
 async function main() {
-    
+    // 未配置 WX_ID 时，自动从 yyb_go 拉取所有存活账号
     if (!ACCOUNTS_RAW.length) {
-        console.log(`未找到变量 ${CK_NAME}`);
+        try {
+            const _accs = await loadAccounts();
+            ACCOUNTS_RAW = _accs.map(a => a.openid || a.wxid || a._ref || String(a.id)).filter(Boolean);
+        } catch (e) {
+            console.log(`从 yyb_go 拉取账号失败: ${e.message || e}`);
+        }
+    }
+    if (!ACCOUNTS_RAW.length) {
+        console.log(`未找到可用账号（WX_ID 未配置且 yyb_go 无存活账号）`);
         return;
     }
     for (let i = 0; i < ACCOUNTS_RAW.length; i++) {

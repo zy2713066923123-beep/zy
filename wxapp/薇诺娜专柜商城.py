@@ -12,7 +12,7 @@ WECHAT_SERVER   微信服务端地址，默认： http://192.168.1.179:8011
 """
 
 from __future__ import annotations
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 
 import json
 import os
@@ -447,10 +447,10 @@ class RelayClient:
         return None
 
     def get_code(self, wxid: str) -> str:
-        return getCode.get_single_code(self.app_id, wxid)
+        return yyb.get_single_code(self.app_id, wxid)
 
     def get_mobile_info(self, wxid: str) -> Dict[str, str]:
-        code = getCode.get_single_phone_number(self.app_id, wxid)
+        code = yyb.get_single_phone_number(self.app_id, wxid)
         return {"code": code, "show_mobile": "", "mobile": ""}
 
 

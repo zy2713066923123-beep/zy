@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 # cron: 26 11,13 * * *
 """
 # name: 统一梦时代
@@ -9,7 +9,7 @@ Python 移植自统一梦时代.js（全量）
 环境变量：
   WX_ID           多账号，换行或 & 分隔。格式：wxid_...#备注 / openid#phone#备注
                  兼容读取 qhdwq 变量名
-  （协议层走 getCode.py：WX_ID 里放 getCode 协议账号，脚本通过 getCode 获取 wx.login code / 手机号）
+  （协议层走 yyb.py：WX_ID 里放 getCode 协议账号，脚本通过 getCode 获取 wx.login code / 手机号）
 
 可选变量：
   QHDWQ_DELAY_MIN=3       单接口/任务最小延迟秒
@@ -376,7 +376,7 @@ def encrypt_farm_body(obj):
 
 
 # ============================================================
-#  协议（getCode.py）
+#  协议（yyb.py）
 # ============================================================
 def get_wx_login_code(acc):
     code = get_single_code(APPID, acc['id'])

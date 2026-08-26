@@ -1,10 +1,10 @@
-require('./getCode.js'); // 自动同步 yyb_go 存活账号
+require('./yyb.js'); // 自动同步 yyb_go 存活账号
 /*
  * name: 骆驼户外运动城签到
  * cron: 20 8 * * *
  *
  * 功能：微盟小程序「骆驼户外运动城」每日签到（签到有礼）。
- *       双协议登录：牛子(Wechat) + 应用宝(YYB)，统一走 ./getCode.js 路由获取 wx.login code / 手机号授权。
+ *       双协议登录：牛子(Wechat) + 应用宝(YYB)，统一走 ./yyb.js 路由获取 wx.login code / 手机号授权。
  *       参考 ./骆驼.js（同为微盟 wx3d2bdbf67041d80e）完善：loginX 登录 → 协议签署 → 会员激活 → 签到有礼 → 积分查询。
  *       签到业务参数已用抓包 HAR 校验（signMainInfo 实测成功）。
  *
@@ -38,8 +38,8 @@ const path = require('path');
 const crypto = require('crypto');
 require('events').defaultMaxListeners = 50;
 
-const getSingleCode = getCode.getSingleCode;
-const getSinglePhoneEncrypted = getCode.getSinglePhoneEncrypted;
+const getSingleCode = yyb.getSingleCode;
+const getSinglePhoneEncrypted = yyb.getSinglePhoneEncrypted;
 const { sendNotify } = require('../sendNotify.js');
 
 // ============================================================
@@ -309,7 +309,7 @@ function isYybOpenid(id) {
 }
 
 // 协议路由：应用宝 openid/数字 id → yyb；其余（wxid_、wx:、用户自定义微信号等）→ wechat（牛子）
-// 与 ./getCode.js 的 _detectProtocolForIdentifier 一致：正向识别应用宝 openid，其余一律当微信号，不做拒绝。
+// 与 ./yyb.js 的 _detectProtocolForIdentifier 一致：正向识别应用宝 openid，其余一律当微信号，不做拒绝。
 function detectProtocol(id) {
   const raw = String(id || '').split('#')[0].trim();
   if (raw.startsWith('yyb:')) return 'yyb';

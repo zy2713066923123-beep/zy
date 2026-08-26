@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 """
 小铛家小程序
  cron: 48 8,14 * * *
@@ -605,47 +605,28 @@ class XiaodangjiaWxidSign:
     def get_code(self, wxid: str) -> Optional[str]:
         """获取微信登录code（通过共享 getCode 模块，自动路由牛子/应用宝，读取 WX_ID 过滤）"""
         try:
-            return getCode.get_single_code(self.wechat_mini_appid, wxid)
+            return yyb.get_single_code(self.wechat_mini_appid, wxid)
         except Exception as exc:
             print(f"[{wxid}] 获取 code 异常: {exc}")
             return None
 
     def get_mobile_info(self, wxid: str, code: str) -> Optional[Dict]:
-        url = f"{self.wechat_server}/api/v1/wx/app/get/all/mobile"
-        payload = {
-            "wxid": wxid,
-            "appid": self.wechat_mini_appid,
-            "data": json.dumps(
-                {"api_name": "webapi_getuserwxphone", "with_credentials": True},
-                ensure_ascii=False,
-            ),
-            "opt": 0,
-        }
         try:
-            # 本地微信中转服务不走代理
-            response = self.session.post(url, json=payload, timeout=30, proxies={"http": None, "https": None})
-            result = response.json()
+            res = get_single_phone_encrypted(self.wechat_mini_appid, wxid)
+            if res:
+                return {
+                    "code": code,
+                    "wx_phone": {
+                        "mobile": res.get("mobile") or "",
+                        "show_mobile": res.get("mobile") or "",
+                        "encryptedData": res.get("encryptedData"),
+                        "iv": res.get("iv"),
+                        "code": code,
+                    }
+                }
         except Exception as exc:
             print(f"[{wxid}] 获取手机号异常: {exc}")
-            return None
-
-        if not result.get("Success"):
-            print(f"[{wxid}] 获取手机号失败: {result.get('Message', 'unknown error')}")
-            return None
-
-        raw_data = result.get("Data", {}).get("Data", "")
-        if isinstance(raw_data, str):
-            mobile_info = json.loads(raw_data) if raw_data else {}
-        elif isinstance(raw_data, dict):
-            mobile_info = raw_data
-        else:
-            mobile_info = {}
-
-        mobile_info["code"] = code
-        wx_phone = mobile_info.get("wx_phone")
-        if isinstance(wx_phone, dict):
-            wx_phone.setdefault("code", code)
-        return mobile_info
+        return None
 
     def get_login_payload(self, wxid: str) -> Optional[Dict]:
         code = self.get_code(wxid)

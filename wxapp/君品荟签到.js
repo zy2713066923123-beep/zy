@@ -1,4 +1,4 @@
-require('./getCode.js'); // 自动同步 yyb_go 存活账号
+require('./yyb.js'); // 自动同步 yyb_go 存活账号
 /*
 君品荟签到
 
@@ -9,7 +9,7 @@ require('./getCode.js'); // 自动同步 yyb_go 存活账号
 WX_ID 格式：
   支持直接填 wxid_xxx (牛子)
   支持直接填 openid (应用宝)
-  脚本会自动使用 getCode.js 进行路由获取
+  脚本会自动使用 yyb.js 进行路由获取
 
 可选：
   JPH_NOTIFY     通知开关，默认 1；填 0 关闭 sendNotify

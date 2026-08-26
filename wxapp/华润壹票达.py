@@ -16,7 +16,7 @@ cron: 18 9,17 * * *
 """
 
 from __future__ import annotations
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 
 import hashlib
 import importlib.util
@@ -285,49 +285,7 @@ def parse_wxid_accounts(raw_value: str) -> List[AccountConfig]:
     return accounts
 
 
-def build_code_url(raw_url: str) -> str:
-    raw = (raw_url or DEFAULT_WECHAT_SERVER).strip().rstrip("/")
-    if not raw:
-        return ""
-    if raw.endswith("/api/v1/wx/app/get/code") or raw.endswith("/get/code"):
-        return raw
-    return f"{raw}/api/v1/wx/app/get/code"
 
-
-def build_mobile_url(code_url: str) -> str:
-    if not code_url:
-        return ""
-    if "/get/code" in code_url:
-        return code_url.replace("/get/code", "/get/all/mobile")
-    if "/api/" in code_url:
-        base = code_url.rsplit("/api/", 1)[0]
-        return f"{base.rstrip('/')}/api/v1/wx/app/get/all/mobile"
-    return f"{code_url.rstrip('/')}/api/v1/wx/app/get/all/mobile"
-
-
-def extract_wx_code(data: Any) -> str:
-    if not isinstance(data, dict):
-        return ""
-    for key in ("code", "wx_code", "js_code"):
-        val = data.get(key)
-        if val:
-            return str(val)
-    for nest_key in ("Data", "data", "result"):
-        nested = data.get(nest_key)
-        if isinstance(nested, dict):
-            for key in ("code", "wx_code", "js_code"):
-                val = nested.get(key)
-                if val:
-                    return str(val)
-        elif isinstance(nested, str) and nested and not nested.startswith("{"):
-            return nested
-    return ""
-
-
-def wechat_success(data: Dict[str, Any]) -> bool:
-    if data.get("Success") is False or data.get("success") is False:
-        return False
-    return True
 
 
 class YiPiaoDaClient:
@@ -435,7 +393,7 @@ class YiPiaoDaClient:
     def fetch_wx_code(self, summary: AccountSummary) -> str:
         summary.log("获取 code: 通过 getCode 模块获取")
         try:
-            code = getCode.get_single_code(self.wechat_appid, self.account.wxid)
+            code = yyb.get_single_code(self.wechat_appid, self.account.wxid)
             summary.log(f"code 获取成功: {str(code)[:12]}... (len={len(str(code))})")
             return str(code)
         except Exception as exc:
@@ -453,109 +411,18 @@ class YiPiaoDaClient:
         return "wechat"
 
     def fetch_phone_encrypted(self, summary: AccountSummary) -> Dict[str, Any]:
-        """按账号协议自动路由获取手机号授权数据（与登录 code 同协议）：
-        - 应用宝(yyb): getCode.get_single_phone_number → {code}（手机号授权 code）
-        - 牛子(wechat): 协议服务 get/all/mobile → encryptedData/iv 或 code
-        """
-        proto = self._phone_proto(self.account.wxid)
-        if proto == "yyb":
-            summary.log("手机号协议: 应用宝(YYB)，通过 getCode 获取授权 code")
-            try:
-                code = getCode.get_single_phone_number(self.wechat_appid, self.account.wxid)
-            except Exception as exc:
-                raise RuntimeError(f"YYB 获取手机号失败: {exc}") from exc
-            if not code:
-                raise RuntimeError("YYB 获取手机号 code 为空，请确认该 openid 已在应用宝授权")
-            summary.log(f"✅ phone code ok (len={len(str(code))})")
-            return {"code": str(code)}
-
-        summary.log("手机号协议: 牛子，调用 get/all/mobile")
-        """协议服务 get/all/mobile 返回结构（实测）：
-        Data.ALLMobile[0] = {mobile, show_mobile, encryptedData, iv, cloud_id, code}
-        其中 code 为 64 位 hex，对应业务 authorization.wxParam.authCode。
-        另有 Data.Data 字符串可能含 wx_phone，但常缺 code，优先 ALLMobile。
-        """
-        url = build_mobile_url(self.wechat_code_url)
-        if not url:
-            raise RuntimeError("无法构造手机号接口 URL，请检查 WECHAT_SERVER")
-        payload = {
-            "wxid": self.account.wxid,
-            "appid": self.wechat_appid,
-            "data": json.dumps(
-                {"api_name": "webapi_getuserwxphone", "with_credentials": True},
-                ensure_ascii=False,
-            ),
-            "opt": 0,
-        }
-        summary.log(f"获取手机号加密包: {url}")
-        resp = requests.post(
-            url,
-            json=payload,
-            timeout=self.timeout,
-            proxies={"http": None, "https": None},
-        )
+        """通过统一 getCode 模块获取手机号授权数据"""
+        summary.log("微信协议: getCode 获取手机号授权数据")
         try:
-            result = resp.json()
-        except Exception as exc:
-            raise RuntimeError(f"手机号接口非 JSON HTTP {resp.status_code}: {resp.text[:200]}") from exc
-        if not isinstance(result, dict):
-            raise RuntimeError(f"手机号接口响应异常: {result}")
-        if not wechat_success(result):
-            msg = result.get("Message") or result.get("msg") or result.get("message") or result
-            raise RuntimeError(f"获取手机号失败: {msg}")
-
-        data = result.get("Data") if isinstance(result.get("Data"), dict) else result.get("data")
-        if not isinstance(data, dict):
-            data = {}
-
-        # 1) 优先 ALLMobile / allMobile
-        for key in ("ALLMobile", "allMobile", "AllMobile"):
-            arr = data.get(key)
-            if isinstance(arr, list) and arr:
-                item = arr[0]
-                if isinstance(item, dict) and (
-                    item.get("encryptedData")
-                    or item.get("encrypted_data")
-                    or item.get("encryptPhoneNumber")
-                ):
-                    summary.log(
-                        f"手机号来源=ALLMobile keys={list(item.keys())} "
-                        f"code_len={len(str(item.get('code') or ''))}"
-                    )
-                    return item
-
-        # 2) Data.Data 字符串 / 嵌套 dict
-        raw: Any = data.get("Data", data.get("data"))
-        info: Any = {}
-        if isinstance(raw, str):
-            try:
-                info = json.loads(raw) if raw else {}
-            except Exception:
-                info = {}
-        elif isinstance(raw, dict):
-            info = raw
-        elif isinstance(data, dict):
-            info = data
-
-        if isinstance(info, dict):
-            phone = info.get("wx_phone") or info.get("wxPhone")
-            if isinstance(phone, dict):
-                # 若嵌套包没有 code，尝试从 ALLMobile 补
-                if not (phone.get("code") or phone.get("authCode")):
-                    for key in ("ALLMobile", "allMobile", "AllMobile"):
-                        arr = data.get(key)
-                        if isinstance(arr, list) and arr and isinstance(arr[0], dict):
-                            for ck in ("code", "authCode", "cloud_id", "iv", "encryptedData"):
-                                if arr[0].get(ck) and not phone.get(ck):
-                                    phone[ck] = arr[0].get(ck)
-                            break
-                summary.log(f"手机号来源=wx_phone keys={list(phone.keys())}")
-                return phone
-            if info.get("encryptedData") or info.get("encrypted_data") or info.get("encryptPhoneNumber"):
-                summary.log(f"手机号来源=nested keys={list(info.keys())}")
+            info = get_single_phone_encrypted(self.wechat_appid, self.account.wxid)
+            if info and (info.get("code") or info.get("encryptedData")):
                 return info
-
-        raise RuntimeError(f"手机号数据包为空: {json.dumps(result, ensure_ascii=False)[:300]}")
+            code = get_single_phone_number(self.wechat_appid, self.account.wxid)
+            if code:
+                return {"code": str(code)}
+        except Exception as exc:
+            summary.log(f"getCode 获取手机号异常: {exc}")
+        raise RuntimeError("获取手机号授权数据为空，请确认该账号在 yyb_go 中已扫码")
 
     def _apply_login_payload(self, payload: Dict[str, Any], summary: AccountSummary, stage: str) -> bool:
         token = clean_header_value(str(payload.get("accessToken") or ""))

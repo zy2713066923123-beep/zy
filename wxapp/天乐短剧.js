@@ -1,11 +1,11 @@
-require('./getCode.js'); // 自动同步 yyb_go 存活账号
+require('./yyb.js'); // 自动同步 yyb_go 存活账号
 /*
  * name: 天乐短剧
  * cron: 41 8,16 * * *
  *
  * 功能：查询状态、签到、视频奖励任务、观看时长任务、领取观看红包、提现。
  *
- * 环境变量（双协议：牛子 Wechat + 应用宝 YYB，统一走 ./getCode.js 路由）：
+ * 环境变量（双协议：牛子 Wechat + 应用宝 YYB，统一走 ./yyb.js 路由）：
  *   WX_ID（推荐）或 REELIX_AUTH
  *     多账号用 & 或换行分隔。
  *     账号标识支持：
@@ -13,7 +13,7 @@ require('./getCode.js'); // 自动同步 yyb_go 存活账号
  *       openid#备注              应用宝 YYB 协议（openid 或数字 id）
  *       wx:xxx#备注              牛子协议
  *       yyb:openid#备注          应用宝 YYB 协议（兼容旧写法）
- *     路由规则：openid/数字 id 自动走 YYB，其余走牛子，与 ./getCode.js 一致。
+ *     路由规则：openid/数字 id 自动走 YYB，其余走牛子，与 ./yyb.js 一致。
  *     仍支持直接填 token：
  *       token#deviceId
  *       token#deviceId#userAgent#clientBuild#encryptKey#iv#version
@@ -56,7 +56,7 @@ const fs = require('fs');
 const path = require('path');
 require('events').defaultMaxListeners = 50;
 
-const getSingleCode = getCode.getSingleCode;
+const getSingleCode = yyb.getSingleCode;
 
 const ENV_NAME = 'REELIX_AUTH';
 const APPID = 'wx82b9bc71fff22c52';
@@ -177,7 +177,7 @@ function isProtocolIdentifier(id) {
 }
 
 // 协议路由：应用宝 openid/数字 id → yyb；其余（wxid_、wx:、用户自定义微信号）→ wechat（牛子）
-// 与 ./getCode.js 的 _detectProtocolForIdentifier 一致：正向识别应用宝 openid，其余一律当微信号。
+// 与 ./yyb.js 的 _detectProtocolForIdentifier 一致：正向识别应用宝 openid，其余一律当微信号。
 function detectProtocol(id) {
   const raw = String(id || '').split('#')[0].trim();
   if (raw.startsWith('yyb:')) return 'yyb';

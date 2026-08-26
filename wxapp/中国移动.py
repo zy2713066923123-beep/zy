@@ -1,4 +1,4 @@
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 # name:中国移动
 # cron:10 8,15 * * *
 
@@ -405,7 +405,7 @@ def send_pushplus(title: str, content: str) -> None:
 def get_code(wxid: str) -> str | None:
     """通过 getCode 统一接口获取微信 login code（支持牛子/YYB 双协议自动路由）"""
     if get_single_code is None:
-        print("❌ [授权] getCode 模块未加载，请确认 getCode.py 与本脚本同目录")
+        print("❌ [授权] getCode 模块未加载，请确认 yyb.py 与本脚本同目录")
         return None
     print(f"🔐 [授权] 通过 getCode 获取 code: {mask(wxid)}")
     try:

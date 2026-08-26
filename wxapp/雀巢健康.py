@@ -1,4 +1,4 @@
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 
 # cron: 55 10,16 * * *
 #!/usr/bin/env python3
@@ -49,7 +49,7 @@ ACTIVITY_PLAN_CODE = "Nestle_Thrive_Companion_180_Days"
 DEFAULT_WECHAT_SERVER = os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or "http://127.0.0.1:8000"
 
 WECHAT_SERVER = os.getenv("WECHAT_SERVER", DEFAULT_WECHAT_SERVER).rstrip("/")
-WX_CODE_API = ""  # 已废弃：现使用 getCode.py 统一接口
+WX_CODE_API = ""  # 已废弃：现使用 yyb.py 统一接口
 ENABLE_MONSTER_TASK = os.getenv("NESTLE_SANXIA_MONSTER_TASK", "1").lower() not in {"0", "false", "no", "off"}
 ENABLE_MONSTER_REGISTER = os.getenv("NESTLE_SANXIA_MONSTER_REGISTER", "1").lower() not in {"0", "false", "no", "off"}
 MONSTER_GOODS_TYPE = os.getenv("NESTLE_SANXIA_MONSTER_GOODS_TYPE", "Althera")
@@ -158,7 +158,7 @@ def is_activity_success(data: Optional[dict]) -> bool:
 
 
 def get_code(wxid: str) -> Optional[str]:
-    """通过 getCode.py 统一接口获取微信 login code"""
+    """通过 yyb.py 统一接口获取微信 login code"""
     try:
         return get_single_code(WX_APP_ID, wxid)
     except Exception as exc:

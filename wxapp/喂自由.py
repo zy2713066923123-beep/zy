@@ -1,4 +1,4 @@
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 """
 # cron: 16 10,14 * * *
 ========================================
@@ -103,7 +103,7 @@ def is_token_valid(token):
 def get_wx_code(wxid):
     """通过共享 getCode 模块获取登录 code（自动路由 牛子/应用宝，读取 WX_ID 过滤）。"""
     try:
-        return getCode.get_single_code(APPID, wxid)
+        return yyb.get_single_code(APPID, wxid)
     except Exception as e:
         raise RuntimeError(f"getCode 取 code 失败: {e}")
 

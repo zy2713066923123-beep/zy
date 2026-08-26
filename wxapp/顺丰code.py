@@ -1,4 +1,4 @@
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 # cron: 59 10,13 * * *
 
 # name: 顺丰速运积分任务
@@ -365,36 +365,14 @@ def _wx_sign_headers(body_obj: Dict[str, Any], suuid: str = "", device_id: str =
 
 
 def _get_wx_code(wechat_server: str, wxid: str, appid: str = WX_APPID) -> str:
-    """获取微信 login code：优先 getCode 标准模式，失败回退牛子 API（与其他脚本一致）"""
-    # 1) getCode.py 标准模式（优先）
-    if _HAS_GETCODE:
-        try:
-            return _gc_get_single_code(appid, wxid)
-        except Exception as e:
-            print(f"⚠️ getCode获取失败，尝试牛子API: {e}")
-
-    # 2) 牛子 API 回退：WECHAT_SERVER + /api/v1/wx/app/get/code
-    if wechat_server:
-        try:
-            base = wechat_server.rstrip("/") + "/api/v1/wx/"
-            data = requests.post(
-                base + "app/get/code",
-                json={"wxid": wxid, "appid": appid},
-                timeout=15,
-            ).json()
-            if data.get("Code") == 0:
-                d = data.get("Data") or data.get("data") or {}
-                code = d.get("code") or d.get("Code") if isinstance(d, dict) else str(d)
-                if code:
-                    return code
-                raise Exception(f"牛子API返回code为空: {data}")
-            raise Exception(f"牛子API获取code失败: {data}")
-        except Exception as e:
-            print(f"⚠️ 牛子API获取code失败: {e}")
-
-    # 注：YYB（应用宝）主要提供加密密钥/云函数等高级能力，顺丰登录仅需 code，
-    #    故 code 路径走 getCode + 牛子即可；YYB_SERVER 已读取以备后续扩展。
-    raise Exception("无法获取微信 login code（getCode 与 牛子 均失败）")
+    """获取微信 login code：统一走 getCode 标准模块"""
+    try:
+        code = get_single_code(appid, wxid)
+        if code:
+            return code
+    except Exception as e:
+        print(f"⚠️ getCode 获取失败: {e}")
+    raise Exception(f"无法获取微信 login code (wxid={wxid}, appid={appid})")
 
 
 def _refresh_wxsf_item_via_protocol(wxid: str, old_item: Dict[str, Any], wechat_server: str) -> Dict[str, Any]:

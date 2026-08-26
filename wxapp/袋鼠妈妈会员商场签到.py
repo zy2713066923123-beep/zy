@@ -1,4 +1,4 @@
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 # name: 袋鼠妈妈会员商场签到
 # cron: 56 8,14 * * *
 #!/usr/bin/env python3
@@ -282,7 +282,7 @@ def request_with_proxy(
 
 def get_wx_code(identifier: str) -> str | None:
     try:
-        return getCode.get_single_code(APPID, identifier)
+        return yyb.get_single_code(APPID, identifier)
     except Exception as e:
         print(f"获取code失败: {e}")
         return None

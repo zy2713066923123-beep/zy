@@ -1,4 +1,4 @@
-require('./getCode.js'); // 自动同步 yyb_go 存活账号
+require('./yyb.js'); // 自动同步 yyb_go 存活账号
 /*
 ------------------------------------------
 @Author: sm
@@ -191,7 +191,7 @@ class Task {
         return result.data;
     }
 
-    /** 通过 getCode.js 统一接口获取微信 login code */
+    /** 通过 yyb.js 统一接口获取微信 login code */
     async getWxCode() {
         return getSingleCode(MINI_APP_ID, this.openid);
     }

@@ -12,7 +12,7 @@
 """
 
 from __future__ import annotations
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 
 import hashlib
 import os
@@ -104,7 +104,7 @@ class JtClient:
         self.user_info: dict[str, Any] = {}
 
     def _wx_login(self) -> dict[str, Any]:
-        code = getCode.get_single_code(APP_ID, self.account.wx_id)
+        code = yyb.get_single_code(APP_ID, self.account.wx_id)
         if not code:
             raise ScriptError("获取 wx.login code 失败")
         try:
@@ -123,7 +123,7 @@ class JtClient:
         info = self._wx_login()
         token = str(info.get("token") or "")
         if not token:
-            phone_code = getCode.get_single_phone_number(APP_ID, self.account.wx_id)
+            phone_code = yyb.get_single_phone_number(APP_ID, self.account.wx_id)
             if not phone_code:
                 raise ScriptError(
                     "该账号未绑定极兔手机号，且未获取到手机号动态 code；"

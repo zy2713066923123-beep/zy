@@ -1,4 +1,4 @@
-require('./getCode.js'); // 自动同步 yyb_go 存活账号
+require('./yyb.js'); // 自动同步 yyb_go 存活账号
 // name:金典
 // cron:30 11,15 * * *
 
@@ -9,7 +9,7 @@ require('./getCode.js'); // 自动同步 yyb_go 存活账号
  *    格式：wxid#备注
  *    多账号用换行或 @ 分隔（兼容旧变量 wxjindian）
  * 2. WECHAT_SERVER
- *    协议服务（可选，在 getCode.js 中配置）
+ *    协议服务（可选，在 yyb.js 中配置）
  * 3. JINDIAN_APPID（可选）
  *    若协议服务需要指定 appid，通过此变量覆盖
  *

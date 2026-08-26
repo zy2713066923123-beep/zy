@@ -1,4 +1,4 @@
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 # cron: 35 9,16 * * *
 # 1 环境变量 WX_SERVER 填 yyb_go 服务地址（例如：http://127.0.0.1:8000）
 # name: 七彩虹社区商城
@@ -407,77 +407,35 @@ class 七彩虹商城客户端:
         return bool(self.access_token and self.refresh_token)
 
     def 获取手机号信息(self):
-        if self.是应用宝账号(self.微信ID):
-            return self.通过应用宝获取手机号信息()
-
-        payload = {
-            "wxid": self.微信ID,
-            "appid": self.小程序AppId,
-            "data": '{"api_name":"webapi_getuserwxphone","with_credentials":true}',
-            "opt": 0,
-        }
-
-        self.打印("[1/4] 获取手机号信息...")
-        结果 = self.请求中转服务("/api/v1/wx/app/get/all/mobile", payload)
-        if not (结果.get("status") and 结果.get("Code") == 0):
-            self.打印(f"    获取手机号失败: {结果}")
-            return None
-
-        外层数据 = 结果.get("Data", {})
-        内层数据 = self.解析JSON字符串(外层数据.get("Data", "{}"))
-        微信手机号数据 = self.解析JSON字符串(内层数据.get("wx_phone", {}))
-        附加数据 = self.解析JSON字符串(微信手机号数据.get("data", "{}"))
-
-        phone = 微信手机号数据.get("mobile", "")
-        encrypted_data = 微信手机号数据.get("encryptedData", "")
-        iv = 微信手机号数据.get("iv", "")
-        code = 附加数据.get("code", "")
-
-        if not phone or not code:
-            self.打印(f"    中转服务返回缺少手机号或手机号 code: {结果}")
-            return None
-
-        self.phone = phone
-        self.phone_code = code
-
-        self.打印(f"    手机号: {脱敏手机号(phone)}")
-        self.打印(f"    手机号 code: {脱敏(code, 24, 6)}")
-        self.打印(f"    加密数据: {脱敏(encrypted_data, 50, 8)}")
-
-        return {
-            "phone": phone,
-            "code": code,
-            "encrypted_data": encrypted_data,
-            "iv": iv,
-        }
-
-    def 通过应用宝获取手机号信息(self):
         self.打印("[1/4] 获取手机号信息...")
         try:
-            code = get_single_phone_number(self.小程序AppId, self.微信ID)
+            res = get_single_phone_encrypted(self.小程序AppId, self.微信ID)
+            phone = res.get("mobile", "") if res else ""
+            encrypted_data = res.get("encryptedData", "") if res else ""
+            iv = res.get("iv", "") if res else ""
+            code = res.get("code", "") if res else ""
+            if not code:
+                code = get_single_phone_number(self.小程序AppId, self.微信ID) or ""
+            if code or phone:
+                self.phone = phone
+                self.phone_code = code
+                if phone:
+                    self.打印(f"    手机号: {脱敏手机号(phone)}")
+                if code:
+                    self.打印(f"    手机号 code: {脱敏(code, 24, 6)}")
+                return {
+                    "phone": phone,
+                    "code": code,
+                    "encrypted_data": encrypted_data,
+                    "iv": iv,
+                }
         except Exception as 异常:
-            self.打印(f"    YYB 获取手机号 code 异常: {异常}")
-            return None
-
-        if not code:
-            self.打印("    YYB 没有返回手机号 code")
-            return None
-
-        self.phone = ""
-        self.phone_code = code
-
-        self.打印("    手机号: YYB仅返回授权code，登录校验后读取")
-        self.打印(f"    手机号 code: {脱敏(code, 24, 6)}")
-
-        return {
-            "phone": "",
-            "code": code,
-            "encrypted_data": "",
-            "iv": "",
-        }
+            self.打印(f"    获取手机号信息异常: {异常}")
+        self.打印("    获取手机号信息失败")
+        return None
 
     def 获取微信授权码(self):
-        """通过 getCode.py 统一接口获取微信 login code"""
+        """通过 yyb.py 统一接口获取微信 login code"""
         self.打印("[2/4] 获取微信授权码...")
         try:
             code = get_single_code(self.小程序AppId, self.微信ID)

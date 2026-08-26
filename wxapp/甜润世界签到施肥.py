@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 # name: 甜润世界签到施肥
 # cron: 1 15,9 * * *
 # -*- coding: utf-8 -*-

@@ -1,4 +1,4 @@
-require('./getCode.js'); // 自动同步 yyb_go 存活账号
+require('./yyb.js'); // 自动同步 yyb_go 存活账号
 // name: 名创优品
 // cron: 30 8 * * *
 const axios = require('axios');
@@ -8,14 +8,10 @@ const path = require('path');
 
 // ============ 统一取码（WX_ID + getCode，支持牛子/YYB 双协议自动路由）============
 
-const WX_IDS = (process.env.WX_ID || "")
+let WX_IDS = (process.env.WX_ID || "")
     .split(/[\r\n|&]+/)
     .map(s => s.trim())
     .filter(Boolean);
-if (!WX_IDS.length) {
-    console.error("未配置环境变量 WX_ID，请设置后重试（格式：wxid#备注 或 openid#手机号，多行换行）");
-    process.exit(1);
-}
 
 const SERVER = (process.env.WX_SERVER || process.env.WX_SERVER || process.env.WECHAT_SERVER || process.env.YYB_SERVER || "").trim();
 if (!SERVER) {
@@ -82,7 +78,7 @@ function saveCache(cache) {
 }
 
 async function getWxCode(identifier) {
-    // 走 getCode.js 统一取码：自动识别 wxid/openid、剥 #手机号、模糊匹配 ref、健康检查
+    // 走 yyb.js 统一取码：自动识别 wxid/openid、剥 #手机号、模糊匹配 ref、健康检查
     return await getSingleCode(APPID, identifier);
 }
 
@@ -553,6 +549,20 @@ async function main() {
     console.log('┌─────────────────────────────┐');
     console.log('│ 名创优品小程序签到 │');
     console.log('└─────────────────────────────┘');
+
+    // 未配置 WX_ID 时，自动从 yyb_go 拉取所有存活账号
+    if (!WX_IDS.length) {
+        try {
+            const _accs = await loadAccounts();
+            WX_IDS = _accs.map(a => a.openid || a.wxid || a._ref || String(a.id)).filter(Boolean);
+        } catch (e) {
+            console.log(`从 yyb_go 拉取账号失败: ${e.message || e}`);
+        }
+    }
+    if (!WX_IDS.length) {
+        console.log('未找到可用账号（WX_ID 未配置且 yyb_go 无存活账号）');
+        return;
+    }
 
     const cache = loadCache();
 

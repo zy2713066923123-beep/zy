@@ -1,4 +1,4 @@
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 # 当前脚本来自于 http://script.345yun.cn 脚本库下载！
 # 当前脚本来自于 http://2.345yun.cn 脚本库下载！
 # 当前脚本来自于 http://2.345yun.cc 脚本库下载！
@@ -31,7 +31,7 @@ import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# 将脚本所在目录加入搜索路径（确保能找到 getCode.py 等同目录模块）
+# 将脚本所在目录加入搜索路径（确保能找到 yyb.py 等同目录模块）
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # ── getCode 模块（标准方式获取微信 code） ──
@@ -276,7 +276,7 @@ class BfshAccount:
     def _get_wechat_code(self):
         """通过 getCode 获取微信登录 code"""
         if not _HAS_GETCODE:
-            log("  ❌ 未找到 getCode.py，请确认文件存在")
+            log("  ❌ 未找到 yyb.py，请确认文件存在")
             return None
         if not self.wxid:
             log("  ❌ 缺少 wxid（请检查 WX_ID 配置）")

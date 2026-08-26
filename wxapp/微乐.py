@@ -20,7 +20,7 @@
 """
 
 from __future__ import annotations
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 
 import os
 import random
@@ -144,7 +144,7 @@ class WeileClient:
         self.nickname = ""
 
     def get_wx_code(self) -> str:
-        code = getCode.get_single_code(APP_ID, self.account.wx_id)
+        code = yyb.get_single_code(APP_ID, self.account.wx_id)
         if not code:
             raise ScriptError("获取 wx.login code 失败")
         return code

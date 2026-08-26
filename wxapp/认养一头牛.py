@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 # name: 认养一头牛
 # cron: 17 9,22 * * *
 
@@ -209,24 +209,17 @@ def refresh_token(openid: str) -> str | None:
         # 传入带 #手机号 后缀的原始串会 404 account not found，这里剥成纯 openid。
         pure_openid = str(openid).split('#')[0].strip()
 
-        # 1. 获取 wx.login code（统一 getCode 模块，按 WX_ID 自动路由牛子/YYB 双协议）
+        # 1. 获取 wx.login code（统一 getCode 模块）
         wx_code = get_single_code(APP_ID, openid)
 
-        # 2. 获取手机号数据（应用宝专属能力，走 YYB/WX 取码服务）
-        phone_resp = requests.post(
-            f"http://{YYB_HOST}/wxapp/getPhoneNumber",
-            json={"ref": pure_openid, "app_id": APP_ID},
-            timeout=15,
-            proxies={"http": None, "https": None},
-        )
-        phone_data = phone_resp.json()
-        if phone_data.get("code") != 0:
-            print(f"  [REFRESH] getPhoneNumber 失败: {phone_data}")
+        # 2. 获取手机号数据（统一 getCode 模块）
+        phone_info = get_single_phone_encrypted(APP_ID, openid)
+        if not phone_info:
+            print("  [REFRESH] get_single_phone_encrypted 获取手机号失败")
             return None
-        result = phone_data["data"]["result"]
-        encrypted_data = result.get("encryptedData")
-        iv = result.get("iv")
-        phone_code = result.get("code", "")
+        encrypted_data = phone_info.get("encryptedData")
+        iv = phone_info.get("iv")
+        phone_code = phone_info.get("code", "")
 
         if not encrypted_data or not iv:
             print("  [REFRESH] 缺少 encryptedData 或 iv")

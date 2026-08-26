@@ -1,4 +1,4 @@
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 # cron: 10 9,13 * * *
 
 """
@@ -53,13 +53,13 @@ SIGN_ACTIVITY_ID = 11
 LOGIN_PATH = "/vip-api/auth/ma/login"
 
 
-# build_code_url 和 get_code 已统一到 getCode.py，此处保留兼容
+# build_code_url 和 get_code 已统一到 yyb.py，此处保留兼容
 def build_code_url(raw_url):
     """已废弃，保留兼容"""
     return ""
 
 def get_code(wxid, _server=None):
-    """通过 getCode.py 统一接口获取微信 code"""
+    """通过 yyb.py 统一接口获取微信 code"""
     try:
         return get_single_code(WX_APPID, wxid)
     except Exception as exc:

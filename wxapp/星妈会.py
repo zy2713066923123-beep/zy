@@ -1,4 +1,4 @@
-import getCode  # 自动同步 yyb_go 存活账号
+import yyb  # 自动同步 yyb_go 存活账号
 
 # cron: 24 11,16 * * *
 #!/usr/bin/env python3
@@ -166,7 +166,7 @@ class FeiheClient:
             return None
 
     def _get_wx_code(self):
-        """通过 getCode.py 统一接口获取小程序 code"""
+        """通过 yyb.py 统一接口获取小程序 code"""
         if not self.wxid:
             raise RuntimeError("未配置 wxid")
         return get_single_code(self.appid, self.wxid)

@@ -1,6 +1,6 @@
-require('./getCode.js'); // 自动同步 yyb_go 存活账号
+require('./yyb.js'); // 自动同步 yyb_go 存活账号
 /**
- * 多账号：账号来源 / wx code / 手机号加密数据(encryptedData/iv) 全部统一走 getCode.js
+ * 多账号：账号来源 / wx code / 手机号加密数据(encryptedData/iv) 全部统一走 yyb.js
  * （自动路由牛子/应用宝，读取 WX_ID 筛选账号）。不再直接依赖 8000 服务。
  * 持久化到 zmnlxqcookie.json
  * 接口域名：warhorsechina.cojoy.com.cn
@@ -13,7 +13,8 @@ require('./getCode.js'); // 自动同步 yyb_go 存活账号
 const $ = Env('战马能量星球');
 const fs = require('fs');
 const path = require('path');
-const notify = $.isNode() ? require('../sendNotify') : '';
+let notify = null;
+try { notify = $.isNode() ? require('../sendNotify') : ''; } catch (e) { notify = null; }
 const Notify = 0;
 const debug = 0;
 const ganta = 1;
@@ -74,7 +75,7 @@ function getCommonHeaders() {
     };
 }
 
-// ===================== 账号/code/手机号 统一走 getCode.js =====================
+// ===================== 账号/code/手机号 统一走 yyb.js =====================
 
 // 解析 WX_ID（格式：identifier#备注，多账号换行 / & / @ 分隔）
 function getWXIDAccounts() {
@@ -95,7 +96,7 @@ function getWXIDAccounts() {
 // 通过统一 getCode 模块获取 wx.login code（自动路由牛子/应用宝）
 function getWxCode(appid, identifier) {
     return new Promise((resolve) => {
-        getCode.getSingleCode(appid, String(identifier).split('#')[0].trim())
+        yyb.getSingleCode(appid, String(identifier).split('#')[0].trim())
             .then(code => {
                 if (code) resolve(code);
                 else { console.log('获取code失败: getSingleCode 返回空'); resolve(null); }
@@ -107,7 +108,7 @@ function getWxCode(appid, identifier) {
 // 通过统一 getCode 模块获取手机号加密数据（encryptedData/iv，由应用宝服务返回）
 function getPhoneEncrypted(appid, identifier) {
     return new Promise((resolve) => {
-        getCode.getSinglePhoneEncrypted(appid, String(identifier).split('#')[0].trim())
+        yyb.getSinglePhoneEncrypted(appid, String(identifier).split('#')[0].trim())
             .then(res => {
                 if (res && res.encryptedData && res.iv) {
                     resolve({ encryptedData: res.encryptedData, iv: res.iv });
