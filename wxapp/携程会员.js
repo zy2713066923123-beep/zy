@@ -21,10 +21,10 @@ class Env {
         }; 
     }
     log(...args) { console.log(...args); this.logs.push(args.join(" ")); }
-    checkEnv(ckName) {
-        const val = process.env.WX_ID || process.env[ckName];
-        if (val) this.userList = val.split(/[\n&]+/).map(v => String(v).split('#')[0].trim()).filter(Boolean);
-        else console.log('未找到环境变量 WX_ID');
+    async checkEnv(ckName) {
+        const list = await global.resolveAccounts(ckName);
+        this.userList = list;
+        if (!this.userList.length) console.log('未找到环境变量 WX_ID，且 yyb_go 无存活账号');
     }
     async done() { 
         try { 

@@ -33,10 +33,11 @@ class WeChatServer {
 class Env {
     constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; this.logs = []; const originalLog = console.log; console.log = (...args) => { this.logs.push(args.join(" ")); originalLog.apply(console, args); }; }
     log(...args) { console.log(...args); this.logs.push(args.join(" ")); }
-    checkEnv(ckName) {
-        const val = process.env.WX_ID || process.env[ckName];
+    async checkEnv(ckName) {
+        const list = await global.resolveAccounts(ckName);
+        this.userList = list;
+        if (!this.userList.length) console.log('未找到环境变量 WX_ID，且 yyb_go 无存活账号');
         if (val) {
-            this.userList = val.split(/[\n&]+/).map(v => String(v).split('#')[0].trim()).filter(Boolean);
         } else {
             // WX_ID 未配置时，自动从 yyb_go 拉取所有存活账号（与其他脚本一致）
             try {

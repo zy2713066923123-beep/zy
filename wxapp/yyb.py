@@ -434,6 +434,28 @@ def get_accounts() -> List[Dict[str, Any]]:
     """获取存活账号列表"""
     return load_accounts()
 
+
+def resolve_accounts(env_name: str = "") -> List[str]:
+    """
+    统一账号解析入口（所有脚本统一调用）：
+    1) 若配置了 WX_ID（或指定 env 变量），按原格式解析为 wxid 列表；
+    2) 否则自动从 yyb_go 拉取存活账号，返回 wxid 列表（openid/wxid/id）。
+    无论哪种方式，统一的“拿 code”入口都是 yyb.YYBClient().get_code(ref, app_id)。
+    """
+    val = (os.getenv("WX_ID") or (os.getenv(env_name) if env_name else "") or "").strip()
+    if val:
+        return [str(v).split("#")[0].strip() for v in re.split(r"[\n&]+", val) if v.strip()]
+    try:
+        accs = load_accounts()
+        if accs:
+            ids = [str(a.get("openid") or a.get("wxid") or a.get("id")) for a in accs if (a.get("openid") or a.get("wxid") or a.get("id"))]
+            print(f"[yyb] 自动从 yyb_go 同步到 {len(ids)} 个存活账号")
+            return ids
+    except Exception as e:
+        print(f"[yyb] 自动拉取账号失败: {e}")
+    print("[yyb] 未配置 WX_ID，且 yyb_go 无存活账号")
+    return []
+
 def print_online_status():
     """打印当前在线账号状态"""
     client = YYBClient()

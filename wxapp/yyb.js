@@ -487,6 +487,34 @@ async function getAccounts() {
 }
 
 /**
+ * 统一账号解析入口（所有脚本统一调用）：
+ * 1) 若配置了 WX_ID（或指定 env 变量），按原格式解析为 wxid 列表；
+ * 2) 否则自动从 yyb_go 拉取存活账号，返回 wxid 列表（openid/wxid/id）。
+ * 无论哪种方式，统一的“拿 code”入口都是 getSingleCode(appid, ref)。
+ */
+async function resolveAccounts(envName) {
+    const val = process.env.WX_ID || (envName ? process.env[envName] : '') || '';
+    if (val && val.trim()) {
+        return val
+            .split(/[\n&]+/)
+            .map(v => String(v).split('#')[0].trim())
+            .filter(Boolean);
+    }
+    try {
+        const accs = await loadAccounts();
+        if (accs && accs.length) {
+            const ids = accs.map(a => String(a.openid || a.wxid || a.id)).filter(Boolean);
+            console.log(`[yyb] 自动从 yyb_go 同步到 ${ids.length} 个存活账号`);
+            return ids;
+        }
+    } catch (e) {
+        console.log(`[yyb] 自动拉取账号失败: ${e.message || e}`);
+    }
+    console.log('[yyb] 未配置 WX_ID，且 yyb_go 无存活账号');
+    return [];
+}
+
+/**
  * 打印当前在线账号状态
  */
 async function printOnlineStatus() {
@@ -665,6 +693,7 @@ global.getSingleWeRunData = getSingleWeRunData;
 global.getSingleCloudFunction = getSingleCloudFunction;
 global.getSingleOAuthAuthorize = getSingleOAuthAuthorize;
 global.loadAccounts = loadAccounts;
+global.resolveAccounts = resolveAccounts;
 global.getAccounts = getAccounts;
 global.getWechatCodes = getWechatCodes;
 global.printOnlineStatus = printOnlineStatus;
