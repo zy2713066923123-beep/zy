@@ -40,7 +40,6 @@ class Env {
 const getWxCode = (wxid, appid) => getSingleCode(appid, String(wxid).split('#')[0].trim());
 
 const $ = new Env("携程会员签到");
-$.checkEnv("WX_ID");
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -599,6 +598,7 @@ class Task {
 }
 
 !(async () => {
+  await $.checkEnv("WX_ID");
   if ($.userList.length === 0) { $.log('未找到有效账号'); return; }
   for (let i = 0; i < $.userList.length; i++) {
     $.userIdx = i + 1;

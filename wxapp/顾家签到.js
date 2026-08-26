@@ -691,7 +691,7 @@ class Task {
 // ====================== 主入口 ======================
 !(async () => {
   console.log(`============ 顾家家居会员俱乐部 ============`);
-  await $.checkEnv(ckName);
+  await await $.checkEnv(ckName);
   console.log(`共 ${$.userList.length} 个账号`);
   for (const openid of $.userList) {
     await new Task(openid).run();

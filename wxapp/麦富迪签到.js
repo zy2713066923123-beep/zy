@@ -340,7 +340,7 @@ class Task {
 }
 
 !(async () => {
-    $.checkEnv(ckName);
+    await $.checkEnv(ckName);
     for (const account of $.userList) {
         await new Task(account).run();
     }

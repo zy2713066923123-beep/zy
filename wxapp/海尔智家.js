@@ -244,7 +244,7 @@ class Task {
 
 !(async () => {
     await getNotice()
-    $.checkEnv(ckName);
+    await $.checkEnv(ckName);
 
     for (let user of $.userList) {
         await new Task(user).run();

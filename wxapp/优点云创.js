@@ -20,7 +20,6 @@ class Env {
 const getWxCode = (wxid, appid) => getSingleCode(appid, String(wxid).split('#')[0].trim());
 
 const $ = new Env("优点云创");
-$.checkEnv("WX_ID");
 
 const APPID = "wx96eb3beaea480465";
 
@@ -213,6 +212,7 @@ class YouDianYunChuang {
 }
 
 !(async () => {
+    await $.checkEnv("WX_ID");
     if (!$.userList.length) {
         $.log(`未找到变量 ${CK_NAME}`);
         return;

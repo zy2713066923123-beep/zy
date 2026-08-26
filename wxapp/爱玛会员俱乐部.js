@@ -248,9 +248,13 @@ async function signIn(account, index) {
       accounts = env.split(/[\n&]+/).map(v => String(v).split('#')[0].trim()).filter(Boolean);
     }
   }
+  // 统一从 yyb_go 自动拉取存活账号（WX_ID/aima 为空时）
+  if (!accounts.length) {
+    accounts = await global.resolveAccounts("aima");
+  }
 
   if (accounts.length === 0) {
-    $.msg("❌ 未找到账号标识，请配置变量 'WX_ID' 或 'aima'");
+    $.msg("❌ 未找到账号标识，请配置变量 'WX_ID'/'aima' 或确认 yyb_go 有存活账号");
     return;
   }
 

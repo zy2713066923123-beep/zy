@@ -20,7 +20,6 @@ class Env {
 const getWxCode = (wxid, appid) => getSingleCode(appid, String(wxid).split('#')[0].trim());
 
 const $ = new Env("同程旅行里程签到");
-$.checkEnv("WX_ID");
 
 const APPID = "wx336dcaf6a1ecf632";
 
@@ -170,6 +169,7 @@ class Tongcheng {
 }
 
 !(async () => {
+    await $.checkEnv("WX_ID");
     if (!$.userList.length) {
         $.log(`未配置 WX_ID`);
         return;

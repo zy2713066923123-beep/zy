@@ -38,7 +38,6 @@ const path = require("path");
 const getWxCode = (wxid, appid) => getSingleCode(appid, String(wxid).split('#')[0].trim());
 
 const $ = new Env("衣城通");
-$.checkEnv("WX_ID");
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -350,6 +349,7 @@ class Task {
 }
 
 !(async () => {
+  await $.checkEnv("WX_ID");
 
   for (const wxid of $.userList) {
     try {

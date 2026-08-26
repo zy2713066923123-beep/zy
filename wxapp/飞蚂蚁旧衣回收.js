@@ -48,7 +48,6 @@ async function loadProxyAgents() {
 const getWxCode = (wxid, appid) => getSingleCode(appid, String(wxid).split('#')[0].trim());
 
 const $ = new Env("飞蚂蚁旧衣回收");
-$.checkEnv("WX_ID");
 
 // 强制全局禁用系统代理环境变量，避免干扰
 delete process.env.HTTP_PROXY;
@@ -496,6 +495,7 @@ async function runAccount(wxid, globalProxyAgent) {
 
 // ===================== 主程序 =====================
 (async () => {
+  await $.checkEnv("WX_ID");
     $.log('===== 飞蚂蚁旧衣回收动态code签到（调试版）=====\n');
     $.log('调试模式已开启，将打印完整请求和响应数据\n');
 

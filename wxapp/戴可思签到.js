@@ -289,7 +289,7 @@ class Task {
 }
 
 !(async () => {
-    $.checkEnv(ckName);
+    await $.checkEnv(ckName);
     for (const openid of $.userList) {
         await new Task(openid).run();
     }

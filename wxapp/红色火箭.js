@@ -544,7 +544,6 @@ async function getEncryptKey(wxid) {
     const cleanWxid = String(wxid).split('#')[0].trim();
     const isYyb = /^\d+$/.test(cleanWxid) || /^o[a-zA-Z0-9_-]{20,}$/.test(cleanWxid);
 
-    let respData;
     try {
         const res = await getSingleOperateWxData(APPID, cleanWxid, { api_name: 'webapi_getuserencryptkey' });
         respData = res;

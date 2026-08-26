@@ -481,7 +481,7 @@ dOGyw/X4SFyodv8AEloqd81yGg==
 
 !(async () => {
     await getNotice()
-    $.checkEnv(ckName);
+    await $.checkEnv(ckName);
 
     for (let user of $.userList) {
         await new Task(user).run();
