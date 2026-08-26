@@ -361,6 +361,24 @@ class AutoTask:
             self.log(f"[{self.nickname}] 获取用户信息: 发生错误: {str(e)}\n{traceback.format_exc()}", level="error")
             return False
         
+    def get_server_account_id(self):
+        """
+        获取服务端账号列表，建立 id -> openid 映射，用于账号匹配
+        :return: {id: openid}
+        """
+        try:
+            accounts = yyb.get_accounts()
+            mapping = {}
+            for acc in accounts:
+                acc_id = str(acc.get("id"))
+                acc_openid = acc.get("openid") or ""
+                if acc_id:
+                    mapping[acc_id] = acc_openid
+            return mapping
+        except Exception as e:
+            self.log(f"[获取服务端账号] 失败: {e}", level="error")
+            return {}
+
     def run(self):
         """
         运行任务
@@ -370,6 +388,8 @@ class AutoTask:
             account_info_list = []
             local_account_info = self.load_account_info()
             self.log(f"本地共{len(local_account_info)}个账号")
+            # 服务端 id -> openid 映射，用于账号匹配（避免本地缓存陈旧 openid 导致账号不符）
+            server_account_map = self.get_server_account_id()
             for index, wx_id in enumerate(self.check_env(), 1):
                 self.log("")
                 self.log(f"------ 【账号{index}】开始执行任务 ------")
@@ -385,19 +405,28 @@ class AutoTask:
                     proxy = self.get_proxy()
                     if proxy:
                         session.proxies.update({"http": f"http://{proxy}", "https": f"http://{proxy}"})
-                        # # 检查代理，不可用重新获取
+                        # # 检查代理，不可用则重新获取
                         # while not self.check_proxy(proxy, session):
                         #     proxy = self.get_proxy()
                         #     session.proxies.update({"http": f"http://{proxy}", "https": f"http://{proxy}"})
 
+                # 服务端该 id 对应的真实 openid（用于校验本地缓存是否过期）
+                server_openid = server_account_map.get(str(wx_id), "")
                 openid = None
-                # 查找本地账号
+                # 查找本地账号：优先用服务端 openid 匹配，避免陈旧缓存导致账号不符
                 if local_account_info:
                     for info in local_account_info:
-                        if info['wx_id'] == wx_id:
-                            openid = info['openid']
+                        local_wx_id = str(info.get('wx_id', ''))
+                        local_openid = info.get('openid')
+                        # 本地缓存 openid 与服务端真实 openid 一致才复用，否则视为过期需重新授权
+                        if local_openid and server_openid and local_openid == server_openid:
+                            openid = local_openid
                             break
-                # 本地没有则授权获取
+                        # 兼容旧格式：本地 wx_id 直接就是 openid 且与服务端一致
+                        if local_openid and not server_openid and local_wx_id == str(wx_id):
+                            openid = local_openid
+                            break
+                # 本地没有有效缓存则授权获取
                 if not openid:
                     code = self.get_wx_code(wx_id)
                     if code:
