@@ -27,11 +27,22 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 // ====================== 账号（环境变量 WX_ID = wxid#备注，换行或&） ======================
-function getAccountList() {
-    return (process.env.WX_ID || "")
+async function getAccountList() {
+    const envList = (process.env.WX_ID || "")
         .split(/\r?\n|&/)
         .map(s => s.trim())
         .filter(Boolean);
+    if (envList.length) return envList;
+    // 环境变量未配置时，自动从 yyb_go 同步存活账号
+    try {
+        const accs = await loadAccounts();
+        if (accs && accs.length) {
+            return accs.map(a => String(a.id || a.openid || a.wxid));
+        }
+    } catch (e) {
+        console.log("[yyb] 同步存活账号失败: " + (e && e.message ? e.message : e));
+    }
+    return [];
 }
 async function getCode(server, appId = MINI_APP_ID) {
     const __id = String(server).split("#")[0].trim();
@@ -611,7 +622,7 @@ class Task {
 }
 
 !(async () => {
-  const accounts = getAccountList();
+  const accounts = await getAccountList();
   if (!accounts.length) {
     console.log("未配置或同步到可用账号 WX_ID，脚本退出");
     return;

@@ -39,12 +39,22 @@ delete process.env.https_proxy;
 // PushPlus 通知Token（青龙环境变量）
 const PLUSPLUS_TOKEN = process.env.PLUSPLUS_TOKEN || "";
 
-// 从环境变量 WX_ID 读取账号，支持用换行或&分隔
-function getAccountList() {
-    return (process.env.WX_ID || "")
+// 从环境变量 WX_ID 读取账号，支持用换行或&分隔；未配置时自动从 yyb_go 同步存活账号
+async function getAccountList() {
+    const envList = (process.env.WX_ID || "")
         .split(/\r?\n|&/)
         .map(item => item.trim())
         .filter(Boolean);
+    if (envList.length) return envList;
+    try {
+        const accs = await loadAccounts();
+        if (accs && accs.length) {
+            return accs.map(a => String(a.id || a.openid || a.wxid));
+        }
+    } catch (e) {
+        console.log("[yyb] 同步存活账号失败: " + (e && e.message ? e.message : e));
+    }
+    return [];
 }
 
 // 品赞代理配置（青龙环境变量）
@@ -536,7 +546,7 @@ async function runAccount(server, globalProxyAgent) {
         globalProxyAgent = await getValidProxy("全局共用");
     }
 
-    const servers = getAccountList();
+    const servers = await getAccountList();
     if (!servers.length) {
         console.log("未配置或同步到可用账号 WX_ID，脚本退出");
         return;

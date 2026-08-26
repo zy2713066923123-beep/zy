@@ -359,7 +359,7 @@ class YYBClient:
         return self._request("POST", "/wxapp/oauth/authorize", json_data={
             "ref": resolved_ref,
             "app_id": app_id,
-            "redirect_uri": redirect_uri,
+            "url": redirect_uri,
             "scope": scope,
             "state": state,
         })

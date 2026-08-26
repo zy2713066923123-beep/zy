@@ -40,11 +40,22 @@ const APPID = "wx49a622805968d156";
 //              - 以 wxid_ 开头或普通标识 → 牛子协议
 //              - 纯数字 / 以 o 开头的 openid（≥20位）→ YYB 应用宝协议
 //              - 由统一 getCode 模块按标识格式自动路由，无需手动指定
-function getAccountList() {
-    return (process.env.WX_ID || "")
+async function getAccountList() {
+    const envList = (process.env.WX_ID || "")
         .split(/\r?\n|&/)
         .map(s => s.trim())
         .filter(Boolean);
+    if (envList.length) return envList;
+    // 环境变量未配置时，自动从 yyb_go 同步存活账号
+    try {
+        const accs = await loadAccounts();
+        if (accs && accs.length) {
+            return accs.map(a => String(a.id || a.openid || a.wxid));
+        }
+    } catch (e) {
+        console.log("[yyb] 同步存活账号失败: " + (e && e.message ? e.message : e));
+    }
+    return [];
 }
 
 const SERVER = (process.env.WX_SERVER || process.env.YYB_SERVER || process.env.WECHAT_SERVER || "http://127.0.0.1:8000").trim();
@@ -735,7 +746,7 @@ ${icon} 结果：${res.success ? "成功" : "失败"}
 (async () => {
     logTitle();
 
-    const wxIds = getAccountList();
+    const wxIds = await getAccountList();
     if (!wxIds.length) {
         console.log("未配置或同步到可用账号 WX_ID，脚本退出");
         return;
