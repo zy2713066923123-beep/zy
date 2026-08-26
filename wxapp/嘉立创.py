@@ -243,6 +243,9 @@ def parse_accounts() -> List[Dict[str, str]]:
 
     # 1) wxid 自动登录模式（推荐）
     wxid_raw = os.getenv("WX_ID") or os.getenv("JLC", "")
+    if not wxid_raw:
+        # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        wxid_raw = "\n".join(resolve_accounts())
     if wxid_raw:
         items = _split_accounts(wxid_raw)
         for idx, item in enumerate(items):

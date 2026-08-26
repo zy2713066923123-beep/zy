@@ -785,10 +785,16 @@ async function runOne(line, idx) {
 }
 
 (async () => {
-  const raw = process.env.WX_ID || process.env[ENV_NAME] || '';
+  let raw = process.env.WX_ID || process.env[ENV_NAME] || '';
   if (!raw.trim()) {
-    console.log(`未设置环境变量 WX_ID 或 ${ENV_NAME}`);
-    process.exit(0);
+    // 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+    const auto = await resolveAccounts();
+    if (auto && auto.length) {
+      raw = auto.join('\n');
+    } else {
+      console.log(`未设置环境变量 WX_ID 或 ${ENV_NAME}`);
+      process.exit(0);
+    }
   }
 
   const accounts = splitAccounts(raw);

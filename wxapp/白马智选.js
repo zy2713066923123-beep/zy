@@ -14,7 +14,7 @@ const http = require('http');
 const zlib = require('zlib');
 const WX_APPID = 'wx51f8cb2a7578f42f';
 let ckName = "WX_ID";
-const WXID_RAW = (process.env.WX_ID || '').trim();
+let WXID_RAW = (process.env.WX_ID || '').trim();
 const WECHAT_SERVER = (process.env.WX_SERVER || process.env.WECHAT_SERVER || '').replace(/\/$/, '');
 
 const SCRIPT_NAME = '白马智选';
@@ -180,9 +180,15 @@ async function main() {
     log(`🔔${SCRIPT_NAME}, 开始!`);
 
     if (!WXID_RAW) {
-        log('❌ 未找到 ' + ckName + ' 环境变量');
-        await push_notification();
-        return;
+        // 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        const auto = await resolveAccounts();
+        if (auto && auto.length) {
+            WXID_RAW = auto.join('\n');
+        } else {
+            log('❌ 未找到 ' + ckName + ' 环境变量');
+            await push_notification();
+            return;
+        }
     }
     if (!WECHAT_SERVER) {
         log('❌ 未找到 WECHAT_SERVER 环境变量');

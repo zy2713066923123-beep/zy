@@ -25,7 +25,7 @@ const STATUS_ONLY = process.env.WHMLX_STATUS_ONLY === '1';
 const DEBUG = process.env.debug === '1' || process.env.WHMLX_DEBUG === '1';
 const ACCOUNT_GAP_MS = Math.max(1000, parseInt(process.env.WHMLX_ACCOUNT_GAP_MS || '3000', 10));
 const CONCURRENCY = Math.max(1, parseInt(process.env.WHMLX_CONCURRENCY || '0', 10) || 0);
-const ACCOUNT_RAW = String(process.env.WX_ID || process.env[ENV_NAME] || process.env.WHMLX_ACCOUNTS || process.env.whmlx || '').trim();
+let ACCOUNT_RAW = String(process.env.WX_ID || process.env[ENV_NAME] || process.env.WHMLX_ACCOUNTS || process.env.whmlx || '').trim();
 const CACHE_FILE = path.join(process.cwd(), '.cache', 'warhorse_journey.json');
 
 let msg = '';
@@ -540,6 +540,11 @@ async function runAccountsConcurrent(accounts, limit) {
 
 async function main() {
   addNotify('战马万里行脚本启动');
+  if (!ACCOUNT_RAW) {
+    // 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+    const auto = await resolveAccounts();
+    if (auto && auto.length) ACCOUNT_RAW = auto.join('\n');
+  }
   const accounts = parseAccounts(ACCOUNT_RAW);
 
   if (accounts.length) {

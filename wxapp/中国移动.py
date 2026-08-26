@@ -86,6 +86,9 @@ APPID = "wx43aab19a93a3a6f2"
 # 账号（WX_ID = wxid#备注，多个换行或 & 分隔）
 WX_IDS = [s.strip() for s in os.getenv("WX_ID", "").replace("&", "\n").splitlines() if s.strip()]
 if not WX_IDS:
+    # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+    WX_IDS = resolve_accounts()
+if not WX_IDS:
     print("❌ 未配置环境变量 WX_ID，请按 wxid/openid#备注 格式配置（多个换行分隔）")
 
 # 兼容旧版 SERVERS 本地 code 服务（已废弃，保留用于报错提示）

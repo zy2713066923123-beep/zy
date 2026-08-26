@@ -155,6 +155,9 @@ if __name__ == "__main__":
 
     # 从环境变量读取账号
     raw_env = os.getenv("WX_ID") or os.getenv("zjfc", "")
+    if not raw_env:
+        # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        raw_env = "\n".join(resolve_accounts())
     accounts = [item.split('#')[0].strip() for item in raw_env.replace("&", "\n").splitlines() if item.strip()]
 
     if not accounts:

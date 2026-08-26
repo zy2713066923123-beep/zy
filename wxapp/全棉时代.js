@@ -2659,6 +2659,13 @@ function time(fmt, ts = null) {
 
 // ============================================变量检查============================================ \\
 async function Envs() {
+    if (!S_qmsdCk) {
+        // 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        const auto = await resolveAccounts();
+        if (auto && auto.length) {
+            S_qmsdCk = auto.join('\n');
+        }
+    }
     if (S_qmsdCk) {
         if (S_qmsdCk.indexOf("@") != -1) {
             S_qmsdCk.split("@").forEach((item) => {

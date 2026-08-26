@@ -383,8 +383,13 @@ def get_env_data():
     wxid_raw = (os.getenv("WX_ID") or os.getenv("FEIHE_DATA") or "").strip()
     wechat_server = (os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or "").strip()
     if not wxid_raw:
-        print("❌ 未找到环境变量 WX_ID 或 FEIHE_DATA")
-        return []
+        # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        auto = resolve_accounts()
+        if auto:
+            wxid_raw = "\n".join(auto)
+        else:
+            print("❌ 未找到环境变量 WX_ID 或 FEIHE_DATA")
+            return []
     
     accounts = []
     # 支持 @, &, 或换行分隔

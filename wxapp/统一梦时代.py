@@ -855,6 +855,9 @@ def print_summary():
 
 def main():
     raw = ENV.get('WX_ID') or ENV.get('qhdwq') or ''
+    if not raw:
+        # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        raw = "\n".join(resolve_accounts())
     accounts = parse_accounts(raw)
     if not accounts:
         log('未配置 WX_ID / qhdwq，格式：wxid_...#备注，多账号换行或 & 分隔')

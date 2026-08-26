@@ -239,7 +239,14 @@ async function getOrRefreshSafe(account, tokenStore) {
 // ===================== 初始化 =====================
 async function Envs() {
     console.log('开始解析环境变量 WX_ID 获取账号列表...');
-    const accounts = getWXIDAccounts();
+    let accounts = getWXIDAccounts();
+    if (!accounts.length) {
+        // 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        const auto = await resolveAccounts();
+        if (auto && auto.length) {
+            accounts = auto.map((acc) => ({ openid: acc, wxid: acc, nickname: acc }));
+        }
+    }
     if (!accounts.length) {
         console.log('未解析到任何账号，请检查环境变量 WX_ID（格式：wxid#备注，多账号换行/@/& 分隔）');
         return false;

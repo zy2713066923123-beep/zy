@@ -126,6 +126,9 @@ MEMBER_BASE = os.getenv("UFS_MEMBER_BASE", "https://member.unileverfoodsolutions
 ACCOUNT_ID = os.getenv("UFS_ACCOUNT_ID", "577c98c4905e88311f8b474a").strip()
 
 WX_IDS = [s.strip() for s in os.getenv("WX_ID", "").replace("&", "\n").splitlines() if s.strip()]
+if not WX_IDS:
+    # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+    WX_IDS = resolve_accounts()
 
 # 可自动完成的任务白名单 (reward 无需真人弹窗即可领到积分)。
 # 服务端的 simple-complete 接口只认特定 code, 业务任务 (进货/报单/上传/调研/邀请/

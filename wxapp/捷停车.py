@@ -129,9 +129,14 @@ def mask_text(value: str) -> str:
 
 def parse_accounts() -> List[Dict[str, str]]:
     if not WXID_ENV:
-        print("❌ 未配置 WX_ID 环境变量")
-        print("格式: wxid#备注，多个账号用换行或 @ 分隔")
-        return []
+        # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        auto = resolve_accounts()
+        if auto:
+            WXID_ENV = "\n".join(auto)
+        else:
+            print("❌ 未配置 WX_ID 环境变量")
+            print("格式: wxid#备注，多个账号用换行或 @ 分隔")
+            return []
 
     accounts: List[Dict[str, str]] = []
     for raw_line in re.split(r"[\r\n@]+", WXID_ENV):

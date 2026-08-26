@@ -257,6 +257,10 @@ def run_by_wechat_loader():
     wxid_env = (os.getenv("WX_ID") or "").strip()
 
     if not wxid_env:
+        # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        wxid_env = "\n".join(resolve_accounts())
+
+    if not wxid_env:
         return False
 
     for idx, (wxid, remark) in enumerate(parse_multi_accounts(wxid_env), 1):

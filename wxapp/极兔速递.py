@@ -70,6 +70,10 @@ def parse_accounts() -> list[Account]:
             continue
         accounts.append(Account(len(accounts) + 1, wx_id))
     if not accounts:
+        # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        for wx_id in resolve_accounts():
+            accounts.append(Account(len(accounts) + 1, wx_id))
+    if not accounts:
         raise ScriptError("未配置 WX_ID，多个账号用换行或 & 分割")
     return accounts
 

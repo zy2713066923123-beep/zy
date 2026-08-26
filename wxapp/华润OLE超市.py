@@ -638,8 +638,13 @@ def main() -> None:
         or ""
     ).strip()
     if not wxid_raw:
-        print("❌ 未配置环境变量 WX_ID（格式: wxid#备注，多账号换行或 & / @ 分隔）")
-        return
+        # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        auto = resolve_accounts()
+        if auto:
+            wxid_raw = "\n".join(auto)
+        else:
+            print("❌ 未配置环境变量 WX_ID（格式: wxid#备注，多账号换行或 & / @ 分隔）")
+            return
 
     accounts = parse_wxid_list(wxid_raw)
     if not accounts:

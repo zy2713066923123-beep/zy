@@ -607,7 +607,14 @@ async function runAccount(account, index, total) {
 async function main() {
   console.log('期云积签兑 qyqd 自动化开始');
   if (CONFIG.dryRun) console.log('当前为 dry-run：不会提交签到或领奖接口');
-  const accounts = parseAccounts();
+  let accounts = parseAccounts();
+  if (accounts.length === 0) {
+    // 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+    const auto = await resolveAccounts();
+    if (auto && auto.length) {
+      accounts = parseWxidAccounts(auto.join('\n'));
+    }
+  }
   if (accounts.length === 0) throw new Error('未找到环境变量 WX_ID 或 qyqd');
 
   for (let i = 0; i < accounts.length; i++) {

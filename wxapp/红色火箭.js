@@ -1300,9 +1300,15 @@ async function main() {
     log('🚀 红色火箭脚本启动');
 
     if (!taskVar.trim()) {
-        log('环境变量未设置: ' + ckName);
-        await push_notification();
-        process.exit(0);
+        // 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        const auto = await resolveAccounts();
+        if (auto && auto.length) {
+            taskVar = auto.join('\n');
+        } else {
+            log('环境变量未设置: ' + ckName);
+            await push_notification();
+            process.exit(0);
+        }
     }
 
     // 解析账号：WX_ID 格式 wxid#备注，多账号换行或 & 分隔

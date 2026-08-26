@@ -612,6 +612,7 @@ builtins.get_single_we_run_data = get_single_we_run_data
 builtins.get_single_cloud_function = get_single_cloud_function
 builtins.get_single_oauth_authorize = get_single_oauth_authorize
 builtins.load_accounts = load_accounts
+builtins.resolve_accounts = resolve_accounts
 builtins.get_accounts = get_accounts
 builtins.get_wechat_codes = get_wechat_codes
 builtins.print_online_status = print_online_status

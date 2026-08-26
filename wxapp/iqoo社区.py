@@ -292,7 +292,12 @@ def parse_wxid_accounts(raw: Any) -> list[Dict[str, str]]:
 
 
 def load_wxid_accounts() -> list[Dict[str, str]]:
-    return parse_wxid_accounts(os.getenv("WX_ID") or os.getenv("IQOO_WXID", ""))
+    accounts = parse_wxid_accounts(os.getenv("WX_ID") or os.getenv("IQOO_WXID", ""))
+    if not accounts:
+        # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        for ref in resolve_accounts():
+            accounts.append({"wxid": ref, "remark": ref})
+    return accounts
 
 
 def normalize_token(raw: Any) -> str:

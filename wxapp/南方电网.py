@@ -276,6 +276,9 @@ APPID = "wx325a533aedaafe35"
 # 与项目其它脚本一致, 经 getCode 自动路由牛子/YYB 协议取 code。
 WX_IDS = [s.strip() for s in os.getenv("WX_ID", "").replace("&", "\n").splitlines() if s.strip()]
 if not WX_IDS:
+    # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+    WX_IDS = resolve_accounts()
+if not WX_IDS:
     print("ℹ️  未配置环境变量 WX_ID，将尝试使用环境变量/config.json 中的 token 兜底")
 
 # 用 code 换 token 的登录接口 (南网在线微信小程序)

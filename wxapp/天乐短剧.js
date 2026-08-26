@@ -119,14 +119,22 @@ function envFlag(name, defaultValue) {
   return ['1', 'true', 'yes', 'on'].includes(String(value).toLowerCase());
 }
 
-function parseAccounts() {
+async function parseAccounts() {
   const globalUserKey = parseUserKey(process.env.REELIX_USER_KEY || '');
   const sources = [];
   const wxIdRaw = String(process.env.WX_ID || '').trim();
   const authRaw = String(process.env[ENV_NAME] || '').trim();
   if (wxIdRaw) sources.push(wxIdRaw);
   if (authRaw) sources.push(authRaw);
-  const raw = sources.join('\n');
+  let raw = sources.join('\n');
+  if (!raw.trim()) {
+    // 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+    const auto = await resolveAccounts();
+    if (auto && auto.length) {
+      sources.push(auto.join('\n'));
+      raw = sources.join('\n');
+    }
+  }
   if (!raw.trim()) {
     log(`未配置环境变量 WX_ID 或 ${ENV_NAME}`);
     return [];
@@ -1089,7 +1097,7 @@ function printSummary() {
 }
 
 async function main() {
-  const accounts = parseAccounts();
+  const accounts = await parseAccounts();
   if (!accounts.length) return;
 
   let success = 0;

@@ -30,7 +30,7 @@ const COOKIE_CACHE_FILE = pathMod.join(CACHE_DIR, 'pdd_cookie_cache.json');
 
 // 配置区
 let ckName = 'WX_ID';
-const WXID_RAW = (process.env.WX_ID || '').trim();
+let WXID_RAW = (process.env.WX_ID || '').trim();
 const WECHAT_SERVER = (process.env.WX_SERVER || process.env.WECHAT_SERVER || '').replace(/\/$/, '');
 const NO_RELOGIN = process.env.PDD_NO_RELOGIN !== '0' && process.env.PDD_NO_RELOGIN !== 'false';
 
@@ -669,9 +669,15 @@ async function main() {
     log(`🔔${SCRIPT_NAME}, 开始!`);
 
     if (!WXID_RAW) {
-        log(`❌ 未找到 ${ckName} 环境变量`);
-        await push_notification();
-        return;
+        // 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        const auto = await resolveAccounts();
+        if (auto && auto.length) {
+            WXID_RAW = auto.join('\n');
+        } else {
+            log(`❌ 未找到 ${ckName} 环境变量`);
+            await push_notification();
+            return;
+        }
     }
     if (!WECHAT_SERVER) {
         log('❌ 未找到 WECHAT_SERVER 环境变量');

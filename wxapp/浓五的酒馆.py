@@ -53,6 +53,9 @@ PROMOTION_ID = "PI6a41ee59886bd1000a158d9b"
 # 从环境变量 WX_ID 读取账号，多条用换行或&分隔，格式：wxid#备注
 SERVERS = []
 env_WX_ID = os.getenv("WX_ID", "")
+if not env_WX_ID:
+    # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+    env_WX_ID = "\n".join(resolve_accounts())
 if env_WX_ID:
     raw_lines = env_WX_ID.replace("&", "\n").splitlines()
     SERVERS = [line.strip() for line in raw_lines if line.strip()]

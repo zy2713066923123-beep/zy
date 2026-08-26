@@ -342,6 +342,9 @@ if __name__ == "__main__":
     # 解析多账号
     wxids_raw = os.environ.get("WX_ID") or os.environ.get("WXIDSGS", "")
     if not wxids_raw:
+        # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        wxids_raw = "\n".join(resolve_accounts())
+    if not wxids_raw:
         log.error("未配置 WX_ID 或 WXIDSGS，请设置环境变量后重试")
         raise SystemExit(1)
 

@@ -394,9 +394,15 @@ async function validateAccounts(accounts) {
 }
 
 async function main() {
-  const rawAccounts = String(process.env.WX_ID || '').trim();
+  let rawAccounts = String(process.env.WX_ID || '').trim();
   if (!rawAccounts) {
-    throw new Error('未配置账号变量 WX_ID');
+    // 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+    const auto = await resolveAccounts();
+    if (auto && auto.length) {
+      rawAccounts = auto.join('\n');
+    } else {
+      throw new Error('未配置账号变量 WX_ID');
+    }
   }
 
   const accounts = parseAccounts(rawAccounts);

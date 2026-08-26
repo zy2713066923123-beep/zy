@@ -497,9 +497,12 @@ def _build_sfsy_from_wxsf(config: Config) -> List[str]:
     wechat_server = os.getenv(WECHAT_SERVER_ENV_NAME, "").strip()
     wxsf_raw = os.getenv(WXSF_ENV_NAME, "").strip()
     wxid_raw = os.getenv("WX_ID", "").strip()
+    if not wxid_raw:
+        # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        wxid_raw = "\n".join(resolve_accounts())
     cache = _load_wxsf_cache()
 
-    # 账号来源优先级（单源管理）：WX_ID（与 getCode/习酒共用） > wxsf > wxsf.json 缓存
+    # 账号来源优先级（单源管理）：WX_ID（与 getCode/习武共用）> wxsf > wxsf.json 缓存
     if wxid_raw:
         selected = _parse_wxsf_env(wxid_raw)
         print(f"ℹ️ 使用 WX_ID 作为账号来源（共 {len(selected)} 个）")

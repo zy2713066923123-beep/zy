@@ -196,6 +196,9 @@ def main():
     # 解析账号
     accounts = []
     wxid_raw = (os.getenv("WX_ID") or "").strip()
+    if not wxid_raw:
+        # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        wxid_raw = "\n".join(resolve_accounts())
     if wxid_raw:
         items = [x.strip() for x in re.split(r"[\n&]", wxid_raw) if x.strip()]
         for item in items:

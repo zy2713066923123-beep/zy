@@ -493,8 +493,13 @@ def main():
 
     wxcode_ck = os.environ.get(ENV_WXCODE_CK)
     if not wxcode_ck:
-        print("❌ 环境变量 WX_ID 未设置")
-        return
+        # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        auto = resolve_accounts()
+        if auto:
+            wxcode_ck = "\n".join(f"{ref}#{ref}" for ref in auto)
+        else:
+            print("❌ 环境变量 WX_ID 未设置")
+            return
 
     accounts = []
     for line in re.split(r"[\r\n@&]+", wxcode_ck.strip()):

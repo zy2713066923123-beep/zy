@@ -34,6 +34,9 @@ def get_wxid_list():
     import re
     data = os.getenv("WX_ID", "").strip() or os.getenv("soy_wxid_data", "").strip()
     if not data:
+        # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        data = "\n".join(resolve_accounts())
+    if not data:
         message_list.append("❌ 环境变量[WX_ID 或 soy_wxid_data]为空！")
         return []
     # 支持换行、&、@、逗号、空格等多种分隔符

@@ -293,6 +293,9 @@ def run_account(index: int, wxid: str, remark: str) -> str:
 def main() -> None:
     accounts = parse_wx_accounts(os.getenv("WX_ID", ""))
     if not accounts:
+        # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        accounts = parse_wx_accounts("\n".join(resolve_accounts()))
+    if not accounts:
         raise RuntimeError("请配置青龙环境变量 WX_ID（微信协议版，格式 wxid#备注，多账号换行/&/| 分隔）")
 
     results: List[str] = []

@@ -1392,6 +1392,9 @@ class NissanSign:
 
 def main() -> None:
     raw_wxid = os.environ.get("WX_ID", "")
+    if not raw_wxid:
+        # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        raw_wxid = "\n".join(resolve_accounts())
     accounts = parse_accounts(raw_wxid, "")
 
     print(f"## 开始执行... {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")

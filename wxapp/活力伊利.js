@@ -440,9 +440,15 @@ async function sendNotify(title, content) {
 }
 
 async function main() {
-  const rawAccounts = process.env.WX_ID || process.env.wxhlyili || '';
+  let rawAccounts = process.env.WX_ID || process.env.wxhlyili || '';
   if (!rawAccounts.trim()) {
-    throw new Error('未配置账号变量 WX_ID 或 wxhlyili');
+    // 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+    const auto = await resolveAccounts();
+    if (auto && auto.length) {
+      rawAccounts = auto.join('\n');
+    } else {
+      throw new Error('未配置账号变量 WX_ID 或 wxhlyili');
+    }
   }
 
   const accounts = parseAccounts(rawAccounts);

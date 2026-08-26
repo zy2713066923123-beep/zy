@@ -120,10 +120,15 @@ def 解析环境变量账号列表():
     原始值 = os.getenv("WX_ID") or ""
     原始值 = 原始值.strip()
     if not 原始值:
-        raise ValueError(
-            '未检测到环境变量 WX_ID。请按「wxid#备注」格式设置，'
-            "多账号可用换行或 @ 分隔。"
-        )
+        # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        自动账号 = resolve_accounts()
+        if 自动账号:
+            原始值 = "\n".join(自动账号)
+        else:
+            raise ValueError(
+                '未检测到环境变量 WX_ID。请按「wxid#备注」格式设置，'
+                "多账号可用换行或 @ 分隔。"
+            )
 
     账号列表 = []
     条目列表 = [条目.strip() for 条目 in re.split(r"[\r\n@]+", 原始值) if 条目.strip()]

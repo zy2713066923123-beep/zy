@@ -880,6 +880,9 @@ def build_notify_content(summaries: List[AccountSummary]) -> str:
 def main() -> None:
     accounts = parse_wxid_list(os.environ.get("WX_ID", ""))
     if not accounts:
+        # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        accounts = parse_wxid_list("\n".join(resolve_accounts()))
+    if not accounts:
         print("错误: 未设置 WX_ID 环境变量")
         print("格式: wxid#备注，多个账号用换行或 @ 分隔")
         print("示例: wxid_abc123#账号1@wxid_def456#账号2")

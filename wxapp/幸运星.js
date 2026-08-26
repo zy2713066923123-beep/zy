@@ -281,8 +281,13 @@ function accountName(cookie) {
 }
 
 /** 读取 WX_ID（微信账号），多账号换行或 & 分隔，支持 wxid#备注 */
-function getWxIds() {
-  const raw = (process.env.WX_ID || '').trim();
+async function getWxIds() {
+  let raw = (process.env.WX_ID || '').trim();
+  if (!raw) {
+    // 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+    const auto = await resolveAccounts();
+    if (auto && auto.length) raw = auto.join('\n');
+  }
   if (!raw) return [];
   return raw
     .split(/[\n&]+/)
@@ -306,7 +311,7 @@ function writeTokenCache(cache) {
  *  - 模式 getcode: 由 WX_ID 提供 openid/wxid，登录态通过 getCode 换 Cookie 后缓存
  *  - 模式 cookie:  直接使用 H5 Cookie（老用户 / --ck 本地测试）
  */
-function buildAccounts() {
+async function buildAccounts() {
   const accounts = [];
   const seen = new Set();
   const pushCookie = (c) => {
@@ -323,7 +328,7 @@ function buildAccounts() {
   const ckFile = readCkFile();
   if (ckFile) for (const c of splitAccounts(ckFile)) pushCookie(c);
 
-  const wxIds = getWxIds();
+  const wxIds = await getWxIds();
   if (wxIds.length) {
     for (const wxid of wxIds) pushWxid(wxid);
   } else {
@@ -690,7 +695,7 @@ async function getCookieForWxid(wxid) {
 
 /** 收集所有待处理账号，为 getcode 账号解析出登录 Cookie */
 async function getAllAccounts() {
-  const accounts = buildAccounts();
+  const accounts = await buildAccounts();
   const ready = [];
   for (const acc of accounts) {
     if (acc.mode === 'getcode') {

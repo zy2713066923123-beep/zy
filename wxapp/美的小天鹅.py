@@ -499,6 +499,9 @@ def main():
     """主执行函数"""
     mdxte_raw = os.getenv('WX_ID') or os.getenv('mdxte')
     if not mdxte_raw:
+        # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        mdxte_raw = "\n".join(resolve_accounts())
+    if not mdxte_raw:
         print("未找到环境变量 WX_ID 或 mdxte")
         return
 

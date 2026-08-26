@@ -111,9 +111,15 @@ function parseAccounts() {
     });
 }
 
-function parseWxIds() {
-    if (!WX_IDS_RAW) return [];
-    return WX_IDS_RAW.split(/[\n&|]/).map(s => s.trim()).filter(Boolean);
+async function parseWxIds() {
+    let raw = WX_IDS_RAW;
+    if (!raw) {
+        // 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        const auto = await resolveAccounts();
+        if (auto && auto.length) raw = auto.join('\n');
+    }
+    if (!raw) return [];
+    return raw.split(/[\n&|]/).map(s => s.trim()).filter(Boolean);
 }
 
 function uuid() {
@@ -499,7 +505,7 @@ async function limitedParallel(tasks, limit) {
     }
 
     // 共享微信协议账号池，按索引与绿树账号配对
-    const wxIds = parseWxIds();
+    const wxIds = await parseWxIds();
     if (wxIds.length === 0) {
         console.log('⚠️ 未配置 WX_ID，广告领奖将回退到 openid/deviceFP（可能共用同一微信号）');
     } else if (wxIds.length < accounts.length) {

@@ -182,6 +182,9 @@ def is_cache_valid(cache: dict[str, Any]) -> bool:
 def parse_wxid_from_env() -> list[tuple[str, str]]:
     env_value = (os.environ.get("WX_ID") or os.environ.get("lmfwxid") or "").strip()
     if not env_value:
+        # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        env_value = "\n".join(resolve_accounts())
+    if not env_value:
         return []
 
     parts: list[str] = []

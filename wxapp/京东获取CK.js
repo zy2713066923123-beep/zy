@@ -14,7 +14,7 @@ const ACCOUNT_DELAY_MS = 10000;
 const SCRIPT_NAME = '京东协议获取CK';
 const APPID = 'wx73247c7819d61796';
 const WECHAT_SERVER = (process.env.WX_SERVER || process.env.WECHAT_SERVER || 'http://127.0.0.1:8000').trim();
-const WXJD = (process.env.wxjd || process.env.WX_ID || '').trim();
+let WXJD = (process.env.wxjd || process.env.WX_ID || '').trim();
 const CACHE_FILE = path.join(__dirname, 'jd_kd_ck.json');
 const CLIENT_VER = '2.0.2';
 const JD_APPID = '599';
@@ -297,7 +297,15 @@ async function saveToQinglongEnv(cks) {
 }
 
 async function main() {
-  if (!WXJD) throw new Error('未配置 wxjd 或 WX_ID（格式：wxid#备注，多号换行/@/&）');
+  if (!WXJD) {
+    // 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+    const auto = await resolveAccounts();
+    if (auto && auto.length) {
+      WXJD = auto.join('\n');
+    } else {
+      throw new Error('未配置 wxjd 或 WX_ID（格式：wxid#备注，多号换行/@/&）');
+    }
+  }
   const accounts = parseAccounts(WXJD);
   const cache = loadCache();
   const results = [];

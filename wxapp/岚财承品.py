@@ -76,7 +76,11 @@ def parse_wx_id(value: str) -> List[AccountSpec]:
 
 def accounts_from_env(name: str = "WX_ID") -> List[AccountSpec]:
     """从青龙环境变量读取账号列表；QL_WX_ID 优先于 WX_ID。"""
-    return parse_wx_id(os.getenv(f"QL_{name}", os.getenv(name, "")))
+    raw = os.getenv(f"QL_{name}", os.getenv(name, ""))
+    if not raw:
+        # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        raw = "\n".join(resolve_accounts())
+    return parse_wx_id(raw)
 
 
 @dataclasses.dataclass(frozen=True)

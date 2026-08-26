@@ -370,6 +370,10 @@ if __name__ == "__main__":
     accounts = [item.split('#')[0].strip() for item in raw_env.replace("&", "\n").splitlines() if item.strip()]
 
     if not accounts:
+        # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        accounts = resolve_accounts()
+
+    if not accounts:
         print("❌ 未检测到 账号信息，退出脚本。")
     else:
         skip_community = os.getenv("BREO_SKIP_COMMUNITY", "").lower() in ("1", "true", "yes")

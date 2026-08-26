@@ -15,7 +15,7 @@ const crypto = require('crypto');
 const NAME = '广汽丰田新能源-微信协议版';
 const APPID = 'wxd8a42d1c0c59c15d';
 const API_VERSION = '1.4.0';
-const WXGQFT = (process.env.WX_ID || '').trim();
+let WXGQFT = (process.env.WX_ID || '').trim();
 
 const GW_BASE = 'https://gw.nevapp.gtmc.com.cn';
 const XCX_BASE = 'https://xcx.nevapp.gtmc.com.cn/wxapp/nev-prod/bff-nev-wxapp';
@@ -354,7 +354,15 @@ async function ensureCred(acc, cache) {
 }
 
 async function main() {
-  if (!WXGQFT) throw new Error('未设置变量 WX_ID');
+  if (!WXGQFT) {
+    // 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+    const auto = await resolveAccounts();
+    if (auto && auto.length) {
+      WXGQFT = auto.join('\n');
+    } else {
+      throw new Error('未设置变量 WX_ID');
+    }
+  }
   const accounts = parseAccounts(WXGQFT);
   if (!accounts.length) throw new Error('WX_ID 无账号');
 

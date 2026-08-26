@@ -569,7 +569,13 @@ async function checkCodeServer(appid) {
     return [];
   }
   // 解析 WX_ID：支持换行 / & 分隔，每行格式 identifier#alias
-  const rawList = (process.env.WX_ID || '').split(/[\n&]+/).map(v => v.trim()).filter(Boolean);
+  let rawWx = (process.env.WX_ID || '').trim();
+  if (!rawWx) {
+    // 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+    const auto = await resolveAccounts();
+    if (auto && auto.length) rawWx = auto.join('\n');
+  }
+  const rawList = rawWx.split(/[\n&]+/).map(v => v.trim()).filter(Boolean);
   if (!rawList.length) {
     $.log(`❌未配置 WX_ID 环境变量`);
     return [];

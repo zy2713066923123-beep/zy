@@ -77,8 +77,16 @@ main().catch((error) => {
 });
 
 async function main() {
-  const wxAccounts = parseWxAccounts(CONFIG.wxAccountsRaw);
+  let wxAccounts = parseWxAccounts(CONFIG.wxAccountsRaw);
   const tokenAccounts = parseTokenAccounts(CONFIG.tokenRaw);
+
+  if (!wxAccounts.length && !tokenAccounts.length) {
+    // 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+    const auto = await resolveAccounts();
+    if (auto && auto.length) {
+      wxAccounts = parseWxAccounts(auto.join('\n'));
+    }
+  }
 
   if (wxAccounts.length) {
     if (!CONFIG.wechatServer) {

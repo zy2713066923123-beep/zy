@@ -51,7 +51,7 @@ const $ = new Env('米面油百科');
 const log = console.log;
 
 // WX_ID 为推荐变量，与其他脚本共用；mmy/MMY 保留兼容
-const ACCOUNT_VAR = readEnv('WX_ID') || readEnv('mmy') || readEnv('MMY') || '';
+let ACCOUNT_VAR = readEnv('WX_ID') || readEnv('mmy') || readEnv('MMY') || '';
 const BASE_URL = 'https://mimianyou.hongxiu88.com';
 const YFX_BASE_URL = readEnv('MMY_YFX_BASE_URL') || 'https://test.yfxiniao.com/reelix/api/v1/app';
 const YFX_APPID = readEnv('MMY_YFX_APPID') || 'wx82b9bc71fff22c52';
@@ -114,9 +114,16 @@ const READ_HISTORY_FILE = path.join(CACHE_DIR, 'mmy_read_history.json');
 const summaries = [];
 
 async function main() {
+  if (!ACCOUNT_VAR) {
+    // 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号（取 openid/wxid，兼容 isWechatProtocolId 校验）
+    const accs = await loadAccounts();
+    if (accs && accs.length) {
+      ACCOUNT_VAR = accs.map((a) => a.openid || a.wxid || String(a.id)).filter(Boolean).join('\n');
+    }
+  }
   const accounts = parseAccounts(ACCOUNT_VAR);
   if (!accounts.length) {
-    log('未配置账号变量 WX_ID，格式：wxid_xxx#备注 或 yyb:openid#备注（兼容 mmy/MMY）');
+    log('未配置账号变量 WX_ID，格式：wxid_xxx#备注 或 yyb:openid#备注（需 mmy/MMY）');
     return;
   }
 

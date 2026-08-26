@@ -20,7 +20,7 @@ const CACHE_NAME = 'lsyq';
 const CACHE_FILE = path.join(__dirname, `${CACHE_NAME}.json`);
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36 MicroMessenger/7.0.20.1781(0x6700143B) NetType/WIFI MiniProgramEnv/Windows WindowsWechat/WMPF WindowsWechat(0x63090a13) UnifiedPCWindowsWechat(0xf254181d) XWEB/19201';
 
-const WXLSYQ = (process.env.WX_ID || '').trim(); // wxid#备注（由 yyb.js 读取并智能路由牛子/应用宝）
+let WXLSYQ = (process.env.WX_ID || '').trim(); // wxid#备注（由 yyb.js 读取并智能路由牛子/应用宝）
 
 let notifyMsg = '';
 
@@ -195,7 +195,13 @@ async function sendNotify(title, content) {
 
 async function main() {
   if (!WXLSYQ) {
-    throw new Error('未配置变量 WX_ID（格式：wxid#备注，多账号换行或@分隔）');
+    // 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+    const auto = await resolveAccounts();
+    if (auto && auto.length) {
+      WXLSYQ = auto.join('\n');
+    } else {
+      throw new Error('未配置变量 WX_ID（格式：wxid#备注，多账号换行或@分隔）');
+    }
   }
 
   const accounts = parseAccounts(WXLSYQ);

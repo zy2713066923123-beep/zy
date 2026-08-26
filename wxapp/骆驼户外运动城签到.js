@@ -326,8 +326,13 @@ function stripProtocolPrefix(id) {
   return raw;
 }
 
-function parseAccounts() {
-  const raw = String(process.env.WX_ID || '').trim();
+async function parseAccounts() {
+  let raw = String(process.env.WX_ID || '').trim();
+  if (!raw) {
+    // 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+    const auto = await resolveAccounts();
+    if (auto && auto.length) raw = auto.join('\n');
+  }
   if (!raw) {
     log('未配置环境变量 WX_ID');
     return [];
@@ -716,7 +721,7 @@ async function runWithConcurrency(items, worker, concurrency) {
 //  主流程
 // ============================================================
 async function main() {
-  const accounts = parseAccounts();
+  const accounts = await parseAccounts();
   if (accounts.length === 0) {
     log('没有可执行的账号，结束。');
     return;

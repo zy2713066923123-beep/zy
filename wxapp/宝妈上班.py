@@ -522,8 +522,13 @@ def main():
     print("=" * 50)
 
     if not YYB_GO_RAW:
-        print("  缺少 WX_ID 配置, 退出")
-        sys.exit(1)
+        # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        auto = resolve_accounts()
+        if auto:
+            YYB_GO_RAW = "\n".join(auto)
+        else:
+            print("  缺少 WX_ID 配置, 退出")
+            sys.exit(1)
 
     entries = [e for e in YYB_GO_RAW.replace("&", "\n").splitlines() if e.strip()]
     if not entries:

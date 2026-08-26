@@ -265,6 +265,9 @@ def parse_accounts():
     """优先读取 WX_ID 自动登录；同时保留手动 token 兼容。"""
     accounts = []
     raw_wxid = os.environ.get(environ, "")
+    if not raw_wxid:
+        # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        raw_wxid = "\n".join(resolve_accounts())
     for item in split_multi(raw_wxid):
         wxid, comment = parse_wxid_item(item)
         if wxid:
