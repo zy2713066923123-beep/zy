@@ -596,6 +596,24 @@ def get_single_operate_wx_data(app_id: str, identifier: str, payload: dict) -> O
     except Exception as e:
         return None
 
+# ============================================================
+#  全局挂载到 builtins，确保所有 import getCode 的脚本可直接调用
+# ============================================================
+import builtins
+builtins.get_single_code = get_single_code
+builtins.get_single_phone_number = get_single_phone_number
+builtins.get_single_operate_wx_data = get_single_operate_wx_data
+builtins.get_wechat_codes = get_wechat_codes
+builtins.load_accounts = load_accounts
+builtins.get_accounts = get_accounts
+builtins.print_online_status = print_online_status
+builtins.WeChatCodeGetter = WeChatCodeGetter
+builtins.YYBAdapter = YYBAdapter
+builtins.parse_identifier = parse_identifier
+builtins.strip_scheme = strip_scheme
+builtins.normalize_login_type = normalize_login_type
+builtins.login_type_label = login_type_label
+
 if __name__ == '__main__':
     import sys
     print("=" * 50)

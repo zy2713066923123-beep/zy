@@ -62,16 +62,16 @@ RETRY_BASE_DELAY = 3
 
 
 def normalize_wechat_server(raw: str) -> str:
-    server = (raw or "http://127.0.0.1:8069").strip().rstrip("/")
+    server = (raw or "http://127.0.0.1:8000").strip().rstrip("/")
     if not server:
-        return "http://127.0.0.1:8069"
+        return "http://127.0.0.1:8000"
     if not server.startswith(("http://", "https://")):
         server = "http://" + server
     for suffix in ("/api/v1", "/api"):
         if server.lower().endswith(suffix):
             server = server[: -len(suffix)].rstrip("/")
             break
-    return server or "http://127.0.0.1:8069"
+    return server or "http://127.0.0.1:8000"
 
 
 def resolve_local_path(name: str) -> Path:
@@ -83,7 +83,7 @@ def resolve_local_path(name: str) -> Path:
 
 
 WECHAT_SERVER_RAW = (
-    os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or os.getenv("YYB_WX_SERVER") or "http://127.0.0.1:8069"
+    os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or os.getenv("YYB_SERVER") or os.getenv("YYB_WX_SERVER") or "http://127.0.0.1:8000"
 )
 WECHAT_SERVER = normalize_wechat_server(WECHAT_SERVER_RAW)
 CACHE_FILE = resolve_local_path(os.getenv("JYK_CACHE_FILE") or (ENV_NAME + ".json"))

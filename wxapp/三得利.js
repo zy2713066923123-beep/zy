@@ -39,21 +39,13 @@ delete process.env.https_proxy;
 // PushPlus 通知Token（青龙环境变量）
 const PLUSPLUS_TOKEN = process.env.PLUSPLUS_TOKEN || "";
 
-// 从环境变量 WX_ID 读取内网服务器，支持用换行或&分隔多个IP:端口
-let SERVERS = [];
-if (process.env.WX_ID) {
-    SERVERS = process.env.WX_ID
-        .split(/\r?\n|&/) // 兼容Windows换行\r\n、Linux换行\n
+// 从环境变量 WX_ID 读取账号，支持用换行或&分隔
+function getAccountList() {
+    return (process.env.WX_ID || "")
+        .split(/\r?\n|&/)
         .map(item => item.trim())
-        .filter(item => item.length > 0); // 过滤空行、纯空格行
+        .filter(Boolean);
 }
-// 校验服务器列表，无配置直接终止脚本
-if (SERVERS.length === 0) {
-    console.error("❌ 未读取到环境变量 WX_ID，请配置 WX_ID，多个地址用换行或&分隔，格式示例：");
-    console.error("192.168.1.21:8088\n192.168.31.111:8088");
-    process.exit(1);
-}
-console.log(`✅ 成功读取 ${SERVERS.length} 台内网服务器：\n${SERVERS.join("\n")}`);
 
 // 品赞代理配置（青龙环境变量）
 const PROXY_API = process.env.PROXY_API || ""; // 代理提取API链接
@@ -544,9 +536,14 @@ async function runAccount(server, globalProxyAgent) {
         globalProxyAgent = await getValidProxy("全局共用");
     }
 
+    const servers = getAccountList();
+    if (!servers.length) {
+        console.log("未配置或同步到可用账号 WX_ID，脚本退出");
+        return;
+    }
     const results = [];
-    // 顺序执行所有服务器
-    for (const server of SERVERS) {
+    // 顺序执行所有账号
+    for (const server of servers) {
         const res = await runAccount(server, globalProxyAgent);
         results.push(res);
         // 账号间间隔2秒

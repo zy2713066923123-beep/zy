@@ -143,8 +143,16 @@ def get_uc_access_token_by_wxid(wxid: str) -> str:
                 return cached_token
 
     client = UcAccessTokenClient(APPID)
-    client.get_wx_code(wxid)
-    client.get_uc_token()
+    try:
+        code = client.get_wx_code(wxid)
+    except Exception:
+        code = None
+    if not code:
+        return None
+    try:
+        client.get_uc_token()
+    except Exception:
+        return None
 
     new_cache_data = {
         'uc_access_token': client.uc_access_token,

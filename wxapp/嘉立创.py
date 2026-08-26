@@ -47,7 +47,7 @@ SCRIPT_NAME = "JLC 嘉立创签到"
 DEBUG = False
 DEBUG_ENV = {
     "JLC": "wxid_xxxxxxxx#测试号",
-    "WECHAT_SERVER": "http://192.168.31.196:8787",
+    "WECHAT_SERVER": "http://127.0.0.1:8000",
 }
 if DEBUG:
     for _k, _v in DEBUG_ENV.items():
@@ -60,8 +60,8 @@ PLATFORM_TYPE = os.getenv("JLC_PLATFORM_TYPE", "MP-WEIXIN").strip()
 SOURCE = os.getenv("JLC_SOURCE", "2").strip()
 
 # 微信协议服务地址
-DEFAULT_WECHAT_SERVER = "http://192.168.31.196:8787"
-WECHAT_SERVER = os.getenv("WECHAT_SERVER", DEFAULT_WECHAT_SERVER).strip().rstrip("/")
+DEFAULT_WECHAT_SERVER = "http://127.0.0.1:8000"
+WECHAT_SERVER = (os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or DEFAULT_WECHAT_SERVER).strip().rstrip("/")
 WX_AUTH = os.getenv("WX_ID", "")
 
 # 嘉立创小程序 appid

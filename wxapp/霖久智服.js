@@ -93,7 +93,10 @@ async function main() {
   const manualAccounts = parseManualAccounts(CONFIG.ljzfData);
   const accounts = [...wxAccounts, ...manualAccounts];
 
-  if (!accounts.length) throw new Error('未配置 WX_ID 或 ljzfData，请至少填写一项配置');
+  if (!accounts.length) {
+    log('未配置或同步到可用账号 WX_ID / ljzfData，脚本安全退出');
+    return;
+  }
   wxAccounts
     .filter((account) => !account.mobile)
     .forEach((account) => log(`⚠️ 账号 ${account.remark} 未从变量解析到手机号，将尝试使用 quickLogin/缓存返回的手机号`));

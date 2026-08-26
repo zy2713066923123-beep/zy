@@ -33,21 +33,20 @@ PLATFORM = 12
 
 WX_IDS = [s.strip() for s in os.getenv("WX_ID", "").replace("&", "\n").splitlines() if s.strip()]
 if not WX_IDS:
-    print("❌ 未配置环境变量 WX_ID")
-    print("格式：wxid#备注 或 openid，多账号换行或 & 分隔")
-    sys.exit(1)
+    try:
+        accs = load_accounts()
+        if accs:
+            WX_IDS = [acc.get("openid") or str(acc.get("id")) for acc in accs]
+    except Exception:
+        pass
 
-WECHAT_SERVER = (os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or "").strip()
-YYB_SERVER = (os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or "").strip()
-if not WECHAT_SERVER and not YYB_SERVER:
-    print("❌ 未配置取码服务地址，请设置 WX_SERVER")
-    sys.exit(1)
-if WECHAT_SERVER:
-    os.environ["WECHAT_SERVER"] = WECHAT_SERVER
-if YYB_SERVER:
-    os.environ["YYB_SERVER"] = YYB_SERVER
+WECHAT_SERVER = (os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or "http://127.0.0.1:8000").strip()
+YYB_SERVER = (os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or "http://127.0.0.1:8000").strip()
+os.environ["WECHAT_SERVER"] = WECHAT_SERVER
+os.environ["YYB_SERVER"] = YYB_SERVER
 
-print(f"✅ 读取到 {len(WX_IDS)} 个微信账号，自动路由牛子/YYB 双协议")
+if WX_IDS:
+    print(f"✅ 读取到 {len(WX_IDS)} 个微信账号，自动路由牛子/YYB 双协议")
 
 
 def xiaofujia_login(code: str, mobile_code: str) -> dict | None:

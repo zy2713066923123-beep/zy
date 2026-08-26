@@ -1462,8 +1462,12 @@ if __name__ == "__main__":
 
     accounts = parse_accounts(WX_ID_RAW)
     if not accounts:
-        print("❌ 未找到环境变量 WX_ID 或 WXIDXJ，请设置账号")
-        sys.exit(1)
+        try:
+            accs = load_accounts()
+            if accs:
+                accounts = [{"id": acc.get("openid") or str(acc.get("id")), "note": acc.get("nickname") or acc.get("alias") or f"账号_{acc.get('id')}"} for acc in accs]
+        except Exception:
+            pass
 
     CACHE_FILE = Path(__file__).parent / "xijiutoken.json"
 

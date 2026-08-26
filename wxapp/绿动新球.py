@@ -64,23 +64,20 @@ WX_IDS = [
 ]
 
 if not WX_IDS:
-    print("❌ 未配置环境变量 WX_ID，请设置后重试")
-    print("格式：wxid#备注 或 openid，多账号换行或 & 分隔")
-    exit(1)
+    try:
+        accs = load_accounts()
+        if accs:
+            WX_IDS = [acc.get("openid") or str(acc.get("id")) for acc in accs]
+    except Exception:
+        pass
 
-YYB_SERVER = (os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or "").strip()
-WECHAT_SERVER = (os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or "").strip()
+YYB_SERVER = (os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or "http://127.0.0.1:8000").strip()
+WECHAT_SERVER = (os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or "http://127.0.0.1:8000").strip()
+os.environ["YYB_SERVER"] = YYB_SERVER
+os.environ["WECHAT_SERVER"] = WECHAT_SERVER
 
-if not YYB_SERVER and not WECHAT_SERVER:
-    print("❌ 未配置取码服务地址，请设置 YYB_SERVER 或 WECHAT_SERVER 后重试")
-    exit(1)
-
-# 不强制 SERVER_TYPE，由统一 getCode 模块按 WX_ID 标识格式自动路由双协议
-if YYB_SERVER:
-    os.environ["YYB_SERVER"] = YYB_SERVER
-if WECHAT_SERVER:
-    os.environ["WECHAT_SERVER"] = WECHAT_SERVER
-print(f"✅ 读取到 {len(WX_IDS)} 个微信账号，自动路由牛子/YYB 双协议")
+if WX_IDS:
+    print(f"✅ 读取到 {len(WX_IDS)} 个微信账号，自动路由牛子/YYB 双协议")
  
 PLUSPLUS_TOKEN = os.getenv("PLUSPLUS_TOKEN", "")
 PROXY_API = os.getenv("PROXY_API", "")

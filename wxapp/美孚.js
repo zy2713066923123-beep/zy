@@ -36,7 +36,7 @@ const APP_VERSION = '4.8.9';
 const CACHE_FILE = path.join(__dirname, 'mfwx.json');
 
 const CONFIG = {
-  wechatServer: trimRightSlash(process.env.WX_SERVER || process.env.WECHAT_SERVER || process.env.MF_WECHAT_SERVER || ''),
+  wechatServer: trimRightSlash(process.env.WX_SERVER || process.env.YYB_SERVER || process.env.WECHAT_SERVER || process.env.MF_WECHAT_SERVER || 'http://127.0.0.1:8000'),
   wxAccountsRaw: process.env.WX_ID || '',
   tokenRaw: process.env.mftoken || process.env.MFTOKEN || '',
   timeout: toPositiveInt(process.env.MF_TIMEOUT, 20000),

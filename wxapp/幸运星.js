@@ -52,6 +52,7 @@ require('./getCode.js'); // 自动同步 yyb_go 存活账号
  * ===================================================================== */
 const crypto = require('crypto');
 const https = require('https');
+const { getSingleCode } = require('./getCode.js');
 
 const DEFAULT_CONFIG = {
   appKey: '12574478',
@@ -218,12 +219,6 @@ class EleMtop {
  * ===================================================================== */
 const fs = require('fs');
 const path = require('path');
-// 共享微信小程序 code 获取模块（同目录 wxapp/getCode.js），自动路由牛子/应用宝
-let getSingleCode = null;
-try {
-} catch (e) {
-  try { getSingleCode = require('./wxapp/getCode.js').getSingleCode; } catch (e2) { getSingleCode = null; }
-}
 
 // 饿了么小程序 AppID（点餐小程序，须与 getCode/YYB 服务端注册的一致）。
 // 注意：算法资源 mor.v.js / awsc_params.cjs 固定使用 wxece3a9a4c82f58c9，默认值必须与此一致；

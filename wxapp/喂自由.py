@@ -550,8 +550,15 @@ if __name__ == "__main__":
             WXIDS.append((line, line))
 
     if not WXIDS:
-        log.error("未配置环境变量 WX_ID")
-        exit(1)
+        try:
+            accs = load_accounts()
+            if accs:
+                for acc in accs:
+                    ident = acc.get("openid") or str(acc.get("id"))
+                    alias = acc.get("nickname") or acc.get("alias") or f"账号_{acc.get('id')}"
+                    WXIDS.append((ident, alias))
+        except Exception:
+            pass
 
     CACHE_FILE = pathlib.Path(__file__).parent / "wzy_token.json"
 

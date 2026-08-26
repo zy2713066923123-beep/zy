@@ -51,8 +51,15 @@ if _wx_id_raw:
             ACCOUNTS.append((line, line))
 
 if not ACCOUNTS:
-    print("❌ 未配置环境变量 WX_ID")
-    exit(1)
+    try:
+        accs = load_accounts()
+        if accs:
+            for acc in accs:
+                ident = acc.get("openid") or str(acc.get("id"))
+                alias = acc.get("nickname") or acc.get("alias") or f"账号_{acc.get('id')}"
+                ACCOUNTS.append((ident, alias))
+    except Exception:
+        pass
 
 print(f"✅ 成功读取 {len(ACCOUNTS)} 个账号")
 print("-" * 60 + "\n")

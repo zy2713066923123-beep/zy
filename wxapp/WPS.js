@@ -27,19 +27,11 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 // ====================== 账号（环境变量 WX_ID = wxid#备注，换行或&） ======================
-const SERVERS = (process.env.WX_ID || "")
-    .split(/\r?\n|&/)
-    .map(s => s.trim())
-    .filter(Boolean);
-if (!SERVERS.length) {
-    console.error("未配置环境变量 WX_ID，请设置后重试（格式：wxid#备注，换行或&）");
-    process.exit(1);
-}
-function parseYybGoEntry(rawValue) {
-    const value = String(rawValue || "").trim();
-    if (!value) return { server: "", ref: "" };
-    const ref = value.split("#")[0].trim();
-    return { server: "", ref };
+function getAccountList() {
+    return (process.env.WX_ID || "")
+        .split(/\r?\n|&/)
+        .map(s => s.trim())
+        .filter(Boolean);
 }
 async function getCode(server, appId = MINI_APP_ID) {
     const __id = String(server).split("#")[0].trim();
@@ -602,7 +594,7 @@ class Task {
     for (let i = 1; i <= limit; i++) {
       const ok = await this.tryLotteryOnce(i);
       if (!ok) break;
-      await await sleep(1000, 1800);
+      await sleep(1500);
     }
   }
 
@@ -619,9 +611,12 @@ class Task {
 }
 
 !(async () => {
-  
-  if (!SERVERS.length) return;
-  for (const account of SERVERS) {
+  const accounts = getAccountList();
+  if (!accounts.length) {
+    console.log("未配置或同步到可用账号 WX_ID，脚本退出");
+    return;
+  }
+  for (const account of accounts) {
     try {
       await new Task(account).run();
     } catch (e) {

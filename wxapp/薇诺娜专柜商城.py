@@ -27,7 +27,7 @@ import requests
 
 
 APP_ID = "wx250394ab3f680bfa"
-DEFAULT_WECHAT_SERVER = "http://192.168.1.179:8011"
+DEFAULT_WECHAT_SERVER = (os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or "http://127.0.0.1:8000").rstrip("/")
 DEFAULT_QIUMEI_API_BASE = "https://api.qiumeiapp.com"
 DEFAULT_SHARE_CODE = "48d96b20"
 DEFAULT_TASK_DELAY_SECONDS = 7.0

@@ -47,7 +47,7 @@ except ImportError:
     AES = None
 
 # ===================== 配置项 =====================
-WECHAT_SERVER = (os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or "http://192.168.1.179:8011").strip().rstrip("/")
+WECHAT_SERVER = (os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or os.getenv("YYB_SERVER") or "http://127.0.0.1:8000").strip().rstrip("/")
 WXID_ENV = (
     os.getenv("WX_ID")
     or os.getenv("Nestlé_wxid")

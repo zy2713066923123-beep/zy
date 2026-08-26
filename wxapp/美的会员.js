@@ -40,28 +40,15 @@ const APPID = "wx49a622805968d156";
 //              - 以 wxid_ 开头或普通标识 → 牛子协议
 //              - 纯数字 / 以 o 开头的 openid（≥20位）→ YYB 应用宝协议
 //              - 由统一 getCode 模块按标识格式自动路由，无需手动指定
-//   YYB_SERVER YYB 应用宝取码服务地址（YYB 账号时使用，如 http://127.0.0.1:8088）
-//   WECHAT_SERVER 牛子取码服务地址（牛子账号时使用）
-const WX_IDS = (process.env.WX_ID || "")
-    .split(/\r?\n|&/)
-    .map(s => s.trim())
-    .filter(Boolean);
-
-if (!WX_IDS.length) {
-    console.log("❌ 未配置环境变量 WX_ID，请设置后重试");
-    console.log("格式：wxid#备注 或 openid，多账号换行或 & 分隔");
-    process.exit(1);
+function getAccountList() {
+    return (process.env.WX_ID || "")
+        .split(/\r?\n|&/)
+        .map(s => s.trim())
+        .filter(Boolean);
 }
 
-const SERVER = (process.env.WX_SERVER || process.env.WX_SERVER || process.env.YYB_SERVER || process.env.WECHAT_SERVER || "").trim();
-
-if (!SERVER) {
-    console.log("❌ 未配置取码服务地址，请设置 WX_SERVER 后重试");
-    process.exit(1);
-}
-
+const SERVER = (process.env.WX_SERVER || process.env.YYB_SERVER || process.env.WECHAT_SERVER || "http://127.0.0.1:8000").trim();
 if (!process.env.WX_SERVER) process.env.WX_SERVER = SERVER;
-console.log(`✅ 读取到 ${WX_IDS.length} 个微信账号，自动路由牛子/YYB 双协议`);
 
 const PLUSPLUS_TOKEN = process.env.PLUSPLUS_TOKEN || "";
 const PROXY_API = process.env.PROXY_API || "";
@@ -748,14 +735,20 @@ ${icon} 结果：${res.success ? "成功" : "失败"}
 (async () => {
     logTitle();
 
+    const wxIds = getAccountList();
+    if (!wxIds.length) {
+        console.log("未配置或同步到可用账号 WX_ID，脚本退出");
+        return;
+    }
+    console.log(`✅ 读取到 ${wxIds.length} 个微信账号，自动路由牛子/YYB 双协议`);
     const results = [];
 
-    for (let i = 0; i < WX_IDS.length; i++) {
+    for (let i = 0; i < wxIds.length; i++) {
         try {
-            const res = await runAccount(i + 1, WX_IDS.length, WX_IDS[i]);
+            const res = await runAccount(i + 1, wxIds.length, wxIds[i]);
             results.push(res);
         } catch (e) {
-            console.log(`❌ [主程序] ${WX_IDS[i]} 执行异常: ${e.message}`);
+            console.log(`❌ [主程序] ${wxIds[i]} 执行异常: ${e.message}`);
 
             results.push({
                 server: WX_IDS[i],

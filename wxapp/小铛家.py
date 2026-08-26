@@ -911,7 +911,7 @@ def main() -> None:
     print("=" * 50)
     print("小铛家签到脚本")
     print("=" * 50)
-    print(f"微信中转服务端: {os.environ.get("WX_SERVER") or os.environ.get("WECHAT_SERVER") or os.environ.get("YYB_SERVER") or DEFAULT_WECHAT_SERVER}")
+    print(f"微信中转服务端: {os.environ.get('WX_SERVER') or os.environ.get('WECHAT_SERVER') or os.environ.get('YYB_SERVER') or DEFAULT_WECHAT_SERVER}")
     print(f"共 {len(accounts)} 个账号")
     if proxy_api:
         print(f"已启用品赞代理，代理类型: {proxy_type}")
