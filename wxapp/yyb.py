@@ -463,7 +463,11 @@ def resolve_accounts(env_name: str = "") -> List[str]:
     try:
         accs = load_accounts()
         if accs:
-            ids = [str(a.get("openid") or a.get("wxid") or a.get("id")) for a in accs if (a.get("openid") or a.get("wxid") or a.get("id"))]
+            # 优先返回自增 id（纯数字），保证 _resolve_ref 走 isdigit 分支直接命中，
+            # 避免 openid/wxid 字段名或取值与 Go 端不一致导致 account not found。
+            ids = [str(a.get("id")) for a in accs if a.get("id") is not None]
+            if not ids:
+                ids = [str(a.get("openid") or a.get("wxid") or a.get("id")) for a in accs if (a.get("openid") or a.get("wxid") or a.get("id"))]
             print(f"[yyb] 自动从 yyb_go 同步到 {len(ids)} 个存活账号")
             return ids
     except Exception as e:

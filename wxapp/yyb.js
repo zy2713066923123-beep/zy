@@ -518,7 +518,12 @@ async function resolveAccounts(envName) {
     try {
         const accs = await loadAccounts();
         if (accs && accs.length) {
-            const ids = accs.map(a => String(a.openid || a.wxid || a.id)).filter(Boolean);
+            // 优先返回自增 id（纯数字），保证 _resolveRef 走 isdigit 分支直接命中，
+            // 避免 openid/wxid 字段名或取值与 Go 端不一致导致 account not found。
+            let ids = accs.map(a => (a.id != null ? String(a.id) : '')).filter(Boolean);
+            if (!ids.length) {
+                ids = accs.map(a => String(a.openid || a.wxid || a.id)).filter(Boolean);
+            }
             console.log(`[yyb] 自动从 yyb_go 同步到 ${ids.length} 个存活账号`);
             return ids;
         }

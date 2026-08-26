@@ -429,8 +429,24 @@ if __name__ == '__main__':
             if raw:
                 accounts.append(('hxek', raw))
 
+    # 未配置变量时，自动从 yyb_go 拉取存活账号（走 WX_ID/getCode 模式）
     if not accounts:
-        print("未填写 WX_ID 或 HXEK 变量")
+        try:
+            from yyb import load_accounts
+            accs = load_accounts()
+            if accs:
+                for acc in accs:
+                    # 优先用自增 id（纯数字），保证 _resolve_ref 走 isdigit 分支直接命中
+                    ref = str(acc.get('id') or acc.get('openid') or acc.get('wxid') or '').strip()
+                    if ref:
+                        accounts.append(('wxid', ref))
+                if accounts:
+                    print(f"自动从 yyb_go 拉取到 {len(accounts)} 个存活账号")
+        except Exception as _e:
+            print(f"自动拉取 yyb_go 账号失败: {_e}")
+
+    if not accounts:
+        print("未填写 WX_ID 或 HXEK 变量，且未从 yyb_go 拉取到账号")
         exit()
 
     # 统计信息
