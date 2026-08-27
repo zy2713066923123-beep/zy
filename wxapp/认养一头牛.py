@@ -3,6 +3,7 @@
 import yyb  # 自动同步 yyb_go 存活账号
 # name: 认养一头牛
 # cron: 8 16,04 * * *
+"""
 认养一头牛签到（YYB Go 版）
 
 功能：

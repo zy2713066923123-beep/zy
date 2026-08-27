@@ -2,8 +2,7 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 ﻿// name:广汽
 /**
  * 广汽丰田新能源 - 微信协议版（无babel依赖）
- * cron: 32 10,22 * * *
-变量：
+ * cron: 32 10,22 * * * * 变量：
  *   WX_ID=wxid#备注#deviceId#UA  (多号用换行或&，除了wxid其它皆选填，会自动生成一号一UA设备ID)
  *   WECHAT_SERVER/YYB_SERVER/SERVER_TYPE 在 yyb.js 中配置（微信协议地址）
  * 缓存：gqft.json

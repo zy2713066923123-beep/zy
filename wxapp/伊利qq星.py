@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 import yyb  # 自动同步 yyb_go 存活账号
 # name: 伊利qq星
-# cron: 40 07,19 * * *
-# -*- coding: utf-8 -*-
+# cron: 40 07,19 * * *# -*- coding: utf-8 -*-
 
 import json
 import re

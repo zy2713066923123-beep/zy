@@ -4,8 +4,7 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 @Author: sm
 @Date: 2026.05.31
 @Description: 戴可思小程序签到
-cron: 20 11,23 * * *
-变量名：dks
+cron: 20 11,23 * * *变量名：dks
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
 ------------------------------------------
 

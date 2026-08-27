@@ -4,8 +4,7 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 @Author: sm
 @Date: 2024.06.07 19:15
 @Description:  蜜雪冰城APP/小程序
-cron: 56 15,03 * * *
-#Notice:
+cron: 56 15,03 * * *#Notice:   
 变量名：mxbc
 变量值：wx_server 里的 openid/账号标识，多账号&或换行
 ⚠️【免责声明】

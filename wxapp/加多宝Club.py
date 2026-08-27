@@ -3,6 +3,7 @@
 import yyb  # 自动同步 yyb_go 存活账号
 # name: 加多宝Club
 # cron: 12 08,20 * * *
+"""
 加多宝Club小程序（YYB Go版）
 
 功能：

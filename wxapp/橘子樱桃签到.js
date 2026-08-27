@@ -4,8 +4,7 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 @Author: sm
 @Date: 2026.06.01
 @Description: 橘子樱桃微信小程序签到
-cron: 28 12,00 * * *
-变量名：juziyingtao
+cron: 28 12,00 * * *变量名：juziyingtao
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
   wxid#备注  多个换行
 ------------------------------------------

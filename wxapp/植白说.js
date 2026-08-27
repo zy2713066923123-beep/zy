@@ -4,8 +4,7 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 @Author: sm
 @Date: 2026.06.01
 @Description:  植白说小程序
-cron: 24 12,00 * * *
-#Notice:
+cron: 24 12,00 * * *#Notice:
 变量名称：zbs
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
   wxid#备注  多个换行

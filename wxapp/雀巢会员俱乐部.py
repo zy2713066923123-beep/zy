@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import yyb  # 自动同步 yyb_go 存活账号
-# cron:56 16,04 * * *
+# cron: 56 16,04 * * *
 # name: 雀巢会员俱乐部
+"""
 脚本名称：雀巢会员俱乐部
 说明：
   通过 yyb.py 获取 code，再调用雀巢登录接口换 token 后执行签到。

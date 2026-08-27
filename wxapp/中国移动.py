@@ -1,6 +1,7 @@
 import yyb  # 自动同步 yyb_go 存活账号
 # name:中国移动
 # cron:8 07,19 * * *
+"""
 中国移动小程序动态 code 版
 
 功能：

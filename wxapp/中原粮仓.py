@@ -1,6 +1,5 @@
 # name:中原粮仓
-# cron:4 07,19 * * *
-import yyb  # 自动同步 yyb_go 存活账号（与其他脚本一致）
+# cron:4 07,19 * * *import yyb  # 自动同步 yyb_go 存活账号（与其他脚本一致）
 # 当前脚本整合自 wxapp 下的 1.py（抽奖）与 2.py（签到/跳一跳/冲浪）
 
 import os

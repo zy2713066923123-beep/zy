@@ -3,8 +3,8 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 // name:创维小程序
 /**
  * 创维小程序
- * cron: 8 08,20 * * *
-流程：
+ * cron: 8 08,20 * * * *
+ * 流程：
  * wxid -> WECHAT_SERVER取code -> /v2/user/exchange -> ticket -> /v2/user/signin -> Authorization
  * -> 固定5个任务：/userScoreStatusInfo + /v1/complete-task/{taskCode}
  * -> 额外签到（兑吧连续签到）：index-nav(register) -> duiba-nologin -> autoLogin -> doSign

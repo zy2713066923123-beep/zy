@@ -4,8 +4,7 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 @Author: sm
 @Date: 2024.06.07 19:15
 @Description:  
-cron: 32 06,18 * * *
-#Notice:
+cron: 32 06,18 * * *#Notice:   
 stokke 微信小程序 每周签到得积分 
 变量名称：stokke
 ⚠️【免责声明】

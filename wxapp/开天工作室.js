@@ -11,7 +11,7 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
  * @date 2024/08/19
  *
  * 变量名：KTGZS_TOKEN
- * cron: 44 10,22 * * *
+ * cron: 44 10,22 * * * */
 const axios = require('axios');
 
 // ---- 轻量运行时（替代 ../utils/initScript）----

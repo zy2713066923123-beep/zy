@@ -1,7 +1,6 @@
 require('./yyb.js'); // 自动同步 yyb_go 存活账号
 /*
-cron: 24 07,19 * * *
-name: 云朵充电
+cron: 24 07,19 * * *name: 云朵充电
 变量: YUNDUO_TOKEN
 值格式: 仅Token 或 Token&OpenID
 */

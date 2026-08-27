@@ -4,8 +4,7 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 @Author: sm
 @Date: 2026.06.01
 @Description:  康师傅畅饮社
-cron: 40 10,22 * * *
-#Notice:
+cron: 40 10,22 * * *#Notice:
 康师傅畅饮社小程序
 变量名 ksfcys
 变量值：wx_server 里的 openid/账号标识，多账户&或换行

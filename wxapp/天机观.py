@@ -3,6 +3,7 @@
 import yyb  # 自动同步 yyb_go 存活账号
 # cron: 44 09,21 * * *
 # name: 天机观
+"""
 作者: ChatGPT
 名称: 天机观自动任务（getCode版）
 功能: 通过共享 getCode 模块自动获取 code，完成登录后自动执行签到/分享商品/观看广告

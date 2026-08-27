@@ -3,6 +3,7 @@
 import yyb  # 自动同步 yyb_go 存活账号
 # name: RIO会员
 # cron: 12 06,18 * * *
+"""
 RIO会员小程序签到（YYB Go版）
 
 功能：

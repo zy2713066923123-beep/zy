@@ -4,8 +4,7 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 @Author: sm
 @Date: 2026.05.31
 @Description: 好人家签到
-cron: 56 09,21 * * *
-变量名：hrj
+cron: 56 09,21 * * *变量名：hrj
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
 ------------------------------------------
 

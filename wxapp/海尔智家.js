@@ -4,8 +4,7 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 @Author: sm
 @Date: 2024.06.07 19:15
 @Description:  海尔智家
-cron: 12 13,01 * * *
-#Notice:
+cron: 12 13,01 * * *#Notice:   
 变量名hezj
 变量值填写 wx_server 里的 openid/账号标识，多账户&或换行
   wxid#备注  多个换行

@@ -1,7 +1,6 @@
 import yyb  # 自动同步 yyb_go 存活账号
 
-# cron: 0 17,05 * * *
-#!/usr/bin/env python3
+# cron: 0 17,05 * * *#!/usr/bin/env python3
 # name: 雀巢健康
 # -*- coding: utf-8 -*-
 """

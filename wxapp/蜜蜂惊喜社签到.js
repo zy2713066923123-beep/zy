@@ -4,8 +4,7 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 @Author: sm
 @Date: 2026.06.01
 @Description: 蜜蜂惊喜社微信小程序签到
-cron: 52 15,03 * * *
-变量名：mifengjingxishe
+cron: 52 15,03 * * *变量名：mifengjingxishe
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
   wxid#备注  多个换行
 ------------------------------------------

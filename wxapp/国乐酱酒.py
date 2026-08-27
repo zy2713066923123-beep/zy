@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 import yyb  # 自动同步 yyb_go 存活账号
 # name: 国乐酱酒
-# cron: 28 09,21 * * *
-# -*- coding: utf-8 -*-
+# cron: 28 09,21 * * *# -*- coding: utf-8 -*-
 
 import os
 import time

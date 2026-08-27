@@ -4,7 +4,7 @@ import yyb  # 自动同步 yyb_go 存活账号
 变量: WX_SERVER (必填，yyb_go 服务地址)；WX_ID (可选白名单，留空自动拉取存活账号) 
     PROXY_API_URL (代理api，返回一条txt文本，内容为代理ip:端口)
 定时: 一天两次
-cron: 24 14,02 * * *
+cron: 24 14,02 * * *"""
 # name: 紫金
 
 import os

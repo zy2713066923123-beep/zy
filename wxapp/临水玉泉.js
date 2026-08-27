@@ -3,8 +3,7 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 /**
 微信协议-临水玉泉（yyb.js 统一版）
 变量：WX_ID  wxid#备注 多号换行
-cron: 16 07,19 * * *
-WX_ID 由共享 yyb.js 读取并智能路由 牛子/应用宝
+cron: 16 07,19 * * *  WX_ID 由共享 yyb.js 读取并智能路由 牛子/应用宝
   WECHAT_SERVER / YYB_SERVER / SERVER_TYPE 在 yyb.js 中配置
  */
 

@@ -2,6 +2,7 @@
 import yyb  # 自动同步 yyb_go 存活账号
 # cron: 40 14,02 * * *
 # name: 统一梦时代
+"""
 统一梦时代（微盟小程序 wx532ecb3bdaaf92f9）：积分签到 + 茄皇农场
 Python 移植自统一梦时代.js（全量）
 

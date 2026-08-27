@@ -4,7 +4,8 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 @Author: sm
 @Date: 2026.07.29
 @Description:  大物是也小程序签到
-cron: 36 09,21 * * *
+cron: 36 09,21 * * *------------------------------------------
+
 变量：
   WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:8000）
   YYB_SERVER     (兼容别名) yyb_go 服务地址
