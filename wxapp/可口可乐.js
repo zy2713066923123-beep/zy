@@ -74,11 +74,21 @@ class Task {
     }
 
     async run() {
-        //随机延迟5-30s 模拟人工操作
+        //随机延迟5-30s 模拟营销
         await $.wait(Math.floor(Math.random() * 20 + 5) * 1000);
-        let { data: codeRes } = await wechat.getCode(this.wcsid)
-        if (codeRes.status) {
-            await this.getUserToken(codeRes.data.code)
+        // token 缓存：有效期内复用，避免每次运行都重新取 code（规避微信限流）
+        const cached = getCachedToken('icoke', this.wcsid);
+        if (cached) {
+            this.token = cached.token;
+            $.log(`🌸账号[${this.index}] 命中token缓存，跳过取code`)
+        } else {
+            let { data: codeRes } = await wechat.getCode(this.wcsid)
+            if (codeRes.status) {
+                await this.getUserToken(codeRes.data.code)
+            }
+            if (this.token) {
+                saveCachedToken('icoke', this.wcsid, this.token);
+            }
         }
         if (!this.token) {
             $.log(`账号[${this.index}] 获取用户Token失败❌`)

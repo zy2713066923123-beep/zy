@@ -650,13 +650,24 @@ async function runAccount(index, total, openid) {
     console.log(`⏳ [延迟] 启动延迟 ${(delay / 1000).toFixed(1)}s`);
     await sleep(delay);
 
-    const code = await yyb.getSingleCode(APPID, openid);
-    if (!code) {
-        result.error = "获取 code 失败";
-        return result;
-    }
+    // token 缓存：有效期内复用，避免每次运行都重新取 code（规避微信限流）
+    const cached = getCachedToken('midea', openid, { maxAgeMs: 6 * 3600 * 1000 });
+    let login = cached ? { cookie: cached.cookie, ucAccessToken: cached.ucAccessToken } : null;
+    if (login && (login.cookie || login.ucAccessToken)) {
+        console.log(`✅ [缓存] ${openid} 命中token缓存，跳过取code`);
+    } else {
+        const code = await yyb.getSingleCode(APPID, openid);
+        if (!code) {
+            result.error = "获取 code 失败";
+            return result;
+        }
 
-    const login = await loginByCode(code, proxyAgent, proxyKey);
+        login = await loginByCode(code, proxyAgent, proxyKey);
+
+        if (login.cookie || login.ucAccessToken) {
+            saveCachedToken('midea', openid, { cookie: login.cookie, ucAccessToken: login.ucAccessToken });
+        }
+    }
 
     result.cookie = login.cookie ? mask(login.cookie) : "-";
     result.ucAccessToken = login.ucAccessToken ? mask(login.ucAccessToken) : "-";

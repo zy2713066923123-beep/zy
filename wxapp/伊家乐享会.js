@@ -495,13 +495,21 @@ async function runOne(account) {
   log(`\n================ ${account.remark} ================`);
   log(`🧩 ${account.remark} 使用微信 code 服务登录`);
 
-  const code = await getWxCode(account.wxid);
-  const loginResp = await loginByCode(code);
-  if (!isSuccess(loginResp) || !loginResp?.data?.accessToken) {
-    throw new Error(`登录失败: ${extractErrorMsg(loginResp)}`);
+  // token 缓存：有效期内复用，避免每次运行都重新取 code（规避微信限流）
+  let token = null;
+  const cached = getCachedToken('yijia', account.wxid);
+  if (cached) {
+    token = cached.token;
+    log(`🧩 ${account.remark} 命中token缓存，跳过取code`);
+  } else {
+    const code = await getWxCode(account.wxid);
+    const loginResp = await loginByCode(code);
+    if (!isSuccess(loginResp) || !loginResp?.data?.accessToken) {
+      throw new Error(`登录失败: ${extractErrorMsg(loginResp)}`);
+    }
+    token = String(loginResp.data.accessToken);
+    saveCachedToken('yijia', account.wxid, token);
   }
-
-  const token = String(loginResp.data.accessToken);
 
   const [beforeUser, beforeScoreResp, taskCenter] = await Promise.all([
     getUserInfo(token),

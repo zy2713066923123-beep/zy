@@ -390,47 +390,55 @@ async function runAccount(wxid, globalProxyAgent) {
         $.log(`[${alias}] 启动延迟 ${startDelay / 1000}s`);
         await sleep(startDelay);
 
-        // 1. 获取code（使用标准 yyb.js 模块）
-        let code = await getWxCode(wxid, APPID);
-        if (!code) {
-            result.error = "获取code失败";
-            return result;
-        }
-
-        // 2. 登录获取token
-        let login = await wxLogin(code, UA, proxyAgent, alias);
-        if (!login) {
-            result.error = "登录请求无响应";
-            $.log(`[${alias}] 登录失败：无响应数据`);
-            return result;
-        }
-
-        if (login.code != 200) {
-            result.error = `登录失败：${login.message || "未知错误"}`;
-            $.log(`[${alias}] ${result.error}`);
-            return result;
-        }
-
-        // 多路径尝试提取token，兼容不同响应结构
+        // token 缓存：有效期内复用，避免每次运行都重新取 code（规避微信限流）
         let token = null;
-        if (login.data?.userInfo?.token) {
-            token = login.data.userInfo.token;
-        } else if (login.data?.token) {
-            token = login.data.token;
-        } else if (login.token) {
-            token = login.token;
-        } else if (login.data?.access_token) {
-            token = login.data.access_token;
-        }
+        const cached = getCachedToken('feimayi', wxid, { maxAgeMs: 6 * 3600 * 1000 });
+        if (cached) {
+            token = cached.token;
+            $.log(`[${alias}] 命中token缓存，跳过取code`);
+        } else {
+            // 1. 获取code（wxid 标准 yyb.js 模块）
+            let code = await getWxCode(wxid, APPID);
+            if (!code) {
+                result.error = "获取code失败";
+                return result;
+            }
 
-        if (!token) {
-            result.error = "无法从登录响应中提取token，请查看调试日志";
-            $.log(`[${alias}] ${result.error}`);
-            return result;
-        }
+            // 2. 登录获取token
+            let login = await wxLogin(code, UA, proxyAgent, alias);
+            if (!login) {
+                result.error = "登录请求无响应";
+                $.log(`[${alias}] 登录失败：无响应数据`);
+                return result;
+            }
 
-        $.log(`[${alias}] 登录成功，获取到有效token`);
-        debugLog("提取到的token", token);
+            if (login.code != 200) {
+                result.error = `登录失败：${login.message || "未知错误"}`;
+                $.log(`[${alias}] ${result.error}`);
+                return result;
+            }
+
+            // 多路径提取token，兼容不同响应结构
+            if (login.data?.userInfo?.token) {
+                token = login.data.userInfo.token;
+            } else if (login.data?.token) {
+                token = login.data.token;
+            } else if (login.token) {
+                token = login.token;
+            } else if (login.data?.access_token) {
+                token = login.data.access_token;
+            }
+
+            if (!token) {
+                result.error = "无法从登录响应中提取token，请查看调试日志";
+                $.log(`[${alias}] ${result.error}`);
+                return result;
+            }
+
+            $.log(`[${alias}] 登录成功，获取到有效token`);
+            debugLog("提取到的token", token);
+            saveCachedToken('feimayi', wxid, token);
+        }
         await sleep(random(3000, 8000));
 
         // 3. 签到

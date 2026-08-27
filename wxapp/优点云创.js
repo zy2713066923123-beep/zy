@@ -112,11 +112,20 @@ class YouDianYunChuang {
     }
 
     async login() {
+        // token 缓存：有效期内复用，避免每次运行都重新取 code（规避微信限流）
+        const cached = getCachedToken('youdian', this.wxid, { maxAgeMs: 6 * 3600 * 1000 });
+        if (cached && cached.session) {
+            this.session = cached.session;
+            this.openid = cached.openid || "";
+            this.log(`命中session缓存，跳过取code`);
+            return;
+        }
         const code = await getWxCode(this.wxid, APPID);
         const data = await this.call({ action: "WxLogin", code });
         this.session = data.r3dkey || "";
         this.openid = data.openid || "";
         if (!this.session) throw new Error(`登录响应缺少 r3dkey: ${short(data)}`);
+        saveCachedToken('youdian', this.wxid, { session: this.session, openid: this.openid });
         this.log(`登录成功 openid=${this.openid || "未知"}`);
     }
 

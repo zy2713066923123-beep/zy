@@ -88,6 +88,13 @@ class Tongcheng {
     }
 
     async login() {
+        // token 缓存：有效期内复用，避免每次运行都重新取 code（规避微信限流）
+        const cached = getCachedToken('tongcheng', this.wxid, { maxAgeMs: 6 * 3600 * 1000 });
+        if (cached && cached.loginInfo) {
+            this.loginInfo = cached.loginInfo;
+            $.log(`命中登录缓存，跳过取code`);
+            return;
+        }
         const code = await getWxCode(this.wxid, APPID);
         const res = await request({
             method: "POST",
@@ -106,6 +113,7 @@ class Tongcheng {
             memberId: content.memberId,
             sectoken: content.sectoken,
         };
+        saveCachedToken('tongcheng', this.wxid, { loginInfo: this.loginInfo });
         $.log(`账号[${this.index}] 登录成功: openId=${content.openId} memberId=${content.memberId || ""}`);
         return `openId=${content.openId} memberId=${content.memberId || ""}`;
     }

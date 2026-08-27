@@ -753,34 +753,57 @@ async function runOne(line, idx) {
       console.log(`备注: ${parts.slice(1).join('#')}`);
     }
 
-    const codeMain = await getWxCode(wxid, MAIN_APPID);
-    console.log(`wxid=${wxid} 主程序code获取成功`);
+    // token 缓存：JWT 有效期内复用，避免每次运行都重新取 code（规避微信限流）
+    const cached = getCachedToken('wennong', wxid);
+    if (cached && cached.bffToken) {
+      bffToken = cached.bffToken;
+      yaraUserId = cached.yaraUserId || '';
+      discourseUsername = cached.discourseUsername || '';
+      consumerToken = cached.consumerToken || '';
+      accountId = cached.accountId || ACCOUNT_ID_DEFAULT;
+      console.log(`wxid=${wxid} 命中token缓存，跳过取code`);
+      if (bffToken) printTokenInfo('BFF token', bffToken);
+      if (consumerToken) printTokenInfo('Consumer token', consumerToken);
+    } else {
+      const codeMain = await getWxCode(wxid, MAIN_APPID);
+      console.log(`wxid=${wxid} 主程序code获取成功`);
 
-    const loginInfo = await preLoginByCode(codeMain);
-    bffToken = loginInfo?.token || '';
-    yaraUserId = loginInfo?.yaraUserId || '';
-    discourseUsername = loginInfo?.discourseUsername || '';
+      const loginInfo = await preLoginByCode(codeMain);
+      bffToken = loginInfo?.token || '';
+      yaraUserId = loginInfo?.yaraUserId || '';
+      discourseUsername = loginInfo?.discourseUsername || '';
 
-    console.log('loginInfoAtom=', JSON.stringify({
-      token: bffToken,
-      yaraUserId,
-      discourseUsername,
-    }));
+      console.log('loginInfoAtom=', JSON.stringify({
+        token: bffToken,
+        yaraUserId,
+        discourseUsername,
+      }));
 
-    if (bffToken) printTokenInfo('BFF token', bffToken);
+      if (bffToken) printTokenInfo('BFF token', bffToken);
 
-    if (bffToken && yaraUserId) {
-      const sign = await bffSigninStatus(bffToken, yaraUserId);
-      console.log('/v2/profile/{id}/signin =>', sign);
-    }
+      if (bffToken && yaraUserId) {
+        const sign = await bffSigninStatus(bffToken, yaraUserId);
+        console.log(`/v2/profile/{id}/signin =>`, sign);
+      }
 
-    if (needConsumerToken) {
-      const codeMember = await getWxCode(wxid, MEMBER_APPID);
-      const oauthData = await oauthWeapp(accountId, MEMBER_APPID, codeMember);
-      consumerToken = oauthData.accessToken;
-      const p = decodeJwtPayload(consumerToken) || {};
-      accountId = p.aid || accountId;
-      printTokenInfo('Consumer token', consumerToken);
+      if (needConsumerToken) {
+        const codeMember = await getWxCode(wxid, MEMBER_APPID);
+        const oauthData = await oauthWeapp(accountId, MEMBER_APPID, codeMember);
+        consumerToken = oauthData.accessToken;
+        const p = decodeJwtPayload(consumerToken) || {};
+        accountId = p.aid || accountId;
+        printTokenInfo('Consumer token', consumerToken);
+      }
+
+      if (bffToken) {
+        saveCachedToken('wennong', wxid, {
+          bffToken,
+          yaraUserId,
+          discourseUsername,
+          consumerToken,
+          accountId,
+        });
+      }
     }
   } else {
     const parsed = parseManualTokenParts(parts);

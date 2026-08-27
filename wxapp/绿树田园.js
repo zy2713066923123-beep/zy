@@ -246,6 +246,18 @@ class TreeCoin {
     }
 
     async login() {
+        // token 缓存：sessionId+sessionKey 有效期内复用，避免每次运行都重新取 code（规避微信限流）
+        const cacheKey = this.wxid || this.deviceFP || this.authCode;
+        const cached = getCachedToken('lvshu', cacheKey, { maxAgeMs: 6 * 3600 * 1000 });
+        if (cached && cached.sessionId && cached.sessionKey) {
+            this.sessionId = cached.sessionId;
+            this.cbcKey = Buffer.from(cached.sessionKey, 'base64');
+            this.userInfo = cached.userInfo || {};
+            this.openid = this.userInfo.openid || this.userInfo.wxOpenid || this.userInfo.open_id || this.deviceFP;
+            console.log('🔑 命中session缓存，跳过取code登录');
+            return this.userInfo;
+        }
+
         const res = await axios.post(`${BASE_URL}/auth/login-by-auth-code`, {
             authCode: this.authCode,
             device_fingerprint: this.deviceFP
@@ -261,6 +273,11 @@ class TreeCoin {
         this.cbcKey = Buffer.from(res.data.data.session.sessionKey, 'base64');
         this.userInfo = res.data.data.user.dataValues;
         this.openid = this.userInfo.openid || this.userInfo.wxOpenid || this.userInfo.open_id || this.deviceFP;
+        saveCachedToken('lvshu', cacheKey, {
+            sessionId: this.sessionId,
+            sessionKey: res.data.data.session.sessionKey,
+            userInfo: this.userInfo
+        });
         return this.userInfo;
     }
 

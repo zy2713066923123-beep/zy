@@ -97,9 +97,19 @@ class Task {
     async run() {
         //随机延迟5-30s 模拟人工操作
         await $.wait(Math.floor(Math.random() * 20 + 5) * 1000);
-        let { data: codeRes } = await wechat.getCode(this.wcsid)
-        if (codeRes.status) {
-            await this.getUserToken(codeRes.data.code)
+        // token 缓存：有效期内复用，避免每次运行都重新取 code（规避微信限流）
+        const cached = getCachedToken('musi', this.wcsid, { maxAgeMs: 6 * 3600 * 1000 });
+        if (cached) {
+            this.activedAuthToken = cached.token;
+            $.log(`🌸账号[${this.index}] 命中token缓存，跳过取code`)
+        } else {
+            let { data: codeRes } = await wechat.getCode(this.wcsid)
+            if (codeRes.status) {
+                await this.getUserToken(codeRes.data.code)
+            }
+            if (this.activedAuthToken) {
+                saveCachedToken('musi', this.wcsid, this.activedAuthToken);
+            }
         }
         if (!this.activedAuthToken) {
             $.log(`账号[${this.index}] 获取用户Token失败❌`)

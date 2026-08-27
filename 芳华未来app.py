@@ -1,4 +1,4 @@
-# name:芳华未来
+# name:芳华未来app
 # cron:10 2 * * *
 
 import requests

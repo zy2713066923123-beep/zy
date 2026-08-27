@@ -580,27 +580,38 @@ async function checkCodeServer(appid) {
     return [];
   }
   // 逐个获取 code（双协议：wxid_ 开头 → 牛子，openid 格式 → 应用宝）
-  const codeList = await Promise.all(rawList.map(async (entry) => {
+  // token 缓存：有效期内复用，避免每次运行都重新取 code（规避微信限流）
+  const users = [];
+  for (const entry of rawList) {
     const identifier = entry.split('#')[0].trim();
+    const cached = getCachedToken('feihe', identifier, { maxAgeMs: 6 * 3600 * 1000 });
+    if (cached && cached.token) {
+      $.log(`✅ ${identifier} 命中token缓存，跳过取code`);
+      users.push({ token: cached.token });
+      continue;
+    }
     try {
-      return await getSingleCode(appid, identifier);
+      const code = await getSingleCode(appid, identifier);
+      if (!code) {
+        $.log(`❌获取code失败: ${identifier}`);
+        continue;
+      }
+      const token = await getWxToken(code);
+      if (!token) {
+        $.log(`❌获取token失败: ${identifier}`);
+        continue;
+      }
+      const newToken = await refreshTokenStandalone(token);
+      if (!newToken) {
+        $.log(`❌刷新token失败: ${identifier}`);
+        continue;
+      }
+      saveCachedToken('fh', identifier, { token: newToken });
+      users.push({ token: newToken });
     } catch (e) {
       $.log(`❌获取code失败: ${identifier} => ${e.message || e}`);
-      return null;
     }
-  }));
-  const validCodes = codeList.filter(Boolean);
-  !validCodes.length
-    ? $.log(`❌获取code授权失败！请检查 getCode 服务`)
-    : $.log(`✅获取code授权成功！当前code数量为${validCodes.length}`);
-  // code → getWxToken → refreshToken → { token }
-  const users = await Promise.all(validCodes.map(async (code) => {
-    const token = await getWxToken(code);
-    if (!token) return null;
-    const newToken = await refreshTokenStandalone(token);
-    if (!newToken) return null;
-    return { "token": newToken };
-  }));
+  }
   return users
     .filter(value => value && Object.keys(value).length !== 0)
     .map(u => new UserInfo(u));

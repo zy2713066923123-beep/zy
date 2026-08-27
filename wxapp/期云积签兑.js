@@ -288,12 +288,20 @@ class QyqdClient {
   /** 登录，wxid 模式走微信 code，旧模式走手机号密码。 */
   async login() {
     if (this.account.mode === 'wxid') {
+      // token 缓存：有效期内复用，避免每次运行都重新取 code（规避微信限流）
+      const cached = getCachedToken('qiyun', this.account.wxid, { maxAgeMs: 6 * 3600 * 1000 });
+      if (cached && cached.token) {
+        this.token = cached.token;
+        console.log(`  - 命中token缓存，跳过取code`);
+        return cached.user_info || {};
+      }
       const code = await getWxCode(this.account.wxid);
       const res = await this.request('POST', '/auth/wechat-login', { code }, false);
       if (res.code !== 0 || !res.data || !res.data.token) {
         throw new Error(res.message || '微信登录失败');
       }
       this.token = res.data.token;
+      saveCachedToken('qiyun', this.account.wxid, { token: this.token, user_info: res.data.user_info || {} });
       return res.data.user_info || {};
     }
 

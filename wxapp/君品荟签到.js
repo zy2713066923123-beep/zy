@@ -67,9 +67,22 @@ let user_phone = '';
             addNotifyStr(`\n==== 开始【第 ${num} 个账号】====\n`, true)
             xjhd = xjhdArr[index];
 
-            await get_code(xjhd);
-            await wxMiniSilentLogin(xj_code);
-            await get_setcookie(xj_token);
+            // token 缓存：有效期内复用，避免每次运行都重新取 code（规避微信限流）
+            const accountKey = String(xjhd || '').trim().split('#')[0].trim();
+            const cached = getCachedToken('junpinhui', accountKey, { maxAgeMs: 6 * 3600 * 1000 });
+            if (cached && cached.xj_token) {
+                xj_token = cached.xj_token;
+                xj_cookie = cached.xj_cookie || '';
+                wx_unionid = cached.wx_unionid || '';
+                log(`✅ 账号[${accountKey}] 命中token缓存，跳过取code`);
+            } else {
+                await get_code(xjhd);
+                await wxMiniSilentLogin(xj_code);
+                await get_setcookie(xj_token);
+                if (xj_token) {
+                    saveCachedToken('junpinhui', accountKey, { xj_token, xj_cookie, wx_unionid });
+                }
+            }
 
             // 滑块验证
             let captcha = await get_captcha(xj_token);

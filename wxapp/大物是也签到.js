@@ -91,6 +91,14 @@ class Task {
     }
 
     async login() {
+        // token 缓存：有效期内复用，避免每次运行都重新取 code（规避微信限流）
+        const cached = getCachedToken('dawu', this.wxid, { maxAgeMs: 6 * 3600 * 1000 });
+        if (cached && cached.token) {
+            this.token = cached.token;
+            this.needReg = !!cached.needReg;
+            $.log(`✅ ${this.remark} 命中token缓存，跳过取code`);
+            return;
+        }
         const code = await getCode(this.wxid);
         if (!code) throw new Error("获取微信 code 失败");
         const data = await this.request({
@@ -107,6 +115,7 @@ class Task {
         if (!data || !data.token) throw new Error("登录未返回 token");
         this.token = data.token;
         this.needReg = !!data.needReg;
+        saveCachedToken('dawu', this.wxid, { token: this.token, needReg: this.needReg });
     }
 
     async getMemberDetail() {

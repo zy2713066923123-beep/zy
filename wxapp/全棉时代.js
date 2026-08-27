@@ -71,17 +71,25 @@ async function GetRewrite() {
                     wxid = wxid.split("#")[0].trim();
                 }
                 taskBeforeScore = 0;
-                let code = await getCode();
-                if (code == "") {
-                    log(`\n==== 账号【${num}】获取code失败 ====\n`);
-                    continue;
-                }
-                log(`\n==== 全棉时代登录 ====\n`)
-                let loginFlag = await doLogin(code);
-                await $.wait(2000);
-                if (!loginFlag) {
-                    log(`\n==== 账号【${num}】登入失败 ====\n`);
-                    continue;
+                // token 缓存：有效期内复用，避免每次运行都重新取 code（规避微信限流）
+                const cachedToken = getCachedToken('qmsd', wxid, { maxAgeMs: 6 * 3600 * 1000 });
+                if (cachedToken) {
+                    scriptToken = cachedToken.token;
+                    log(`\n==== 账号【${num}】命中token缓存，跳过取code ====\n`);
+                } else {
+                    let code = await getCode();
+                    if (code == "") {
+                        log(`\n==== 账号【${num}】获取code失败 ====\n`);
+                        continue;
+                    }
+                    log(`\n==== 全棉时代登录 ====\n`)
+                    let loginFlag = await doLogin(code);
+                    await $.wait(2000);
+                    if (!loginFlag) {
+                        log(`\n==== 账号【${num}】登入失败 ====\n`);
+                        continue;
+                    }
+                    saveCachedToken('qmsd', wxid, scriptToken);
                 }
 
                 scriptSignId = await fetchSignId();

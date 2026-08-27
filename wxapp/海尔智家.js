@@ -122,7 +122,15 @@ class Task {
     }
 
     async run() {
-        try { await this.loginByWxCode(); } catch (e) { $.log(`账号[${this.index}] 登录失败: ${e.message || e}`); }
+        // token 缓存：有效期内复用，避免每次运行都重新取 code（规避微信限流）
+        const cached = getCachedToken('haier', this.openid, { maxAgeMs: 6 * 3600 * 1000 });
+        if (cached) {
+            this.token = cached.token;
+            $.log(`账号[${this.index}] 命中token缓存，跳过取code: ${maskToken(this.token)}`);
+        } else {
+            try { await this.loginByWxCode(); } catch (e) { $.log(`账号[${this.index}] 登录失败: ${e.message || e}`); }
+            if (this.token) saveCachedToken('haier', this.openid, this.token);
+        }
         if (!this.token) return;
         await this.pointInfo()
         await this.signIn()

@@ -204,16 +204,25 @@ async function main() {
         log(`────── ${label} 开始执行 ──────`);
 
         // Step 1: 获取微信授权 code
-        log(`${label} 🔑 获取微信授权code...`);
-        let code;
-        try { code = await getWxCode(wxid, WX_APPID); } catch (e) { log(`${label} ❌ ${e.message}`); continue; }
-        if (!code) { log(`${label} ❌ 获取code失败`); continue; }
+        // token 缓存：有效期内复用，避免每次运行都重新取 code（规避微信限流）
+        let token = null;
+        const cached = getCachedToken('baima', wxid, { maxAgeMs: 6 * 3600 * 1000 });
+        if (cached) {
+            token = cached.token;
+            log(`${label} 🧩 命中token缓存，跳过取code`);
+        } else {
+            log(`${label} 🔑 获取微信授权code...`);
+            let code;
+            try { code = await getWxCode(wxid, WX_APPID); } catch (e) { log(`${label} ❌ ${e.message}`); continue; }
+            if (!code) { log(`${label} ❌ 获取code失败`); continue; }
 
-        // Step 2: code 登录获取 token
-        await wait(2000);
-        log(`${label} 🔐 使用code登录白马严选...`);
-        const token = await loginByCode(code);
-        if (!token) { log(`${label} ❌ 登录失败，跳过`); continue; }
+            // Step 2: code 登录获取 token
+            await wait(2000);
+            log(`${label} 🔐 使用code登录白马严选...`);
+            token = await loginByCode(code);
+            if (!token) { log(`${label} ❌ 登录失败，跳过`); continue; }
+            saveCachedToken('baima', wxid, token);
+        }
 
         // Step 3: 签到（先 do_sign 执行签到，再 get_date 查日历）
         await wait(2000);

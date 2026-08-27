@@ -561,6 +561,99 @@ def get_single_oauth_authorize(app_id: str, identifier: str, redirect_uri: str, 
         print(f"[yyb] 公众号网页授权失败: {e}")
         return None
 
+# ============================================================
+# 5. 通用 token 缓存工具（与 yyb.js 保持一致，供各脚本复用）
+# 说明：微信 wx.login 的 code 是一次性的，不能缓存；但登录后换取的
+# 业务 token 在有效期内可复用，从而大幅减少取 code 频率、规避限流。
+# 缓存文件统一存放在 token_caches/ 目录，与 yyb.js 共享同一套缓存。
+# 用法：
+#   import yyb
+#   cache = yyb.read_token_cache('myapp')            # 读整个缓存文件
+#   t = cache.get(openid)                            # 取某账号的 token
+#   cache[openid] = {'token': token, 'updatedAt': int(time.time()*1000)}
+#   yyb.write_token_cache('myapp', cache)            # 写回
+# ============================================================
+
+TOKEN_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'token_caches')
+
+
+def _token_cache_path(name: str) -> str:
+    safe = re.sub(r'[^a-zA-Z0-9_-]', '_', str(name or 'default'))
+    return os.path.join(TOKEN_CACHE_DIR, f"{safe}.json")
+
+
+def read_token_cache(name: str) -> Dict[str, Any]:
+    """读取整个 token 缓存文件，返回 {openid: {token, updatedAt}, ...}。"""
+    try:
+        p = _token_cache_path(name)
+        if not os.path.exists(p):
+            return {}
+        with open(p, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def write_token_cache(name: str, cache: Dict[str, Any]) -> None:
+    """将整个 token 缓存写入文件。"""
+    try:
+        os.makedirs(TOKEN_CACHE_DIR, exist_ok=True)
+        with open(_token_cache_path(name), 'w', encoding='utf-8') as f:
+            json.dump(cache or {}, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[yyb] 写入 token 缓存失败: {e}")
+
+
+def get_cached_token(cache_name: str, openid: str, opts: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    """读取某账号缓存的 token，并判断是否仍有效。
+
+    支持两种有效期判断：
+      1) JWT：token 含 exp 字段，直接按 exp 判断（可提前 expire_lead_sec 秒失效）
+      2) 非 JWT：按缓存时长 max_age_ms 兜底（默认 6 小时）
+    返回 {token, updatedAt} 或 None（无缓存/已过期）。
+    """
+    opts = opts or {}
+    expire_lead_sec = int(opts.get('expire_lead_sec', 60))
+    max_age_ms = int(opts.get('max_age_ms', 6 * 3600 * 1000))
+    cache = read_token_cache(cache_name)
+    item = cache.get(openid)
+    if not item or not item.get('token'):
+        return None
+    now_ms = int(time.time() * 1000)
+    token = str(item['token'])
+    # JWT 判断
+    parts = token.split('.')
+    if len(parts) >= 2:
+        try:
+            payload = json.loads(_b64url_decode(parts[1]))
+            exp = int(payload.get('exp') or 0)
+            if exp and exp * 1000 - expire_lead_sec * 1000 > now_ms:
+                return {'token': token, 'updatedAt': item.get('updatedAt') or now_ms}
+            return None  # JWT 已过期
+        except Exception:
+            pass  # 非标准 JWT，走时间兜底
+    # 时间兜底
+    updated_at = int(item.get('updatedAt') or 0)
+    if updated_at and now_ms - updated_at < max_age_ms:
+        return {'token': token, 'updatedAt': updated_at}
+    return None
+
+
+def save_cached_token(cache_name: str, openid: str, token: str) -> None:
+    """保存某账号的 token 到缓存。"""
+    cache = read_token_cache(cache_name)
+    cache[openid] = {'token': token, 'updatedAt': int(time.time() * 1000)}
+    write_token_cache(cache_name, cache)
+
+
+def _b64url_decode(s: str) -> str:
+    """Base64URL 解码（JWT payload 使用）。"""
+    import base64 as _b64
+    padding = '=' * (-len(s) % 4)
+    return _b64.urlsafe_b64decode(s + padding).decode('utf-8', errors='ignore')
+
+
 # 全局挂载到 builtins
 builtins.YYBClient = YYBClient
 builtins.WeChatCodeGetter = WeChatCodeGetter
@@ -584,6 +677,10 @@ builtins.parse_identifier = parse_identifier
 builtins.strip_scheme = strip_scheme
 builtins.normalize_login_type = normalize_login_type
 builtins.login_type_label = login_type_label
+builtins.read_token_cache = read_token_cache
+builtins.write_token_cache = write_token_cache
+builtins.get_cached_token = get_cached_token
+builtins.save_cached_token = save_cached_token
 
 __all__ = [
     "YYBClient",
@@ -608,6 +705,10 @@ __all__ = [
     "get_single_we_run_data",
     "get_single_cloud_function",
     "get_single_oauth_authorize",
+    "read_token_cache",
+    "write_token_cache",
+    "get_cached_token",
+    "save_cached_token",
     "LOGIN_TYPE_WX",
     "LOGIN_TYPE_SYZS",
     "LOGIN_TYPE_WMPF",

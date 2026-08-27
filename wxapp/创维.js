@@ -751,15 +751,24 @@ async function runOne(line, idx) {
     throw new Error('仅支持 wxid 协议模式；请填 wxid_xxx#备注');
   }
 
-  const code = await getWxCode(wxid, APPID);
-  logOk(`wx.login成功，code=${maskMiddle(String(code), 8, 4)}`);
+  // token 缓存：有效期内复用，避免每次运行都重新取 code（规避微信限流）
+  const cached = getCachedToken('chuangw', wxid);
+  let token = cached ? cached.token : null;
+  if (token) {
+    logOk(`命中token缓存，跳过取code（剩余有效期见下）`);
+    printTokenInfo(token);
+  } else {
+    const code = await getWxCode(wxid, APPID);
+    logOk(`wx.login成功，code=${maskMiddle(String(code), 8, 4)}`);
 
-  const ticket = await exchangeByCode(code);
-  logOk(`exchange成功，ticket=${maskMiddle(ticket, 8, 6)}`);
+    const ticket = await exchangeByCode(code);
+    logOk(`exchange成功，ticket=${maskMiddle(ticket, 8, 6)}`);
 
-  const token = await signinByTicket(ticket);
-  logOk(`signin成功，Authorization=Bearer ${maskMiddle(token, 16, 12)}`);
-  printTokenInfo(token);
+    token = await signinByTicket(ticket);
+    logOk(`signin成功，Authorization=Bearer ${maskMiddle(token, 16, 12)}`);
+    printTokenInfo(token);
+    saveCachedToken('chuangw', wxid, token);
+  }
   logSep();
 
   const profile = await getUserByToken(token);

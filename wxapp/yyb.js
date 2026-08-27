@@ -651,7 +651,86 @@ async function getSingleOAuthAuthorize(appId, identifier, redirectUri, scope = '
     }
 }
 
+// ============================================================
+// 通用 token 缓存工具（供各脚本复用，避免每次运行都重新取 code）
+// 说明：微信 wx.login 的 code 是一次性的，不能缓存；但登录后换取的
+// 业务 token 在有效期内可复用，从而大幅减少取 code 频率、规避限流。
+// 用法：
+//   const { readTokenCache, writeTokenCache } = require('./yyb.js');
+//   const cache = readTokenCache('myapp');            // 读整个缓存文件
+//   const t = cache[openid];                          // 取某账号的 token
+//   cache[openid] = { token, updatedAt: Date.now() };
+//   writeTokenCache('myapp', cache);                 // 写回
+// ============================================================
+const TOKEN_CACHE_DIR = path.join(__dirname, 'token_caches');
+
+function _tokenCachePath(name) {
+    const safe = String(name || 'default').replace(/[^a-zA-Z0-9_-]/g, '_');
+    return path.join(TOKEN_CACHE_DIR, `${safe}.json`);
+}
+
+function readTokenCache(name) {
+    try {
+        const p = _tokenCachePath(name);
+        if (!fs.existsSync(p)) return {};
+        return JSON.parse(fs.readFileSync(p, 'utf8')) || {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function writeTokenCache(name, cache) {
+    try {
+        fs.mkdirSync(TOKEN_CACHE_DIR, { recursive: true });
+        fs.writeFileSync(_tokenCachePath(name), JSON.stringify(cache, null, 2), 'utf8');
+    } catch (e) {
+        console.log(`[yyb] 写入token缓存失败: ${e.message || e}`);
+    }
+}
+
+// 通用 token 缓存辅助：读取某账号缓存的 token，并判断是否仍有效。
+// 支持两种有效期判断：
+//   1) JWT：token 含 exp 字段，直接按 exp 判断（可提前 expireLeadSec 秒失效）
+//   2) 非 JWT：按缓存时长 maxAgeMs 兜底（默认 6 小时）
+// 返回 { token, updatedAt } 或 null（无缓存/已过期）。
+function getCachedToken(cacheName, openid, opts = {}) {
+    const { expireLeadSec = 60, maxAgeMs = 6 * 3600 * 1000 } = opts;
+    const cache = readTokenCache(cacheName);
+    const item = cache[openid];
+    if (!item || !item.token) return null;
+    const now = Date.now();
+    // JWT 判断
+    const parts = String(item.token).split('.');
+    if (parts.length >= 2) {
+        try {
+            const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
+            const exp = Number(payload.exp || 0);
+            if (exp && exp * 1000 - expireLeadSec * 1000 > now) {
+                return { token: item.token, updatedAt: item.updatedAt || now };
+            }
+            return null; // JWT 已过期
+        } catch (e) { /* 非标准 JWT，走时间兜底 */ }
+    }
+    // 时间兜底
+    const updatedAt = Number(item.updatedAt || 0);
+    if (updatedAt && now - updatedAt < maxAgeMs) {
+        return { token: item.token, updatedAt };
+    }
+    return null;
+}
+
+// 通用 token 缓存辅助：保存某账号的 token 到缓存
+function saveCachedToken(cacheName, openid, token) {
+    const cache = readTokenCache(cacheName);
+    cache[openid] = { token, updatedAt: Date.now() };
+    writeTokenCache(cacheName, cache);
+}
+
 // 挂载到全局 global
+global.readTokenCache = readTokenCache;
+global.writeTokenCache = writeTokenCache;
+global.getCachedToken = getCachedToken;
+global.saveCachedToken = saveCachedToken;
 global.YYBClient = YYBClient;
 global.WeChatCodeGetter = WeChatCodeGetter;
 global.YYBAdapter = YYBAdapter;
@@ -699,6 +778,10 @@ module.exports = {
     getSingleWeRunData,
     getSingleCloudFunction,
     getSingleOAuthAuthorize,
+    readTokenCache,
+    writeTokenCache,
+    getCachedToken,
+    saveCachedToken,
     LOGIN_TYPE_WX,
     LOGIN_TYPE_SYZS,
     LOGIN_TYPE_WMPF,
