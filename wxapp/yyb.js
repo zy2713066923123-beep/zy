@@ -263,15 +263,47 @@ class YYBClient {
 
     // ---------- 小程序核心能力 ----------
 
+    // 微信授权频率控制：两次取码之间的最小间隔(ms)，防止触发后端频率限制
+    _lastCodeTime = 0;
+    _codeMinInterval = parseInt(process.env.WX_CODE_INTERVAL || '3000', 10);
+
+    async _throttleCode() {
+        const now = Date.now();
+        const wait = this._codeMinInterval - (now - this._lastCodeTime);
+        if (wait > 0) {
+            await new Promise(r => setTimeout(r, wait));
+        }
+        this._lastCodeTime = Date.now();
+    }
+
     async getCode(ref, appId) {
         const resolvedRef = await this._resolveRef(ref);
-        const res = await this._requestWithFallback('POST', ['/api/yyb/get-code', '/wxapp/getCode', '/wx/code'], {
-            openid: resolvedRef,
-            appid: appId,
-        });
-        const code = res?.code || (res?.data && res.data.code) || (typeof res === 'string' ? res : null);
-        if (!code) throw new Error(`未拿到有效小程序 code: ${JSON.stringify(res)}`);
-        return String(code);
+        const maxRetry = parseInt(process.env.WX_CODE_RETRY || '2', 10);
+        let lastErr = '';
+        for (let attempt = 0; attempt < maxRetry; attempt++) {
+            await this._throttleCode();
+            try {
+                const res = await this._requestWithFallback('POST', ['/api/yyb/get-code', '/wxapp/getCode', '/wx/code'], {
+                    openid: resolvedRef,
+                    appid: appId,
+                });
+                const code = res?.code || (res?.data && res.data.code) || (typeof res === 'string' ? res : null);
+                if (!code) throw new Error(`未拿到有效小程序 code: ${JSON.stringify(res)}`);
+                return String(code);
+            } catch (e) {
+                const msg = e.message || String(e);
+                lastErr = msg;
+                // 命中频率限制时，退避重试
+                if (/frequency|limit|slowdown|频率|频繁|太频繁/i.test(msg)) {
+                    const backoff = 2000 * (attempt + 1);
+                    console.log(`[yyb] 命中微信授权频率限制，${backoff / 1000}s 后重试 (${attempt + 1}/${maxRetry})`);
+                    await new Promise(r => setTimeout(r, backoff));
+                    continue;
+                }
+                throw e;
+            }
+        }
+        throw new Error(`获取 code 失败(重试${maxRetry}次): ${lastErr}`);
     }
 
     async getCodes(refs, appId) {

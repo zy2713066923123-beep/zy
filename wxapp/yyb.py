@@ -245,21 +245,48 @@ class YYBClient:
 
     # ---------- 小程序核心能力 ----------
 
+    # 微信授权频率控制：两次取码之间的最小间隔(秒)，防止触发后端频率限制
+    _last_code_time = 0.0
+    _code_min_interval = float(os.getenv("WX_CODE_INTERVAL", "3.0"))
+
+    def _throttle_code(self):
+        now = time.time()
+        wait = self._code_min_interval - (now - self._last_code_time)
+        if wait > 0:
+            time.sleep(wait)
+        self._last_code_time = time.time()
+
     def get_code(self, ref: str, app_id: str) -> str:
-        """获取微信小程序登录 Code (wx.login)"""
+        """获取微信小程序登录 Code (wx.login)，带频率控制与退避重试"""
         resolved_ref = self._resolve_ref(ref)
-        res = self._request_with_fallback("POST", ["/api/yyb/get-code", "/wxapp/getCode", "/wx/code"], json_data={
-            "openid": resolved_ref,
-            "appid": app_id,
-        })
-        code = None
-        if isinstance(res, dict):
-            code = res.get("code") or (res.get("data", {}).get("code") if isinstance(res.get("data"), dict) else None)
-        elif isinstance(res, str):
-            code = res
-        if not code:
-            raise Exception(f"未拿到有效小程序 code: {res}")
-        return str(code)
+        max_retry = int(os.getenv("WX_CODE_RETRY", "2"))
+        last_err = ""
+        for attempt in range(max_retry):
+            self._throttle_code()
+            try:
+                res = self._request_with_fallback("POST", ["/api/yyb/get-code", "/wxapp/getCode", "/wx/code"], json_data={
+                    "openid": resolved_ref,
+                    "appid": app_id,
+                })
+                code = None
+                if isinstance(res, dict):
+                    code = res.get("code") or (res.get("data", {}).get("code") if isinstance(res.get("data"), dict) else None)
+                elif isinstance(res, str):
+                    code = res
+                if not code:
+                    raise Exception(f"未拿到有效小程序 code: {res}")
+                return str(code)
+            except Exception as e:
+                msg = str(e)
+                last_err = msg
+                # 命中频率限制时，退避重试
+                if re.search(r"frequency|limit|slowdown|频率|频繁|太频繁", msg, re.IGNORECASE):
+                    backoff = 2.0 * (attempt + 1)
+                    print(f"[yyb] 命中微信授权频率限制，{backoff}s 后重试 ({attempt + 1}/{max_retry})")
+                    time.sleep(backoff)
+                    continue
+                raise
+        raise Exception(f"获取 code 失败(重试{max_retry}次): {last_err}")
 
     def get_codes(self, refs: List[str], app_id: str) -> Dict[str, Any]:
         """批量获取小程序 Code"""
