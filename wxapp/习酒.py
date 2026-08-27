@@ -1,4 +1,4 @@
-import yyb  # 自动同步 yyb_go 存活账号
+# 自动同步 yyb_go 存活账号
 #  修改脚本 563行的配置信息
 #  脚本同文件夹放青龙面板自带的notify.py推送脚本
 """
@@ -37,7 +37,7 @@ import yyb  # 自动同步 yyb_go 存活账号
 
 cron: 20 07,19 * * *"""
 # name: 习酒
-
+import yyb 
 import os
 import sys
 import time
@@ -336,20 +336,41 @@ class WxAdapter:
         data = self._decode_jsonish(data)
         if not isinstance(data, dict):
             return None
-        candidates = [data, data.get("data"), data.get("result")]
-        for candidate in list(candidates):
-            candidate = self._decode_jsonish(candidate)
-            if not isinstance(candidate, dict):
-                continue
-            if "data" in candidate and isinstance(candidate["data"], (dict, str)):
-                candidates.append(self._decode_jsonish(candidate["data"]))
-            if "result" in candidate and isinstance(candidate["result"], (dict, str)):
-                candidates.append(self._decode_jsonish(candidate["result"]))
-            key = candidate.get("encrypt_key") or candidate.get("encryptKey") or candidate.get("key")
-            iv = candidate.get("iv") or candidate.get("iv_data")
-            version = candidate.get("version") or candidate.get("ver") or 3
-            if key and iv:
-                return {"encrypt_key": key, "iv": iv, "version": version}
+        # 递归收集所有 encrypt_key / iv 候选（兼容嵌套 / key_info_list / 字符串内嵌 JSON）
+        found = []
+
+        def collect(node):
+            node = self._decode_jsonish(node)
+            if isinstance(node, str):
+                s = node.strip()
+                if s[:1] in "{[":
+                    try:
+                        collect(json.loads(s))
+                    except Exception:
+                        pass
+                return
+            if isinstance(node, list):
+                for x in node:
+                    collect(x)
+                return
+            if isinstance(node, dict):
+                key = node.get("encrypt_key") or node.get("encryptKey") or node.get("key")
+                iv = node.get("iv") or node.get("iv_data")
+                version = node.get("version") or node.get("ver") or node.get("keyVersion") or 3
+                if key:
+                    found.append({"encrypt_key": key, "iv": iv, "version": version})
+                for v in node.values():
+                    collect(v)
+
+        collect(data)
+        # 优先选同时带 key 和 iv 的候选（AES-CBC 需要 iv）
+        for item in found:
+            if item["encrypt_key"] and item["iv"]:
+                return item
+        # 退而求其次：只有 key 也返回（iv 留空，由调用方决定是否可用）
+        for item in found:
+            if item["encrypt_key"]:
+                return item
         return None
 
     def _extract_encrypted_data(self, data):
@@ -375,6 +396,7 @@ class WxAdapter:
         """获取用户加密密钥（webapi_getuserencryptkey）"""
         payload = {
             "api_name": "webapi_getuserencryptkey",
+            "with_credentials": True,
             "data": {},
         }
 
@@ -384,8 +406,9 @@ class WxAdapter:
                 parsed = self._extract_encrypt_key(data)
                 if parsed:
                     return {"success": True, **parsed}
-            except Exception:
-                pass
+                log.warning("   [debug] yyb operateWxData 返回但未解析出密钥: %s" % str(data)[:300])
+            except Exception as e:
+                log.warning("   [debug] yyb operateWxData 异常: %s" % e)
 
         if get_single_operate_wx_data:
             try:
@@ -393,8 +416,9 @@ class WxAdapter:
                 parsed = self._extract_encrypt_key(data)
                 if parsed:
                     return {"success": True, **parsed}
-            except Exception:
-                pass
+                log.warning("   [debug] get_single_operate_wx_data 返回但未解析出密钥: %s" % str(data)[:300])
+            except Exception as e:
+                log.warning("   [debug] get_single_operate_wx_data 异常: %s" % e)
 
         if self._is_wxid_style(wxid):
             try:
@@ -577,11 +601,13 @@ class GardenClient:
             self.set_crypto(env_key, env_iv)
             return {"token": token, "login_code": getattr(self, "login_code", ""), "crypto_ready": True}
 
-        # 方式 b: webapi_getuserencryptkey
+        # 方式 b：webapi_getuserencryptkey
         try:
             enc_key_res = wx.get_user_encrypt_key(wxid, appid)
             if enc_key_res.get("success"):
-                self.set_crypto(enc_key_res["encrypt_key"], enc_key_res["iv"], version=enc_key_res.get("version", 3))
+                ek = enc_key_res["encrypt_key"]
+                iv = enc_key_res.get("iv") or ek  # 兼容仅返回 key 的情况（AES-CBC 常见 iv=key）
+                self.set_crypto(ek, iv, version=enc_key_res.get("version", 3))
                 return {"token": token, "login_code": getattr(self, "login_code", ""), "crypto_ready": True}
         except Exception as e:
             log.warning(f"   ⚠️  webapi_getuserencryptkey 异常: {e}")
@@ -645,7 +671,9 @@ class GardenClient:
         try:
             res = self._wx.get_user_encrypt_key(self.wxid, self._wx_appid)
             if res.get("success"):
-                self.set_crypto(res["encrypt_key"], res["iv"], version=res.get("version", 3))
+                ek = res["encrypt_key"]
+                iv = res.get("iv") or ek
+                self.set_crypto(ek, iv, version=res.get("version", 3))
         except Exception:
             pass
 
@@ -1183,9 +1211,9 @@ def run(client, do_daily=True, suppress_token_error=False):
         try:
             questions = client.get_question_task() or []; todo = [q for q in questions if q.get("id") and q.get("answer")]
             log.info("   共 %d 道题，待答 %d 道" % (len(questions), len(todo)))
-            for q in todo:
-                qid, answer = q.get("id"), q.get("answer", ""); log.info("   ❓ [%s] %s  →  %s" % (qid, q.get("title", "")[:25], answer))
-                try: time.sleep(3); r = client.answer_results(qid, answer); log.info("      ✅ 答题成功: %s" % r)
+            for x in todo:
+                key, answer = x.get("id"), x.get("answer", ""); log.info("   ❓ [%s] %s  →  %s" % (key, x.get("title", "")[:25], answer))
+                try: time.sleep(3); r = client.answer_results(key, answer); log.info("      ✅ 答题成功: %s" % r)
                 except TokenInvalidError: raise
                 except Exception as e: log.warning("      ❌ 答题失败：%s" % e)
                 time.sleep(1)
