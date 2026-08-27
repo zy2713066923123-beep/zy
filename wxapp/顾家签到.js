@@ -44,7 +44,7 @@ class Env {
         const adapter = new YYBAdapter();
         const accounts = await adapter.getAccounts();
         if (accounts && accounts.length > 0) {
-          const alive = accounts.filter(a => ['alive', '', 'unknown'].includes(String(a.status || '').toLowerCase()));
+          const alive = accounts.filter(a => ['alive', 'active', '', 'unknown'].includes(String(a.status || '').toLowerCase()));
           if (alive.length > 0) {
             val = alive.map(a => `${a.openid || a.id}#${a.nickname || a.alias || a.id}`).join('\n');
             process.env.WX_ID = val;
