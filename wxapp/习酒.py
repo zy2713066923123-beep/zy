@@ -1429,7 +1429,7 @@ if __name__ == "__main__":
     try:
         accs = load_accounts()
         if accs:
-            accounts = [{"id": str(acc.get("id")), "note": acc.get("nickname") or acc.get("alias") or f"账号_{acc.get('id')}"} for acc in accs]
+            accounts = [{"id": str(acc.get("openid") or acc.get("wxid") or acc.get("id") or ""), "note": acc.get("nickname") or acc.get("alias") or f"账号_{acc.get('id')}"} for acc in accs if (acc.get("openid") or acc.get("wxid") or acc.get("id"))]
     except Exception:
         pass
     if not accounts:

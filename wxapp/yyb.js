@@ -176,17 +176,26 @@ class YYBClient {
             return raw;
         }
 
-        const candidates = accounts.filter((acc) => {
-            if (!targetLt) return true;
-            return normalizeLoginType(acc.login_type) === targetLt;
-        });
-        const pool = (candidates.length > 0 ? candidates : accounts).filter(
-            a => (a.status || 'active').toLowerCase() !== 'error' && (a.status || 'active').toLowerCase() !== 'offline'
-        );
-        const availablePool = pool.length > 0 ? pool : accounts;
+        let pool = await this.getOnlineAccounts();
+        if (!pool || !pool.length) {
+            pool = await this.getAccounts(true);
+        }
+        if (!pool || !pool.length) {
+            return raw;
+        }
+
+        if (targetLt) {
+            const filtered = pool.filter(acc => normalizeLoginType(acc.login_type) === targetLt);
+            if (filtered.length) pool = filtered;
+        }
+
+        // 0. 如果传入空或者 "none"/"undefined"，直接返回首个存活账号
+        if (!raw || ['none', 'undefined', 'null'].includes(raw.toLowerCase())) {
+            return String(pool[0].openid || pool[0].id || '');
+        }
 
         // 1. 精确匹配 openid / wxid / id
-        for (const acc of availablePool) {
+        for (const acc of pool) {
             if (acc.openid === raw || acc.wxid === raw || String(acc.id) === raw) {
                 return String(acc.openid || acc.id);
             }
@@ -194,7 +203,7 @@ class YYBClient {
 
         // 2. 按备注(alias)/昵称匹配
         const lower = raw.toLowerCase();
-        for (const acc of availablePool) {
+        for (const acc of pool) {
             const labels = [acc.alias, acc.remark, acc.nickname]
                 .filter((v) => typeof v === 'string' && v.trim())
                 .map((v) => v.trim().toLowerCase());
@@ -206,16 +215,16 @@ class YYBClient {
         // 3. 数字索引匹配（如 ref 为 "1" / "2"）
         if (/^\d+$/.test(raw)) {
             const num = parseInt(raw, 10);
-            if (num > 0 && num <= availablePool.length) {
-                return String(availablePool[num - 1].openid || availablePool[num - 1].id);
+            if (num > 0 && num <= pool.length) {
+                return String(pool[num - 1].openid || pool[num - 1].id);
             }
         }
 
         // 4. 自动兜底：映射到可用存活账号
         let hash = 0;
         for (let i = 0; i < raw.length; i++) hash = (hash << 5) - hash + raw.charCodeAt(i);
-        const idx = Math.abs(hash) % availablePool.length;
-        return String(availablePool[idx].openid || availablePool[idx].id || raw);
+        const idx = Math.abs(hash) % pool.length;
+        return String(pool[idx].openid || pool[idx].id || raw);
     }
 
     // ---------- 账号管理 ----------

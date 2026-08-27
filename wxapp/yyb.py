@@ -167,18 +167,20 @@ class YYBClient:
             return str(accounts[0].get("openid") or accounts[0].get("id") or "") if accounts else ""
 
         accounts = self.get_accounts()
-        if not accounts:
+        pool = self.get_online_accounts()
+        if not pool:
+            pool = self.get_accounts(force_refresh=True)
+        if not pool:
             return raw
 
-        candidates = [
-            acc for acc in accounts
-            if not target_lt or normalize_login_type(acc.get("login_type")) == target_lt
-        ]
-        OFFLINE = {"offline", "expired", "invalid", "disabled", "error", "dead", "logout"}
-        pool = [
-            acc for acc in (candidates or accounts)
-            if str(acc.get("status") or "").lower() not in OFFLINE
-        ] or candidates or accounts
+        if target_lt:
+            filtered = [acc for acc in pool if normalize_login_type(acc.get("login_type")) == target_lt]
+            if filtered:
+                pool = filtered
+
+        # 0. 如果传入空或者 "none"/"undefined"，直接返回首个存活账号
+        if not raw or raw.lower() in ("none", "undefined", "null"):
+            return str(pool[0].get("openid") or pool[0].get("id") or "")
 
         # 1. 精确匹配 openid / wxid / id
         for acc in pool:
