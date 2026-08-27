@@ -746,7 +746,7 @@ async function runOne(line, idx) {
   // 自动识别 wxid 模式（兼容非 wxid_ 开头）
   const hasWechatServer = !!String(process.env.WX_SERVER || process.env.WECHAT_SERVER || '').trim();
   const explicitWx = head.startsWith('wxid_') || head.startsWith('wx:');
-  const useWxMode = explicitWx || (hasWechatServer && isLikelyWxIdentifier(head) && !looksLikeToken(head));
+  const useWxMode = explicitWx || (hasWechatServer && (isLikelyWxIdentifier(head) || /^\d+$/.test(head)) && !looksLikeToken(head));
 
   if (useWxMode) {
     const wxid = head.startsWith('wx:') ? head.slice(3) : head;
