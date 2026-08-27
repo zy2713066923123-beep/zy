@@ -253,6 +253,8 @@ class YYBClient {
             const st = (acc.status || '').toLowerCase();
             if (OFFLINE.has(st)) return false;
             if (Number(acc.loginSource || acc.login_source) === 3 && acc.hasSession === false) {
+                const name = acc.nickname || acc.alias || acc.wxid || acc.openid || acc.id || '未知';
+                console.log(`[yyb] 跳过微信小程序账号「${name}」：wmpf_session_id 为空/失效（hasSession=false），需重新登录该小程序号`);
                 return false;
             }
             return true;
@@ -482,6 +484,7 @@ async function resolveAccounts(envName) {
 async function printOnlineStatus() {
     const client = new YYBClient();
     try {
+        const all = await client.getAccounts(true);
         const accounts = await client.getOnlineAccounts();
         console.log(`\n[yyb-main] 当前有 ${accounts.length} 个账号在线 (@ ${client.serverUrl}):`);
         accounts.forEach((acc, idx) => {
@@ -489,6 +492,16 @@ async function printOnlineStatus() {
             const lt = loginTypeLabel(acc.login_type);
             console.log(`  - [${lt}] ${name} (id=${acc.id}, openid=${acc.openid || '无'})`);
         });
+        const skipped = all.filter(acc =>
+            Number(acc.loginSource || acc.login_source) === 3 && acc.hasSession === false
+        );
+        if (skipped.length) {
+            console.log(`[yyb-main] 另有 ${skipped.length} 个微信小程序账号因 wmpf_session_id 为空/失效被跳过（需重新登录）:`);
+            skipped.forEach((acc, idx) => {
+                const name = acc.nickname || acc.alias || acc.wxid || `账号_${idx + 1}`;
+                console.log(`  - [小程序] ${name} (openid=${acc.openid || '无'})`);
+            });
+        }
     } catch (e) {
         console.log(`[yyb-main] 获取账号状态失败: ${e.message || e}`);
     }

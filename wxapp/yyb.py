@@ -237,6 +237,8 @@ class YYBClient:
             if st in OFFLINE:
                 continue
             if int(acc.get("loginSource") or acc.get("login_source") or 1) == 3 and acc.get("hasSession") is False:
+                name = acc.get("nickname") or acc.get("alias") or acc.get("wxid") or acc.get("openid") or acc.get("id") or "未知"
+                print(f"[yyb] 跳过微信小程序账号「{name}」：wmpf_session_id 为空/失效（hasSession=false），需重新登录该小程序号")
                 continue
             valid.append(acc)
         return valid
@@ -418,12 +420,20 @@ def resolve_accounts(env_name: str = "") -> List[str]:
 
 def print_online_status():
     client = YYBClient()
+    all_accounts = client.get_accounts(force_refresh=True)
     accounts = client.get_online_accounts()
     print(f"\n[yyb-main] 当前有 {len(accounts)} 个账号在线 (@ {client.server_url}):")
     for idx, acc in enumerate(accounts, 1):
         name = acc.get("nickname") or acc.get("alias") or acc.get("wxid") or f"账号_{idx}"
         lt = login_type_label(acc.get("login_type"))
         print(f"  - [{lt}] {name} (id={acc.get('id')}, openid={acc.get('openid') or '无'})")
+    skipped = [a for a in all_accounts
+               if int(a.get("loginSource") or a.get("login_source") or 1) == 3 and a.get("hasSession") is False]
+    if skipped:
+        print(f"[yyb-main] 另有 {len(skipped)} 个微信小程序账号因 wmpf_session_id 为空/失效被跳过（需重新登录）:")
+        for idx, acc in enumerate(skipped, 1):
+            name = acc.get("nickname") or acc.get("alias") or acc.get("wxid") or f"账号_{idx}"
+            print(f"  - [小程序] {name} (openid={acc.get('openid') or '无'})")
 
 def get_wechat_codes(app_id: str) -> Dict[str, str]:
     client = YYBClient()
