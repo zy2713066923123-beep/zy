@@ -605,8 +605,8 @@ def fetch_all_accounts_from_service() -> list:
         acc_id = acc.get("id")
         nickname = acc.get("nickname", "未知")
         status = acc.get("status", "")
-        if status and status != "alive":
-            print(f"[SKIP] 账号 {acc_id} ({nickname}) 状态非 alive: {status}")
+        if status and status not in ("alive", "active"):
+            print(f"[SKIP] 账号 {acc_id} ({nickname}) 状态非存活: {status}")
             continue
 
         ref = str(acc_id)
