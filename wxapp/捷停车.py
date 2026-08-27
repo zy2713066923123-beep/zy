@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 import yyb  # 自动同步 yyb_go 存活账号
 """
-cron: 42 9,16 * * *
+cron: 36 11,23 * * *
 脚本名称：捷停车自动任务
 # name: 捷停车
 功能：

@@ -1,6 +1,6 @@
 import yyb  # 自动同步 yyb_go 存活账号
 # name: 奈雪的茶
-# cron: 32 8,13 * * *
+# cron: 52 09,21 * * *
 # -*- coding: utf-8 -*-
 """
 脚本名称：奈雪点单动态code签到

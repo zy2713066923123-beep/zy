@@ -1,7 +1,6 @@
 require('./yyb.js'); // 自动同步 yyb_go 存活账号
 // name: 衣城通
-// cron: 46 11,16 * * *
-
+// cron: 0 16,04 * * *
 class Env {
     constructor(name) {
         this.name = name;

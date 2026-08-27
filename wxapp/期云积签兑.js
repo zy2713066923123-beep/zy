@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 require('./yyb.js'); // 自动同步 yyb_go 存活账号
 // name:期云积签兑
-// cron: 47 11,16 * * *
-'use strict';
+// cron: 8 12,00 * * *
+use strict';
 
 /**
  * 期云积签兑 / qyqd 青龙自动化脚本

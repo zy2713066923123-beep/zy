@@ -5,7 +5,7 @@ import yyb  # 自动同步 yyb_go 存活账号
 #需要配置WECHAT_SERVER、WX_ID，用于获取wx.login code
 #账号变量名:BREO
 #new Env("BREO")
-#cron 2 11,14 * * *
+#cron 56 07,19 * * *
 import requests
 import json
 import os

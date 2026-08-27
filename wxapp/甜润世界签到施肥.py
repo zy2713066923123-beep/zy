@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import yyb  # 自动同步 yyb_go 存活账号
 # name: 甜润世界签到施肥
-# cron: 1 15,9 * * *
+# cron: 48 13,01 * * *
 # -*- coding: utf-8 -*-
 
 import os

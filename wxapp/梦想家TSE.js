@@ -5,8 +5,7 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 @Author: sm
 @Date: 2026.07.24
 @Description: 梦想家TSE 微信小程序每日签到（微信协议版，适配青龙）
-cron: 38 8,14 * * *
-
+cron: 20 12,00 * * *
 变量名：WX_ID
 变量值：微信账号（openid/wxid），多账号支持换行、& 分隔，必须配置
 

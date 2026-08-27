@@ -1,7 +1,6 @@
 require('./yyb.js'); // 自动同步 yyb_go 存活账号
 // name: 同程旅行里程
-// cron: 5 9,13 * * *
-
+// cron: 56 08,20 * * *
 const axios = require("axios");
 
 // ====== 标准Env模式 ======

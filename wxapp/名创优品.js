@@ -1,6 +1,6 @@
 const yyb = require('./yyb.js'); // 自动同步 yyb_go 存活账号
 // name: 名创优品
-// cron: 30 8 * * *
+// cron: 0 09,21 * * *
 const axios = require('axios');
 const CryptoJS = require('crypto-js');
 const fs = require('fs');

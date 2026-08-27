@@ -4,8 +4,7 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 @Author: sm
 @Date: 2026.07.24
 @Description: 星韵优选微信小程序签到
-cron: 15 8,13 * * *
-
+cron: 4 12,00 * * *
 变量名：xyyy
 变量值：抓 headers 里的 3rdsession 值（多账号回车分隔）
 

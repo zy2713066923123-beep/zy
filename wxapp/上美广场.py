@@ -2,9 +2,7 @@
 # -*- coding: utf-8 -*-
 import yyb  # 自动同步 yyb_go 存活账号
 # name: 上美广场
-# cron: 20 9,19 * * *
-
-"""
+# cron: 56 06,18 * * *
 SM广场小程序（YYB Go版）
 
 功能：

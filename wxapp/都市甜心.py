@@ -1,6 +1,6 @@
 import yyb  # 自动同步 yyb_go 存活账号
 # name: 都市甜心
-# cron: 0 8,14 * * *
+# cron: 32 16,04 * * *
 # -*- coding: utf-8 -*-
 
 """

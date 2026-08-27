@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import yyb  # 自动同步 yyb_go 存活账号
-# cron: 30 9,16 * * *
+# cron: 44 15,03 * * *
 # @Time     : 2025-12-25
 # name: 蒙娜丽莎
 # @Author   : 凉白开（修订版本）

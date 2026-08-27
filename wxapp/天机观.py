@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import yyb  # 自动同步 yyb_go 存活账号
-# cron: 9 9,14 * * *
-"""
+# cron: 44 09,21 * * *
 # name: 天机观
 作者: ChatGPT
 名称: 天机观自动任务（getCode版）

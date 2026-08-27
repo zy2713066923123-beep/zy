@@ -1,6 +1,6 @@
 import yyb  # 自动同步 yyb_go 存活账号
 # name: DT生活
-# cron: 10 9,15 * * *
+# cron: 4 06,18 * * *
 import os
 import random
 import time

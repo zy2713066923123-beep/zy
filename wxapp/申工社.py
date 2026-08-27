@@ -1,5 +1,5 @@
 import yyb  # 自动同步 yyb_go 存活账号
-# cron: 35 9,15 * * * *
+# cron: 52 13,01 * * *
 import os
 # name: 申工社
 import time

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 iqoo社区 小程序
-cron: 25 10,13 * * *
+cron: 24 06,18 * * *
 登录入口：
 # name: iqoo社区
   1. 优先读取本地 iqoo_token.json 中缓存 of token

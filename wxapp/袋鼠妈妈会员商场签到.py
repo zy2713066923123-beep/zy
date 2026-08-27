@@ -1,6 +1,6 @@
 import yyb  # 自动同步 yyb_go 存活账号
 # name: 袋鼠妈妈会员商场签到
-# cron: 56 8,14 * * *
+# cron: 4 16,04 * * *
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """

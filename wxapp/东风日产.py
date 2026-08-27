@@ -1,5 +1,5 @@
 import yyb  # 自动同步 yyb_go 存活账号
-# cron: 42 9,15 * * *
+# cron: 0 07,19 * * *
 #!/usr/bin/env python3
 # name: 东风日产
 """

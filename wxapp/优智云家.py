@@ -2,9 +2,7 @@
 # -*- coding: utf-8 -*-
 import yyb  # 自动同步 yyb_go 存活账号
 # name: 优智云家
-# cron: 23 9,21 * * *
-
-"""
+# cron: 48 07,19 * * *
 优智云家品牌商城小程序（YYB Go版）
 
 功能：

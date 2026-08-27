@@ -2,9 +2,7 @@
 # -*- coding: utf-8 -*-
 import yyb  # 自动同步 yyb_go 存活账号
 # name: 大参林健康
-# cron: 18 9,20 * * *
-
-"""
+# cron: 32 09,21 * * *
 大参林健康小程序人参游戏（YYB Go版）
 
 功能：

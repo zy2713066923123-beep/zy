@@ -1,5 +1,5 @@
 import yyb  # 自动同步 yyb_go 存活账号
-# cron: 57 8,16 * * *
+# cron: 24 09,21 * * *
 #!/usr/bin/env python3
 # name: 嘉立创
 # -*- coding: utf-8 -*-

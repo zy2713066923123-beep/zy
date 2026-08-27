@@ -1,7 +1,6 @@
 require('./yyb.js'); // 自动同步 yyb_go 存活账号
 // name: 携程会员
-// cron: 3 10,17 * * *
-
+// cron: 40 11,23 * * *
 const axios = require("axios");
 const crypto = require("crypto");
 const fs = require("fs");

@@ -1,5 +1,5 @@
 import yyb  # 自动同步 yyb_go 存活账号
-# cron: 35 9,16 * * *
+# cron: 40 06,18 * * *
 # 1 环境变量 WX_SERVER 填 yyb_go 服务地址（例如：http://127.0.0.1:8000）
 # name: 七彩虹社区商城
 # 2 环境变量 WX_ID（可选，默认自动拉取 yyb_go 上所有存活账号，支持 wxid#备注 白名单过滤）

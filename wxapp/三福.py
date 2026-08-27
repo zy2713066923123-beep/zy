@@ -1,6 +1,6 @@
 import yyb  # 自动同步 yyb_go 存活账号
 # name: 三福
-# cron: 51 11,13 * * *
+# cron: 52 06,18 * * *
 import os
 import time
 import random

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# cron: 1 11,16 * * *
-"""
+# cron: 48 15,03 * * *
 # name: 薇诺娜专柜商城
 薇诺娜专柜商城
 

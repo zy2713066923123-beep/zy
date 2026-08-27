@@ -5,8 +5,7 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 @Author: sm
 @Date: 2026.07.24
 @Description: 匠心中华 微信小程序每日签到（微信协议版，适配青龙）
-cron: 26 8,14 * * *
-
+cron: 20 08,20 * * *
 变量名：WX_ID
 变量值：微信账号（openid/wxid），多账号支持换行、& 分隔，必须配置
 

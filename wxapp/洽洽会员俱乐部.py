@@ -2,9 +2,7 @@
 # -*- coding: utf-8 -*-
 import yyb  # 自动同步 yyb_go 存活账号
 # name: 洽洽会员俱乐部
-# cron: 25 9,21 * * *
-
-"""
+# cron: 52 12,00 * * *
 洽洽会员俱乐部小程序（YYB Go版）
 
 功能：

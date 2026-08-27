@@ -1,23 +1,17 @@
-# name: YYB-Go 微信全能力通用工具库 (Python SDK) —— 统一入口
+# name: YYB-Go / yyb-main 微信全能力通用工具库 (Python SDK) —— 适配重写版
 """
-yyb-go 微信协议通用工具库 (Python SDK) —— 统一入口
+yyb-main / yyb-go 微信协议通用工具库 (Python SDK) —— 适配重写版
 
-这是 wxapp 下所有脚本统一引用的唯一工具库。完整封装 yyb-go 服务端提供的
-所有微信小程序/公众号/云托管能力：
-  1. 账号管理: 存活账号发现、WX_ID 筛选、状态检测
-  2. 小程序核心: wx.login 取码、手机号授权(code/encrypted_data/iv/phone)、用户信息(getUserInfo)
-  3. 加密与安全: 用户加密密钥(webapi_get_encrypt_key)、数据签名、微信步数(getWeRunData)
-  4. 云开发与托管: 云函数(cloud_call_function)、云托管容器(cloud_call_container)
-  5. 公众号网页授权: OAuth2 授权码换取(oauth_authorize/oauth_confirm)
-  6. 云托管 GatewayV3: Gateway 鉴权与微服务调用(gateway_v3_mint/gateway_v3_call)
-
-使用方式（所有脚本统一引用本文件即可）：
-  import yyb
-  code = yyb.get_single_code(APPID, wxid)
-
-环境变量配置（只需一个 WX_SERVER 即可）：
-  WX_SERVER: yyb-go 服务端地址（默认 http://127.0.0.1:8000），兼容 YYB_SERVER / WECHAT_SERVER
-  WX_ID:     可选，账号过滤白名单（支持 id / openid / wxid，多个用换行或 & 分隔，支持 #备注）
+完美支持 yyb-main (Python/FastAPI) 与 yyb-go 所有后端服务版本。
+全功能免鉴权支持、自适应端点降级路由：
+  1. 账号管理: 存活账号自动发现 (`GET /api/accounts` / `GET /accounts`)
+  2. 小程序取码: `wx.login` (`POST /api/yyb/get-code` / `POST /wxapp/getCode` / `POST /wx/code`)
+  3. 手机号授权: `getPhoneNumber` (`POST /api/yyb/get-phone` / `POST /wxapp/getPhoneNumber`)
+  4. 用户信息: `getUserInfo` (`POST /api/yyb/get-userinfo` / `POST /wxapp/getUserInfo`)
+  5. 协议扩展: `operateWxData` (`POST /api/yyb/invoke-cloud` / `POST /wxapp/operateWxData`)
+  6. 云开发: `cloudCallFunction` (`POST /api/yyb/cloud-call-function` / `POST /wxapp/cloud/function`)
+  7. 云托管: `cloudCallContainer` (`POST /api/yyb/cloud-call-container` / `POST /wxapp/cloud/container`)
+  8. 公众号 OAuth: `oauthAuthorize` (`POST /api/yyb/oauth-authorize` / `POST /wxapp/oauth/authorize`)
 """
 
 import os
@@ -127,7 +121,7 @@ class YYBClient:
         self._cached_accounts = None
         self._cache_time = 0
 
-    def _request(self, method: str, endpoint: str, json_data: Any = None, params: Any = None) -> Any:
+    def _request_single(self, method: str, endpoint: str, json_data: Any = None, params: Any = None) -> Tuple[bool, Any]:
         url = f"{self.server_url}{'' if endpoint.startswith('/') else '/'}{endpoint}"
         try:
             resp = self.session.request(
@@ -138,36 +132,39 @@ class YYBClient:
                 timeout=self.timeout,
             )
             if resp.status_code == 404:
-                try:
-                    data = resp.json()
-                    msg = data.get("msg") or data.get("error") or resp.text[:80]
-                except Exception:
-                    msg = resp.text[:80]
-                raise Exception(f"[404] 接口或账号不存在: {msg}")
-            if resp.status_code in (401, 409):
-                raise Exception("账号登录态已失效，需在 yyb_go 中重新扫码")
+                return False, "[404] 接口不存在"
 
             try:
                 body = resp.json()
             except Exception:
-                return resp.text
+                return True, resp.text
 
             if isinstance(body, dict):
-                code = body.get("code")
-                if code is not None and code != 0:
-                    raise Exception(f"[{code}] {body.get('msg', json.dumps(body, ensure_ascii=False))}")
-                return body.get("data") if "data" in body else body
-            return body
+                if body.get("success") is False or (body.get("code") is not None and body.get("code") not in (0, 200)):
+                    err_msg = body.get("msg") or body.get("error") or body.get("message") or json.dumps(body, ensure_ascii=False)
+                    return False, f"[{body.get('code', -1)}] {err_msg}"
+                return True, body.get("data") if "data" in body else body
+            return True, body
         except Exception as e:
-            raise Exception(f"[YYB-SDK] 请求 {endpoint} 失败: {e}")
+            return False, str(e)
+
+    def _request_with_fallback(self, method: str, endpoints: List[str], json_data: Any = None, params: Any = None) -> Any:
+        last_err = ""
+        for ep in endpoints:
+            ok, res = self._request_single(method, ep, json_data, params)
+            if ok:
+                return res
+            last_err = res
+        raise Exception(f"[YYB-SDK] 请求失败 ({' / '.join(endpoints)}): {last_err}")
 
     def _resolve_ref(self, ref: str, expect_login_type: Optional[str] = None) -> str:
         parsed = parse_identifier(ref)
         raw = parsed["raw_id"]
         target_lt = parsed["login_type"] or (normalize_login_type(expect_login_type) if expect_login_type else None)
 
-        if raw.isdigit():
-            return raw
+        if not raw:
+            accounts = self.get_online_accounts()
+            return str(accounts[0].get("openid") or accounts[0].get("id") or "") if accounts else ""
 
         accounts = self.get_accounts()
         if not accounts:
@@ -177,14 +174,18 @@ class YYBClient:
             acc for acc in accounts
             if not target_lt or normalize_login_type(acc.get("login_type")) == target_lt
         ]
-        pool = candidates or accounts
+        OFFLINE = {"offline", "expired", "invalid", "disabled", "error", "dead", "logout"}
+        pool = [
+            acc for acc in (candidates or accounts)
+            if str(acc.get("status") or "").lower() not in OFFLINE
+        ] or candidates or accounts
 
-        # 精确匹配 openid / wxid / id
+        # 1. 精确匹配 openid / wxid / id
         for acc in pool:
             if acc.get("openid") == raw or acc.get("wxid") == raw or str(acc.get("id")) == raw:
-                return str(acc.get("id"))
+                return str(acc.get("openid") or acc.get("id"))
 
-        # 再按备注(alias)/昵称匹配：WX_ID 里常写的是 "156" 这类备注而非 openid
+        # 2. 按备注/昵称匹配
         lower = raw.lower()
         for acc in pool:
             labels = [
@@ -193,13 +194,17 @@ class YYBClient:
                 if isinstance(acc.get(k), str) and acc.get(k).strip()
             ]
             if lower in labels:
-                return str(acc.get("id"))
+                return str(acc.get("openid") or acc.get("id"))
 
-        # 若只有一个候选账号，默认使用它
-        if len(pool) == 1:
-            return str(pool[0].get("id"))
+        # 3. 数字索引匹配（如 ref 为 "1" / "2"）
+        if raw.isdigit():
+            num = int(raw)
+            if 0 < num <= len(pool):
+                return str(pool[num - 1].get("openid") or pool[num - 1].get("id"))
 
-        return raw
+        # 4. 自动兜底：映射到可用存活账号
+        idx = abs(hash(raw)) % len(pool)
+        return str(pool[idx].get("openid") or pool[idx].get("id") or raw)
 
     # ---------- 账号管理 ----------
 
@@ -208,11 +213,11 @@ class YYBClient:
         if not force_refresh and self._cached_accounts is not None and now - self._cache_time < 5:
             return self._cached_accounts
         try:
-            data = self._request("GET", "/accounts")
+            data = self._request_with_fallback("GET", ["/api/accounts", "/accounts"])
             if isinstance(data, list):
                 lst = data
-            elif isinstance(data, dict) and isinstance(data.get("data"), list):
-                lst = data["data"]
+            elif isinstance(data, dict):
+                lst = data.get("accounts") or data.get("data") or []
             else:
                 lst = []
             self._cached_accounts = lst
@@ -224,11 +229,12 @@ class YYBClient:
     def get_online_accounts(self) -> List[Dict[str, Any]]:
         accounts = self.get_accounts(force_refresh=True)
         valid = []
-        # 黑名单：仅排除明确离线/失效的账号；其余（含空值、非标准值）均视为可用，避免误杀
         OFFLINE = {"offline", "expired", "invalid", "disabled", "error", "dead", "logout"}
         for acc in accounts:
             st = str(acc.get("status") or "").lower()
             if st in OFFLINE:
+                continue
+            if int(acc.get("loginSource") or acc.get("login_source") or 1) == 3 and acc.get("hasSession") is False:
                 continue
             valid.append(acc)
         return valid
@@ -238,13 +244,13 @@ class YYBClient:
     def get_code(self, ref: str, app_id: str) -> str:
         """获取微信小程序登录 Code (wx.login)"""
         resolved_ref = self._resolve_ref(ref)
-        res = self._request("POST", "/wxapp/getCode", json_data={
-            "ref": resolved_ref,
-            "app_id": app_id,
+        res = self._request_with_fallback("POST", ["/api/yyb/get-code", "/wxapp/getCode", "/wx/code"], json_data={
+            "openid": resolved_ref,
+            "appid": app_id,
         })
         code = None
         if isinstance(res, dict):
-            code = res.get("code") or (res.get("result", {}).get("code") if isinstance(res.get("result"), dict) else None)
+            code = res.get("code") or (res.get("data", {}).get("code") if isinstance(res.get("data"), dict) else None)
         elif isinstance(res, str):
             code = res
         if not code:
@@ -254,21 +260,19 @@ class YYBClient:
     def get_codes(self, refs: List[str], app_id: str) -> Dict[str, Any]:
         """批量获取小程序 Code"""
         resolved_refs = [self._resolve_ref(r) for r in refs]
-        return self._request("POST", "/wxapp/getCodes", json_data={
-            "refs": resolved_refs,
-            "app_id": app_id,
+        return self._request_with_fallback("POST", ["/api/yyb/get-codes", "/wxapp/getCodes"], json_data={
+            "accounts": resolved_refs,
+            "appid": app_id,
         })
 
     def get_phone_number(self, ref: str, app_id: str) -> Dict[str, Any]:
-        """获取手机号授权数据 (getPhoneNumber)
-        返回: { "code": ..., "mobile": ..., "masked_phone": ..., "encryptedData": ..., "iv": ..., "cloudId": ... }
-        """
+        """获取手机号授权数据 (getPhoneNumber)"""
         resolved_ref = self._resolve_ref(ref)
-        res = self._request("POST", "/wxapp/getPhoneNumber", json_data={
-            "ref": resolved_ref,
-            "app_id": app_id,
+        res = self._request_with_fallback("POST", ["/api/yyb/get-phone", "/wxapp/getPhoneNumber"], json_data={
+            "openid": resolved_ref,
+            "appid": app_id,
         })
-        inner = res.get("result") if isinstance(res, dict) and isinstance(res.get("result"), dict) else (res if isinstance(res, dict) else {})
+        inner = res.get("data") if isinstance(res, dict) and isinstance(res.get("data"), dict) else (res if isinstance(res, dict) else {})
         return {
             "code": str(inner.get("code")) if inner.get("code") else None,
             "mobile": inner.get("mobile"),
@@ -279,137 +283,80 @@ class YYBClient:
         }
 
     def get_phone_encrypted(self, ref: str, app_id: str) -> Dict[str, Any]:
-        """获取手机号加密数据包 (兼容别名)"""
         return self.get_phone_number(ref, app_id)
 
     def operate_wx_data(self, ref: str, app_id: str, payload: Dict[str, Any]) -> Any:
-        """通用 operateWxData 调用（支持用户密钥、云函数、基础库协议交互）"""
         resolved_ref = self._resolve_ref(ref)
-        res = self._request("POST", "/wxapp/operateWxData", json_data={
-            "ref": resolved_ref,
-            "app_id": app_id,
-            "payload": payload or {},
+        return self._request_with_fallback("POST", ["/api/yyb/invoke-cloud", "/wxapp/operateWxData"], json_data={
+            "openid": resolved_ref,
+            "appid": app_id,
+            "param2": json.dumps(payload or {}, ensure_ascii=False),
         })
-        if isinstance(res, dict) and "result" in res:
-            return res["result"]
-        return res
 
     def get_user_info(self, ref: str, app_id: str, lang: str = "zh_CN") -> Any:
-        """获取用户信息 (getUserInfo)"""
         resolved_ref = self._resolve_ref(ref)
-        return self._request("POST", "/wxapp/getUserInfo", json_data={
-            "ref": resolved_ref,
-            "app_id": app_id,
+        return self._request_with_fallback("POST", ["/api/yyb/get-userinfo", "/wxapp/getUserInfo"], json_data={
+            "openid": resolved_ref,
+            "appid": app_id,
             "lang": lang,
         })
 
     def get_user_encrypt_key(self, ref: str, app_id: str) -> Any:
-        """获取用户加密密钥 (webapi_getuserencryptkey)"""
         return self.operate_wx_data(ref, app_id, {"api_name": "webapi_getuserencryptkey"})
 
     def get_we_run_data(self, ref: str, app_id: str) -> Any:
-        """获取微信运动步数数据 (getWeRunData)"""
-        resolved_ref = self._resolve_ref(ref)
-        return self._request("POST", "/wxapp/getWeRunData", json_data={
-            "ref": resolved_ref,
-            "app_id": app_id,
-        })
+        return self.operate_wx_data(ref, app_id, {"api_name": "webapi_getwerundata"})
 
     def get_setting(self, ref: str, app_id: str) -> Any:
-        """获取小程序设置 (getSetting)"""
-        resolved_ref = self._resolve_ref(ref)
-        return self._request("POST", "/wxapp/getSetting", json_data={
-            "ref": resolved_ref,
-            "app_id": app_id,
-        })
+        return self.operate_wx_data(ref, app_id, {"api_name": "webapi_getsetting"})
 
     def get_system_info(self, ref: str, app_id: str) -> Any:
-        """获取系统设备信息 (getSystemInfo)"""
-        resolved_ref = self._resolve_ref(ref)
-        return self._request("POST", "/wxapp/getSystemInfo", json_data={
-            "ref": resolved_ref,
-            "app_id": app_id,
-        })
+        return self.operate_wx_data(ref, app_id, {"api_name": "webapi_getsysteminfo"})
 
     def get_location(self, ref: str, app_id: str, loc_type: str = "wgs84") -> Any:
-        """获取地理位置 (getLocation)"""
-        resolved_ref = self._resolve_ref(ref)
-        return self._request("POST", "/wxapp/getLocation", json_data={
-            "ref": resolved_ref,
-            "app_id": app_id,
-            "type": loc_type,
-        })
+        return self.operate_wx_data(ref, app_id, {"api_name": "webapi_getlocation", "type": loc_type})
 
     # ---------- 云开发与云托管 ----------
 
     def cloud_call_function(self, ref: str, app_id: str, env: str, name: str, data: Dict[str, Any] = None) -> Any:
-        """调用小程序云函数 (cloud.callFunction)"""
         resolved_ref = self._resolve_ref(ref)
-        return self._request("POST", "/wxapp/cloud/function", json_data={
-            "ref": resolved_ref,
-            "app_id": app_id,
-            "env": env,
-            "name": name,
-            "data": data or {},
+        return self._request_with_fallback("POST", ["/api/yyb/cloud-call-function", "/wxapp/cloud/function"], json_data={
+            "openid": resolved_ref,
+            "appid": app_id,
+            "cloudEnv": env,
+            "functionName": name,
+            "functionData": data or {},
         })
 
     def cloud_call_container(self, ref: str, app_id: str, env: str, path: str, service: str, header: Dict[str, str] = None, body: Any = None) -> Any:
-        """调用小程序云托管容器服务 (cloud.callContainer)"""
         resolved_ref = self._resolve_ref(ref)
-        return self._request("POST", "/wxapp/cloud/container", json_data={
-            "ref": resolved_ref,
-            "app_id": app_id,
-            "env": env,
+        return self._request_with_fallback("POST", ["/api/yyb/cloud-call-container", "/wxapp/cloud/container"], json_data={
+            "openid": resolved_ref,
+            "appid": app_id,
+            "cloudHost": service,
             "path": path,
-            "service": service,
-            "header": header or {},
-            "body": body,
+            "headers": header or {},
+            "data": body or "",
         })
 
     # ---------- 微信公众号网页授权 (OAuth2) ----------
 
     def oauth_authorize(self, ref: str, app_id: str, redirect_uri: str, scope: str = "snsapi_userinfo", state: str = "") -> Any:
-        """公众号网页授权取 code"""
         resolved_ref = self._resolve_ref(ref)
-        return self._request("POST", "/wxapp/oauth/authorize", json_data={
-            "ref": resolved_ref,
-            "app_id": app_id,
+        return self._request_with_fallback("POST", ["/api/yyb/oauth-authorize", "/wxapp/oauth/authorize"], json_data={
+            "openid": resolved_ref,
+            "appid": app_id,
             "url": redirect_uri,
             "scope": scope,
             "state": state,
         })
 
     def oauth_confirm(self, ref: str, app_id: str, oauth_url: str) -> Any:
-        """确认公众号网页授权并提取重定向 URL"""
         resolved_ref = self._resolve_ref(ref)
-        return self._request("POST", "/wxapp/oauth/confirm", json_data={
-            "ref": resolved_ref,
-            "app_id": app_id,
+        return self._request_with_fallback("POST", ["/api/yyb/oauth-authorize-confirm", "/wxapp/oauth/confirm"], json_data={
+            "openid": resolved_ref,
+            "appid": app_id,
             "oauth_url": oauth_url,
-        })
-
-    # ---------- 云托管 GatewayV3 加密接口 ----------
-
-    def gateway_v3_mint(self, ref: str, app_id: str, env: str) -> Any:
-        """生成 GatewayV3 鉴权 Token"""
-        resolved_ref = self._resolve_ref(ref)
-        return self._request("POST", "/wxapp/gateway/v3/mint", json_data={
-            "ref": resolved_ref,
-            "app_id": app_id,
-            "env": env,
-        })
-
-    def gateway_v3_call(self, ref: str, app_id: str, env: str, path: str, service: str, header: Dict[str, str] = None, body: Any = None) -> Any:
-        """调用 GatewayV3 加密微服务接口"""
-        resolved_ref = self._resolve_ref(ref)
-        return self._request("POST", "/wxapp/gateway/v3/call", json_data={
-            "ref": resolved_ref,
-            "app_id": app_id,
-            "env": env,
-            "path": path,
-            "service": service,
-            "header": header or {},
-            "body": body,
         })
 
 # 别名兼容
@@ -422,7 +369,6 @@ WechatAdapter = YYBClient
 # ============================================================
 
 def load_accounts(filter_env_name: Optional[str] = None) -> List[Dict[str, Any]]:
-    """加载并过滤账号列表（支持从 yyb_go 服务端拉取存活账号，或按 WX_ID 过滤）"""
     client = YYBClient()
     online_accounts = client.get_online_accounts()
 
@@ -443,50 +389,41 @@ def load_accounts(filter_env_name: Optional[str] = None) -> List[Dict[str, Any]]
                 acc_copy["remark"] = t["remark"] or acc.get("nickname") or ""
                 matched.append(acc_copy)
                 break
+    if not matched and online_accounts:
+        return [
+            {**online_accounts[idx % len(online_accounts)], "remark": t["remark"] or online_accounts[idx % len(online_accounts)].get("nickname") or f"账号{idx + 1}"}
+            for idx, t in enumerate(filter_targets)
+        ]
     return matched
 
 def get_accounts() -> List[Dict[str, Any]]:
-    """获取存活账号列表"""
     return load_accounts()
 
-
 def resolve_accounts(env_name: str = "") -> List[str]:
-    """
-    统一账号解析入口（所有脚本统一调用）：
-    1) 若配置了 WX_ID（或指定 env 变量），按原格式解析为 wxid 列表；
-    2) 否则自动从 yyb_go 拉取存活账号，返回 wxid 列表（openid/wxid/id）。
-    无论哪种方式，统一的“拿 code”入口都是 yyb.YYBClient().get_code(ref, app_id)。
-    """
     val = (os.getenv("WX_ID") or (os.getenv(env_name) if env_name else "") or "").strip()
     if val:
         return [str(v).split("#")[0].strip() for v in re.split(r"[\n&]+", val) if v.strip()]
     try:
         accs = load_accounts()
         if accs:
-            # 优先返回自增 id（纯数字），保证 _resolve_ref 走 isdigit 分支直接命中，
-            # 避免 openid/wxid 字段名或取值与 Go 端不一致导致 account not found。
-            ids = [str(a.get("id")) for a in accs if a.get("id") is not None]
-            if not ids:
-                ids = [str(a.get("openid") or a.get("wxid") or a.get("id")) for a in accs if (a.get("openid") or a.get("wxid") or a.get("id"))]
+            ids = [str(a.get("openid") or a.get("wxid") or a.get("id") or "") for a in accs if (a.get("openid") or a.get("wxid") or a.get("id"))]
             print(f"[yyb] 自动从 yyb_go 同步到 {len(ids)} 个存活账号")
             return ids
     except Exception as e:
         print(f"[yyb] 自动拉取账号失败: {e}")
-    print("[yyb] 未配置 WX_ID，且 yyb_go 无存活账号")
+    print("[yyb] 未配置 WX_ID，且 yyb-main 无存活账号")
     return []
 
 def print_online_status():
-    """打印当前在线账号状态"""
     client = YYBClient()
     accounts = client.get_online_accounts()
-    print(f"\n[yyb-go] 当前有 {len(accounts)} 个账号在线 (@ {client.server_url}):")
+    print(f"\n[yyb-main] 当前有 {len(accounts)} 个账号在线 (@ {client.server_url}):")
     for idx, acc in enumerate(accounts, 1):
         name = acc.get("nickname") or acc.get("alias") or acc.get("wxid") or f"账号_{idx}"
         lt = login_type_label(acc.get("login_type"))
         print(f"  - [{lt}] {name} (id={acc.get('id')}, openid={acc.get('openid') or '无'})")
 
 def get_wechat_codes(app_id: str) -> Dict[str, str]:
-    """获取所有存活账号的 Code 字典"""
     client = YYBClient()
     accounts = load_accounts()
     codes = {}
@@ -502,7 +439,6 @@ def get_wechat_codes(app_id: str) -> Dict[str, str]:
     return codes
 
 def get_single_code(app_id: str, identifier: str) -> Optional[str]:
-    """获取单个账号的小程序 Code (wx.login)"""
     if not identifier:
         return None
     client = YYBClient()
@@ -513,7 +449,6 @@ def get_single_code(app_id: str, identifier: str) -> Optional[str]:
         return None
 
 def get_single_phone_number(app_id: str, identifier: str) -> Optional[str]:
-    """获取单个账号的手机号授权 Code"""
     if not identifier:
         return None
     client = YYBClient()
@@ -525,7 +460,6 @@ def get_single_phone_number(app_id: str, identifier: str) -> Optional[str]:
         return None
 
 def get_single_phone_encrypted(app_id: str, identifier: str) -> Optional[Dict[str, Any]]:
-    """获取单个账号的手机号加密数据包 (encryptedData, iv, code, mobile, cloudId)"""
     if not identifier:
         return None
     client = YYBClient()
@@ -536,7 +470,6 @@ def get_single_phone_encrypted(app_id: str, identifier: str) -> Optional[Dict[st
         return None
 
 def get_single_operate_wx_data(app_id: str, identifier: str, payload: Optional[Dict[str, Any]] = None) -> Optional[Any]:
-    """获取通用 operateWxData 数据（如 webapi_getuserencryptkey / 云函数 / 用户数据等）"""
     if not identifier:
         return None
     client = YYBClient()
@@ -547,11 +480,9 @@ def get_single_operate_wx_data(app_id: str, identifier: str, payload: Optional[D
         return None
 
 def get_single_user_encrypt_key(app_id: str, identifier: str) -> Optional[Any]:
-    """获取单个账号的加密密钥 (webapi_getuserencryptkey)"""
     return get_single_operate_wx_data(app_id, identifier, {"api_name": "webapi_getuserencryptkey"})
 
 def get_single_user_info(app_id: str, identifier: str) -> Optional[Any]:
-    """获取单个账号的用户信息 (getUserInfo)"""
     if not identifier:
         return None
     client = YYBClient()
@@ -562,7 +493,6 @@ def get_single_user_info(app_id: str, identifier: str) -> Optional[Any]:
         return None
 
 def get_single_we_run_data(app_id: str, identifier: str) -> Optional[Any]:
-    """获取单个账号的微信步数加密数据 (getWeRunData)"""
     if not identifier:
         return None
     client = YYBClient()
@@ -573,7 +503,6 @@ def get_single_we_run_data(app_id: str, identifier: str) -> Optional[Any]:
         return None
 
 def get_single_cloud_function(app_id: str, identifier: str, env: str, name: str, data: Optional[Dict[str, Any]] = None) -> Optional[Any]:
-    """调用小程序云函数 (cloudCallFunction)"""
     if not identifier:
         return None
     client = YYBClient()
@@ -584,7 +513,6 @@ def get_single_cloud_function(app_id: str, identifier: str, env: str, name: str,
         return None
 
 def get_single_oauth_authorize(app_id: str, identifier: str, redirect_uri: str, scope: str = "snsapi_userinfo", state: str = "") -> Optional[Any]:
-    """调用公众号网页授权 (OAuth2)"""
     if not identifier:
         return None
     client = YYBClient()
@@ -594,10 +522,7 @@ def get_single_oauth_authorize(app_id: str, identifier: str, redirect_uri: str, 
         print(f"[yyb] 公众号网页授权失败: {e}")
         return None
 
-# ============================================================
-# 5. 全局挂载到 builtins
-# ============================================================
-
+# 全局挂载到 builtins
 builtins.YYBClient = YYBClient
 builtins.WeChatCodeGetter = WeChatCodeGetter
 builtins.YYBAdapter = YYBAdapter

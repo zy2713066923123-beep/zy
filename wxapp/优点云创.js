@@ -1,7 +1,6 @@
 require('./yyb.js'); // 自动同步 yyb_go 存活账号
 // name: 优点云创
-// cron: 10 11,17 * * *
-
+// cron: 52 07,19 * * *
 const axios = require("axios");
 
 // ====== 标准Env模式 ======

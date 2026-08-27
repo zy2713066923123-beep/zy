@@ -4,7 +4,7 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 @Author: sm
 @Date: 2026.05.31
 @Description: 老板电器 ROKI 小程序签到
-cron: 59 10,13 * * *
+cron: 20 15,03 * * *
 变量名：roki
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
 

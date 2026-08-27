@@ -1,6 +1,5 @@
 require('./yyb.js'); // 自动同步 yyb_go 存活账号
-/** cron: 28 9,14 * * *
- * Show:微信公众号 庙友之家 每日签到 积分可换首饰
+// cron: 36 10,22 * * *
  * 变量名:miaoyouHome
  * 变量值:http://www.jumpingcarp.cn/scrm-rz-wechat-tzlm 公众号 左下角 每日签到 链接里面的headers 中的 COOKIE
  * JSESSIONID= 的值 的值 的值 多账户@或换行 

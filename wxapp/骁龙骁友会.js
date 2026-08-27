@@ -4,9 +4,7 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
  * 变量: WX_ID (wxid#备注 多号@或换行)
  * 变量: WECHAT_SERVER (协议服务地址)
  * 可选: WX_APPID (默认 wx026c06df6adc5d06)
- * cron: 25 11,13 * * *
- */
-
+ * cron: 24 17,05 * * *
 const ckName = "WX_ID";
 const WECHAT_SERVER = (process.env.WX_SERVER || process.env.WECHAT_SERVER || "").trim();
 const WX_APPID = (process.env.WX_APPID || "wx026c06df6adc5d06").trim();

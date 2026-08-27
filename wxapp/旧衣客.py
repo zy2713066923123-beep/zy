@@ -2,8 +2,7 @@
 # -*- coding: utf-8 -*-
 # name: 旧衣客
 """
-cron: 0 8,12,20 * * *
-
+cron: 52 11,23 * * *
 变量:
   export WX_SERVER='http://127.0.0.1:8000'
   export WX_ID="wxid#备注"

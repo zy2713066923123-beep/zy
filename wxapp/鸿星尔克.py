@@ -2,7 +2,7 @@
 import yyb  # 自动同步 yyb_go 存活账号
 # -- coding: utf-8 --
 # -------------------------------
-# cron: 21 10,16 * * *
+# cron: 32 17,05 * * *
 # name: 鸿星尔克官方会员中心小程序
 # 账号变量（二选一）：
 #   WX_ID = wxid#备注；多账号用换行或 & 分隔（走 getCode 取 code -> on_login 登录）

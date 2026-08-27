@@ -4,8 +4,8 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 @Author: sm
 @Date: 2024.06.07 19:15
 @Description:  
-cron: 6 9,14 * * *
-#Notice:   
+cron: 12 16,04 * * *
+#Notice:
 谢瑞麟 微信小程序 签到得积分 
 变量名称：tslj
 ⚠️【免责声明】

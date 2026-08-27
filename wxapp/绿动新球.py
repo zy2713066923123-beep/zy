@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import yyb  # 自动同步 yyb_go 存活账号
 # name: 绿动新球
-# cron: 11 10,13 * * *
+# cron: 44 14,02 * * *
 # -*- coding: utf-8 -*-
  
 """

@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import yyb  # 自动同步 yyb_go 存活账号
-# cron:52 8,16 * * *
-"""
+# cron:56 16,04 * * *
 # name: 雀巢会员俱乐部
 脚本名称：雀巢会员俱乐部
 说明：

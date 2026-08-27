@@ -1,5 +1,5 @@
 import yyb  # 自动同步 yyb_go 存活账号
-# cron: 58 11,16 * * *
+# cron: 20 10,22 * * *
 # -*- coding: utf-8 -*-
 # name: 巅峰美缝师
 """

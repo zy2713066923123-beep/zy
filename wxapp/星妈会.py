@@ -1,6 +1,6 @@
 import yyb  # 自动同步 yyb_go 存活账号
 
-# cron: 24 11,16 * * *
+# cron: 0 12,00 * * *
 #!/usr/bin/env python3
 # name: 星妈会
 # -*- coding: utf-8 -*-

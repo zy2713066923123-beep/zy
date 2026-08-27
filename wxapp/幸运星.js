@@ -1,10 +1,7 @@
 require('./yyb.js'); // 自动同步 yyb_go 存活账号
 // name: 幸运星
-// cron: 12 11,16 * * *
-/**
- *
- *
- * 功能（全部纯 Node 接口调用，无需浏览器 / 真实浏览 / App WebView）：
+// cron: 28 10,22 * * *
+功能（全部纯 Node 接口调用，无需浏览器 / 真实浏览 / App WebView）：
  *   1. 每日签到（signinandreceive）
  *   2. 自动完成所有 PAGEVIEW 任务（pageview 上报 → RUNNING→FINISH）
  *   3. 自动领取全部已完成任务的奖励（receiveprize）

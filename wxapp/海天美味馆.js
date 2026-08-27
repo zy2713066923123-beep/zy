@@ -4,7 +4,7 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 @Author: sm
 @Date: 2026.06.01
 @Description:  海天美味馆小程序
-cron: 43 10,14 * * *
+cron: 8 13,01 * * *
 #Notice:
 变量名 haitian
 变量值：wx_server 里的 openid/账号标识，多账号&或换行

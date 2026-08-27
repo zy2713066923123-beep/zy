@@ -1,7 +1,7 @@
 import yyb  # 自动同步 yyb_go 存活账号
 
 # name:岚财承品
-# cron:10 9,15 * * *
+# cron:16 10,22 * * *
 import dataclasses
 import os
 import re

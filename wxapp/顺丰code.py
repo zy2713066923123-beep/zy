@@ -1,6 +1,5 @@
 import yyb  # 自动同步 yyb_go 存活账号
-# cron: 59 10,13 * * *
-
+# cron: 8 17,05 * * *
 # name: 顺丰速运积分任务
 
 

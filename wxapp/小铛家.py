@@ -2,7 +2,7 @@
 import yyb  # 自动同步 yyb_go 存活账号
 """
 小铛家小程序
- cron: 48 8,14 * * *
+ cron: 12 10,22 * * *
 环境变量:
 # name: 小铛家
   WX_ID: wxid列表，格式: wxid#备注，多个账号用换行或@分隔
