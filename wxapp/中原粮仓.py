@@ -99,9 +99,8 @@ def get_yyb_accounts():
 def get_yyb_oauth_code(account):
     """通过 yyb 获取公众号网页授权 code（snsapi_userinfo）
 
-    使用 yyb_go 新版路由 /wxapp/oauth/authorize（旧版 /wx/oauth 已不存在）。
-    oauth_authorize 内部会按 ref 解析账号并请求微信授权，返回原始授权结果
-    （含 code / openid / unionid / 等微信字段，或 redirect_url）。
+    中原粮仓是公众号 H5 应用，wechatLogin 接口需要公众号网页授权 code。
+    使用 yyb_go 的 /wxapp/oauth/authorize 路由获取公众号授权。
     """
     ref = str(account.get("id") or account.get("openid") or account.get("wxid"))
     oauth_url = (
@@ -113,7 +112,6 @@ def get_yyb_oauth_code(account):
     res = _yyb_client.oauth_authorize(ref, APPID, oauth_url)
     if not isinstance(res, dict):
         raise Exception(f"获取公众号授权失败: {res}")
-    # code 优先取返回里的 code，其次从 redirect_url 的 query 解析
     code = res.get("code")
     redirect_url = res.get("redirect_url") or ""
     if not code and redirect_url:
