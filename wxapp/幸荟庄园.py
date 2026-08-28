@@ -47,6 +47,39 @@ BUILDING_TYPES = ["plant", "brew", "age", "bottle"]
 # 每日任务类型
 DAILY_TASK_TYPES = ["read", "game"]
 
+# ============ 防检测/防封停配置 ============
+# 每次请求之间的随机延迟范围(秒)，模拟人类操作节奏
+REQUEST_DELAY_MIN = 1.2
+REQUEST_DELAY_MAX = 3.5
+# 429 限流时的最大重试次数
+MAX_RETRY = 3
+# 429 退避基础延迟(秒)，每次重试翻倍并加随机抖动
+RETRY_BASE_DELAY = 3.0
+# 账号之间的随机间隔范围(秒)
+ACCOUNT_GAP_MIN = 5
+ACCOUNT_GAP_MAX = 12
+# 是否启用随机延迟(可关闭便于调试)
+ENABLE_DELAY = True
+
+# 随机 User-Agent 池，模拟不同设备，避免被识别为脚本
+UA_POOL = [
+    "Mozilla/5.0 (Linux; Android 13; M2012K11AC Build/AQ3A.250226.002; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/150.0.7871.181 Mobile Safari/537.36 XWEB/1500047 MMWEBSDK/20260502 MMWEBID/3433 MicroMessenger/8.0.76.3141(0x28004C54) WeChat/arm64 Weixin NetType/WIFI Language/zh_CN ABI/arm64 MiniProgramEnv/android",
+    "Mozilla/5.0 (Linux; Android 14; 23127PN0CC Build/UKQ1.230917.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/150.0.7871.181 Mobile Safari/537.36 XWEB/1500047 MMWEBSDK/20260502 MMWEBID/3433 MicroMessenger/8.0.76.3141(0x28004C54) WeChat/arm64 Weixin NetType/5G Language/zh_CN ABI/arm64 MiniProgramEnv/android",
+    "Mozilla/5.0 (Linux; Android 14; 2211133C Build/UKQ1.230917.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/120.0.0.0 Mobile Safari/537.36 XWEB/1500047 MMWEBSDK/20260502 MMWEBID/3433 MicroMessenger/8.0.75.3141(0x28004C54) WeChat/arm64 Weixin NetType/4G Language/zh_CN ABI/arm64 MiniProgramEnv/android",
+    "Mozilla/5.0 (Linux; Android 12; 2107119DC Build/SKQ1.211006.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/119.0.0.0 Mobile Safari/537.36 XWEB/1500047 MMWEBSDK/20260502 MMWEBID/3433 MicroMessenger/8.0.75.3141(0x28004B54) WeChat/arm64 Weixin NetType/WIFI Language/zh_CN ABI/arm64 MiniProgramEnv/android",
+    "Mozilla/5.0 (Linux; Android 13; 22081212C Build/TKQ1.220829.002; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/118.0.0.0 Mobile Safari/537.36 XWEB/1500047 MMWEBSDK/20260502 MMWEBID/3433 MicroMessenger/8.0.75.3141(0x28004B54) WeChat/arm64 Weixin NetType/WIFI Language/zh_CN ABI/arm64 MiniProgramEnv/android",
+]
+
+def _sleep(lo, hi):
+    """随机延迟，模拟人类操作节奏"""
+    if not ENABLE_DELAY:
+        return
+    time.sleep(random.uniform(lo, hi))
+
+def _random_ua():
+    """随机选择一个 User-Agent"""
+    return random.choice(UA_POOL)
+
 # 日志
 class Log:
     def __init__(self):
@@ -160,7 +193,7 @@ def login(code, phpsessid=""):
 
     headers = {
         "content-type": "application/x-www-form-urlencoded",
-        "User-Agent": "Mozilla/5.0 (Linux; Android 15; M2012K11AC Build/AQ3A.250226.002; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/150.0.7871.181 Mobile Safari/537.36 XWEB/1500047 MMWEBSDK/20260502 MMWEBID/3433 MicroMessenger/8.0.76.3141(0x28004C54) WeChat/arm64 Weixin NetType/WIFI Language/zh_CN ABI/arm64 MiniProgramEnv/android",
+        "User-Agent": _random_ua(),
     }
     if phpsessid:
         headers["psession"] = phpsessid
@@ -190,7 +223,7 @@ class ManorClient:
         self.session = requests.Session()
         self.session.headers.update({
             "content-type": "application/x-www-form-urlencoded",
-            "User-Agent": "Mozilla/5.0 (Linux; Android 13; M2021K11AC Build/AQ3A.250226.002; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/150.0.7871.181 Mobile Safari/537.36 XWEB/1500047 MMWEBSDK/20260502 MMWEBID/3433 MicroMessenger/8.0.76.3141(0x28004C54) WeChat/arm64 Weixin NetType/WIFI Language/zh_CN ABI/arm64 MiniProgramEnv/android",
+            "User-Agent": _random_ua(),
         })
         if phpsessid:
             self.session.headers["phpsession"] = phpsessid
@@ -199,9 +232,29 @@ class ManorClient:
         url = MANOR_BASE + path
         # 过滤空值
         data = {k: v for k, v in params.items() if v is not None and v != ""}
-        resp = self.session.post(url, data=data, timeout=15)
-        resp.raise_for_status()
-        return resp.json()
+        # 请求前随机延迟，模拟人类操作节奏
+        _sleep(REQUEST_DELAY_MIN, REQUEST_DELAY_MAX)
+        # 429 限流自动退避重试
+        for attempt in range(MAX_RETRY + 1):
+            try:
+                resp = self.session.post(url, data=data, timeout=15)
+                if resp.status_code == 429:
+                    # 限流，退避后重试
+                    backoff = RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 2)
+                    log.warn("    触发限流(429)，%.1fs 后重试(%d/%d)" % (backoff, attempt + 1, MAX_RETRY))
+                    time.sleep(backoff)
+                    continue
+                resp.raise_for_status()
+                return resp.json()
+            except requests.exceptions.HTTPError as e:
+                if e.response is not None and e.response.status_code == 429 and attempt < MAX_RETRY:
+                    delay = RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 2)
+                    log.warn("    触发限流(429)，%.1fs 后重试(%d/%d)" % (delay, attempt + 1, MAX_RETRY))
+                    time.sleep(delay)
+                    continue
+                raise
+        # 重试耗尽
+        raise RuntimeError("请求 %s 多次触发限流(429)" % path)
 
     def status(self):
         return self._post("/status", {"uid": self.uid})
@@ -394,7 +447,11 @@ def main():
             process_account(wxid, remark)
         except Exception as e:
             log.error("账号处理异常: %s" % e)
-        time.sleep(2)
+        # 账号之间随机间隔，避免连续请求被识别为批量操作
+        if i < len(accounts) - 1:
+            gap = random.uniform(ACCOUNT_GAP_MIN, ACCOUNT_GAP_MAX)
+            log.info("⏳ 等待 %.1fs 后处理下一个账号..." % gap)
+            time.sleep(gap)
 
     log.info("全部完成!")
 
