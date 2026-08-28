@@ -304,12 +304,18 @@ class YYBClient:
             "appid": app_id,
         })
         inner = res.get("data") if isinstance(res, dict) and isinstance(res.get("data"), dict) else (res if isinstance(res, dict) else {})
+        # 部分服务端把 encryptedData/iv 放在 raw 字段里，需兼容提取
+        raw = {}
+        if isinstance(inner, dict) and isinstance(inner.get("raw"), dict):
+            raw = inner["raw"]
+        elif isinstance(res, dict) and isinstance(res.get("raw"), dict):
+            raw = res["raw"]
         return {
             "code": str(inner.get("code")) if inner.get("code") else None,
             "mobile": inner.get("mobile"),
             "masked_phone": inner.get("masked_phone"),
-            "encryptedData": inner.get("encryptedData") or inner.get("encrypted_data"),
-            "iv": inner.get("iv") or inner.get("IV"),
+            "encryptedData": inner.get("encryptedData") or inner.get("encrypted_data") or raw.get("encryptedData") or raw.get("encrypted_data"),
+            "iv": inner.get("iv") or inner.get("IV") or raw.get("iv") or raw.get("IV"),
             "cloudId": inner.get("cloudId"),
         }
 

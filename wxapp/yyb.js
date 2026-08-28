@@ -321,12 +321,14 @@ class YYBClient {
             appid: appId,
         });
         const inner = res?.data || res || {};
+        // 部分服务端把 encryptedData/iv 放在 raw 字段里，需兼容提取
+        const raw = (inner && typeof inner.raw === 'object' && inner.raw) || (res && typeof res.raw === 'object' && res.raw) || {};
         return {
             code: inner.code ? String(inner.code) : null,
             mobile: inner.mobile || null,
             masked_phone: inner.masked_phone || null,
-            encryptedData: inner.encryptedData || inner.encrypted_data || null,
-            iv: inner.iv || inner.IV || null,
+            encryptedData: inner.encryptedData || inner.encrypted_data || raw.encryptedData || raw.encrypted_data || null,
+            iv: inner.iv || inner.IV || raw.iv || raw.IV || null,
             cloudId: inner.cloudId || null,
         };
     }
