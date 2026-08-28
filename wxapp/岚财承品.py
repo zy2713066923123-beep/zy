@@ -400,16 +400,16 @@ class Script:
         if not encrypted_data or not iv:
             raise RuntimeError("微信手机号授权包缺少 encryptedData/iv，无法登录")
 
-        # 参考认养一头牛等脚本：getPhoneNumber 返回的 code 是手机号授权 code，
-        # 应作为登录接口的 code 字段；wx.login 的 code 作为 userCode 字段。
+        # 参考认养一头牛等脚本：code 字段传 wx.login 的 code（微信登录 code），
+        # userCode 字段传 getPhoneNumber 返回的手机号授权 code。
         phone_code = mobile_info.get("code") or self.info.get("phoneCode") or ""
 
         data = self.loginByMiniApp(
             {
                 "encryptedData": encrypted_data,
                 "iv": iv,
-                "code": phone_code,
-                "userCode": code,
+                "code": code,
+                "userCode": phone_code,
                 "appId": APPID,
             }
         )
