@@ -137,43 +137,46 @@ def entries():
 def _extract_user_result(user_data):
     """从 yyb operate_wx_data 返回中提取微信用户信息 dict。
 
-    兼容两种返回结构：
+    兼容多种返回结构：
     1. 旧结构：{"result": {"encryptedData":..., "iv":..., "rawData":..., "signature":...}}
-    2. 新结构：{"success": True, "openid":..., "respJson": "{\"data\":\"...\",\"signature\":...,\"encryptedData\":...,\"iv\":...,\"cloud_id\":...}"}
+    2. respJson 结构：{"success": True, "openid":..., "respJson": "{\"data\":\"...\",\"signature\":...,\"encryptedData\":...,\"iv\":...,\"cloud_id\":...}"}
+    3. raw 结构：{"success": True, "openid":..., "raw": {"data": "..."|{...}, "signature":..., "encryptedData":..., "iv":..., "cloud_id":...}}
     """
     if not isinstance(user_data, dict):
         return None
     # 结构 1：直接带 result
     if isinstance(user_data.get("result"), dict):
         return user_data["result"]
-    # 结构 2：respJson 字符串
+    # 结构 2/3：respJson 字符串 或 raw dict，二者内部结构一致
+    resp = None
     resp_json = user_data.get("respJson")
     if isinstance(resp_json, str):
         try:
             resp = json.loads(resp_json)
         except (ValueError, TypeError):
-            return None
-        if not isinstance(resp, dict):
-            return None
-        result = {}
-        # data 可能是 JSON 字符串（用户信息），也可能是 dict
-        data = resp.get("data")
-        if isinstance(data, str):
-            try:
-                data = json.loads(data)
-            except (ValueError, TypeError):
-                pass
-        if isinstance(data, dict):
-            result["userInfo"] = data
-            result["rawData"] = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
-        for key in ("signature", "encryptedData", "iv"):
-            if resp.get(key):
-                result[key] = resp[key]
-        if resp.get("cloud_id"):
-            result["cloudID"] = resp["cloud_id"]
-        result.setdefault("errMsg", "getUserInfo:ok")
-        return result
-    return None
+            resp = None
+    if not isinstance(resp, dict):
+        resp = user_data.get("raw")
+    if not isinstance(resp, dict):
+        return None
+    result = {}
+    # data 可能是 JSON 字符串（用户信息），也可能是 dict
+    data = resp.get("data")
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except (ValueError, TypeError):
+            pass
+    if isinstance(data, dict):
+        result["userInfo"] = data
+        result["rawData"] = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+    for key in ("signature", "encryptedData", "iv"):
+        if resp.get(key):
+            result[key] = resp[key]
+    if resp.get("cloud_id"):
+        result["cloudID"] = resp["cloud_id"]
+    result.setdefault("errMsg", "getUserInfo:ok")
+    return result
 
 
 def get_code(account):
@@ -306,7 +309,12 @@ def login_and_sign(code, wx_user_info, ref):
                 f"页面 {html_title[:40]}）"
             ) from exc
         if not isinstance(token_body, dict) or not token_body.get("passToken"):
-            raise RuntimeError("小米会话建立失败")
+            detail = ""
+            if isinstance(token_body, dict):
+                detail = json.dumps(token_body, ensure_ascii=False)[:300]
+            else:
+                detail = repr(token_body)[:300]
+            raise RuntimeError(f"小米会话建立失败：{detail}")
         session_tokens = token_body
         save_cached_session(ref, token_body)
         flow_ok("小米账号会话建立成功")
