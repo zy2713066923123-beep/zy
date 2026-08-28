@@ -481,10 +481,9 @@ async function loadAccounts(filterEnvName = null) {
         }
     }
     if (matched.length === 0 && onlineAccounts.length > 0) {
-        return filterTargets.map((t, idx) => {
-            const acc = onlineAccounts[idx % onlineAccounts.length];
-            return { ...acc, remark: t.remark || acc.nickname || `账号${idx + 1}` };
-        });
+        // WX_ID 一条都匹配不上：回退为全部在线账号（避免"配 N 条只跑 N 个"）
+        console.log(`[yyb] WX_ID 配置了 ${filterTargets.length} 条但均未匹配到账号，回退使用全部 ${onlineAccounts.length} 个存活账号`);
+        return onlineAccounts;
     }
     return matched;
 }
@@ -494,22 +493,50 @@ async function getAccounts() {
 }
 
 async function resolveAccounts(envName) {
-    const val = process.env.WX_ID || (envName ? process.env[envName] : '') || '';
-    if (val && val.trim()) {
-        return val
-            .split(/[\n&]+/)
-            .map(v => String(v).split('#')[0].trim())
-            .filter(Boolean);
-    }
+    // 优先拉取全部存活账号（不因配置了 WX_ID 就只用配置条目）
+    let online = [];
     try {
-        const accs = await loadAccounts();
-        if (accs && accs.length) {
-            const ids = accs.map(a => String(a.openid || a.wxid || a._ref || a.id || '')).filter(Boolean);
-            console.log(`[yyb] 自动从 yyb_go 同步到 ${ids.length} 个存活账号`);
-            return ids;
-        }
+        online = await new YYBClient().getOnlineAccounts();
     } catch (e) {
-        console.log(`[yyb] 自动拉取账号失败: ${e.message || e}`);
+        console.log(`[yyb] 拉取存活账号失败: ${e.message || e}`);
+    }
+
+    const ids = online.map(a => String(a.openid || a.wxid || a._ref || a.id || '')).filter(Boolean);
+
+    const val = process.env.WX_ID || (envName ? process.env[envName] : '') || '';
+    if (val && val.trim() && ids.length) {
+        // WX_ID 作为筛选：逐条匹配在线账号（openid/wxid/id/备注/昵称）
+        const targets = String(val)
+            .split(/[\n&@]+/)
+            .map(v => String(v).split('#')[0].trim().toLowerCase())
+            .filter(Boolean);
+        const matched = [];
+        for (const t of targets) {
+            const idx = online.findIndex(acc => {
+                const keys = [String(acc.id || ''), acc.openid, acc.wxid, acc._ref, acc.alias, acc.remark, acc.nickname]
+                    .map(k => String(k || '').trim().toLowerCase())
+                    .filter(Boolean);
+                return keys.includes(t);
+            });
+            if (idx >= 0 && !matched.includes(ids[idx])) matched.push(ids[idx]);
+        }
+        if (matched.length === targets.length && matched.length > 0) {
+            // 全部匹配：按 WX_ID 精确筛选
+            console.log(`[yyb] WX_ID ${targets.length} 条全部匹配，按筛选执行`);
+            return matched;
+        }
+        // 任何一条匹配不上：使用全部存活账号（避免"配 N 条只跑 N 个"）
+        console.log(`[yyb] WX_ID ${matched.length}/${targets.length} 条匹配到账号，回退使用全部存活账号`);
+    }
+
+    if (ids.length) {
+        console.log(`[yyb] 自动从 yyb_go 同步到 ${ids.length} 个存活账号`);
+        return ids;
+    }
+
+    // yyb 服务不可用：回退 WX_ID 原始条目
+    if (val && val.trim()) {
+        return val.split(/[\n&]+/).map(v => String(v).split('#')[0].trim()).filter(Boolean);
     }
     console.log('[yyb] 未配置 WX_ID，且 yyb-main 无存活账号');
     return [];
