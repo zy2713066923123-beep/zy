@@ -753,11 +753,38 @@ def get_wx_user_info(wxid: str, log: LogFunc) -> Dict[str, Any]:
 
     if is_yyb:
         res = get_single_operate_wx_data(appid, raw_id, payload)
-        if not res or res.get("code") != 0:
+        if not res:
             raise RuntimeError(f"YYB operateWxData 失败: {res}")
-        inner = res.get("data", {}).get("result", {})
+
+        # 兼容两种返回结构：
+        # 1. 旧结构：{"code":0,"data":{"result":{...}}}
+        # 2. 新结构：{"success":true,"respJson":"{...}"}，respJson 为 JSON 字符串
+        inner = None
+        if isinstance(res, dict):
+            if res.get("code") == 0:
+                inner = res.get("data", {}).get("result", {})
+                if not isinstance(inner, dict):
+                    inner = res.get("data", {})
+            elif res.get("respJson"):
+                try:
+                    inner = json.loads(res["respJson"])
+                except Exception:
+                    inner = None
+            elif res.get("resp"):
+                try:
+                    inner = json.loads(res["resp"])
+                except Exception:
+                    inner = None
+            elif res.get("data") and isinstance(res["data"], dict):
+                inner = res["data"]
+
         if not isinstance(inner, dict):
-            inner = res.get("data", {})
+            raise RuntimeError(f"YYB operateWxData 失败: {res}")
+
+        # 检查 err_no（新结构）或 code（旧结构）
+        err_no = inner.get("err_no", inner.get("errno", 0))
+        if err_no not in (0, None):
+            raise RuntimeError(f"YYB operateWxData 失败: {res}")
 
         encrypted_data = inner.get("encryptedData")
         iv = inner.get("iv")
