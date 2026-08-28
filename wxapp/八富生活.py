@@ -148,8 +148,30 @@ def feistel_encrypt(ad_id, user_id) -> str:
 
 # ---------- 账号来源 ----------
 def load_accounts():
-    """从 WX_ID 环境变量解析多账号（格式 wxid/openid#备注，多账号换行）"""
+    """优先从 yyb 服务拉取存活账号，失败则回退到 WX_ID 环境变量（格式 wxid/openid#备注，多账号换行）"""
     accounts = []
+
+    # 优先从 yyb 服务拉取存活账号
+    try:
+        from yyb import YYBClient
+        online = YYBClient().get_online_accounts()
+        if online:
+            for acc in online:
+                wxid = acc.get("openid") or acc.get("wxid") or acc.get("id") or ""
+                remark = acc.get("nickname") or acc.get("alias") or acc.get("remark") or wxid
+                if wxid:
+                    accounts.append({
+                        "openid": wxid,
+                        "display_name": remark,
+                        "source": "yyb",
+                        "wxid": wxid,
+                    })
+            if accounts:
+                log(f"  📥 从 yyb 服务同步到 {len(accounts)} 个存活账号")
+                return accounts
+    except Exception as exc:
+        log(f"  ⚠️ 从 yyb 服务拉取账号失败: {exc}")
+
     wx_id_raw = os.environ.get("WX_ID", "").strip() or os.environ.get("WXIDBFSH", "").strip()
 
     if not wx_id_raw:

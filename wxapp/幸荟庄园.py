@@ -37,7 +37,7 @@ import requests
 APPID = "wxc431da386d2de6e3"  # 幸荟庄园小程序 appid
 
 # 庄园 API 域名
-MANOR_BASE = "https://yy.fenggewenhua.com"
+MANOR_BASE = "https://yy.fenggewenhua.com/api/manor"
 # 登录域名
 LOGIN_BASE = "https://xcx.fenggewenhua.com"
 
@@ -204,28 +204,28 @@ class ManorClient:
         return resp.json()
 
     def status(self):
-        return self._post("/manor/status", {"uid": self.uid})
+        return self._post("/status", {"uid": self.uid})
 
     def winery(self, winery_id=1):
-        return self._post("/manor/winery", {"uid": self.uid, "winery_id": winery_id})
+        return self._post("/winery", {"uid": self.uid, "winery_id": winery_id})
 
     def building_task(self, winery_id, building_type):
-        return self._post("/manor/building/task", {"uid": self.uid, "winery_id": winery_id, "building_type": building_type})
+        return self._post("/building/task", {"uid": self.uid, "winery_id": winery_id, "building_type": building_type})
 
     def building_start(self, winery_id, building_type, option_id):
-        return self._post("/manor/building/start", {"uid": self.uid, "winery_id": winery_id, "building_type": building_type, "option_id": option_id})
+        return self._post("/building/start", {"uid": self.uid, "winery_id": winery_id, "building_type": building_type, "option_id": option_id})
 
     def building_harvest(self, winery_id, building_type, task_id):
-        return self._post("/manor/building/harvest", {"uid": self.uid, "task_id": task_id})
+        return self._post("/building/harvest", {"uid": self.uid, "task_id": task_id})
 
     def daily_tasks(self, winery_id, building_type):
-        return self._post("/manor/building/daily-tasks", {"uid": self.uid, "winery_id": winery_id, "building_type": building_type})
+        return self._post("/building/daily-tasks", {"uid": self.uid, "winery_id": winery_id, "building_type": building_type})
 
     def complete_daily_task(self, winery_id, building_type, task_type):
-        return self._post("/manor/building/daily-task/complete", {"uid": self.uid, "winery_id": winery_id, "building_type": building_type, "task_type": task_type})
+        return self._post("/building/daily-task/complete", {"uid": self.uid, "winery_id": winery_id, "building_type": building_type, "task_type": task_type})
 
     def story(self, winery_id=1):
-        return self._post("/manor/story", {"uid": self.uid, "winery_id": winery_id, "mode": "random"})
+        return self._post("/story", {"uid": self.uid, "winery_id": winery_id, "mode": "random"})
 
 # ================= 主流程 =================
 def process_account(wxid, remark):

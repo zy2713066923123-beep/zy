@@ -796,6 +796,23 @@ def run_account(
 
 
 def load_accounts() -> List[WxAccount]:
+    # 优先从 yyb 服务拉取存活账号
+    try:
+        from yyb import YYBClient
+        online = YYBClient().get_online_accounts()
+        if online:
+            accounts: List[WxAccount] = []
+            for acc in online:
+                wxid = acc.get("openid") or acc.get("wxid") or acc.get("id") or ""
+                remark = acc.get("nickname") or acc.get("alias") or acc.get("remark") or ""
+                if wxid:
+                    accounts.append(WxAccount(wxid=wxid, remark=remark))
+            if accounts:
+                log(f"[yyb] 自动从 yyb_go 同步到 {len(accounts)} 个存活账号")
+                return accounts
+    except Exception as exc:
+        log(f"[yyb] 拉取存活账号失败: {exc}", "warn")
+
     raw = os.getenv("WX_ID") or ""
     return split_accounts(raw)
 
