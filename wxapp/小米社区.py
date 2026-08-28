@@ -134,6 +134,48 @@ def entries():
     return accounts
 
 
+def _extract_user_result(user_data):
+    """从 yyb operate_wx_data 返回中提取微信用户信息 dict。
+
+    兼容两种返回结构：
+    1. 旧结构：{"result": {"encryptedData":..., "iv":..., "rawData":..., "signature":...}}
+    2. 新结构：{"success": True, "openid":..., "respJson": "{\"data\":\"...\",\"signature\":...,\"encryptedData\":...,\"iv\":...,\"cloud_id\":...}"}
+    """
+    if not isinstance(user_data, dict):
+        return None
+    # 结构 1：直接带 result
+    if isinstance(user_data.get("result"), dict):
+        return user_data["result"]
+    # 结构 2：respJson 字符串
+    resp_json = user_data.get("respJson")
+    if isinstance(resp_json, str):
+        try:
+            resp = json.loads(resp_json)
+        except (ValueError, TypeError):
+            return None
+        if not isinstance(resp, dict):
+            return None
+        result = {}
+        # data 可能是 JSON 字符串（用户信息），也可能是 dict
+        data = resp.get("data")
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except (ValueError, TypeError):
+                pass
+        if isinstance(data, dict):
+            result["userInfo"] = data
+            result["rawData"] = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+        for key in ("signature", "encryptedData", "iv"):
+            if resp.get(key):
+                result[key] = resp[key]
+        if resp.get("cloud_id"):
+            result["cloudID"] = resp["cloud_id"]
+        result.setdefault("errMsg", "getUserInfo:ok")
+        return result
+    return None
+
+
 def get_code(account):
     ref = str(account.get("id") or account.get("openid") or account.get("wxid") or "")
     if not ref:
@@ -148,7 +190,7 @@ def get_code(account):
         "operate_directly": False,
         "with_credentials": True,
     })
-    user_result = user_data.get("result") if isinstance(user_data, dict) else None
+    user_result = _extract_user_result(user_data)
     if not isinstance(user_result, dict):
         raise RuntimeError(f"YYB 获取微信用户信息失败：{user_data}")
     if os.getenv("MI_COMMUNITY_DEBUG") == "1":
