@@ -309,7 +309,24 @@ class Task {
 }
 
 !(async () => {
-    // 未配置 WX_ID 时，自动从 yyb_go 拉取所有存活账号
+    // 优先从 yyb 拉取全部存活账号（不受 WX_ID 过滤，配 N 条只跑 N 个）
+    try {
+        const online = await new YYBClient().getOnlineAccounts();
+        if (online && online.length) {
+            SERVERS = online.map(a => a.openid || a.wxid || a._ref || String(a.id)).filter(Boolean);
+            console.log(`✅ 从 yyb 服务拉取到 ${online.length} 个存活账号`);
+        }
+    } catch (e) {
+        console.log(`[yyb] 拉取账号列表失败: ${e.message || e}`);
+    }
+    // 回退：WX_ID 环境变量
+    if (!SERVERS.length) {
+        SERVERS = (process.env.WX_ID || "")
+            .split(/\r?\n|&/)
+            .map(s => s.trim())
+            .filter(Boolean);
+    }
+    // 兜底：从 yyb_go 拉取所有存活账号
     if (!SERVERS.length) {
         try {
             const _accs = await loadAccounts();

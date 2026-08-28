@@ -383,6 +383,27 @@ function $await(ms) {
 
 // 环境处理
 async function Envs() {
+    // 优先从 yyb 拉取全部存活账号（不受 WX_ID 过滤，配 N 条只跑 N 个）
+    try {
+        const online = await new YYBClient().getOnlineAccounts();
+        if (online && online.length) {
+            xjhd = online
+                .map(acc => {
+                    const id = acc.openid || acc.wxid || String(acc.id || '');
+                    const note = acc.nickname || acc.alias || acc.remark || '';
+                    return id ? `wx:${id}#${note}` : '';
+                })
+                .filter(Boolean)
+                .join('\n');
+            log(`✅ 从 yyb 服务拉取到 ${online.length} 个存活账号`);
+        }
+    } catch (e) {
+        log(`[yyb] 拉取账号列表失败: ${e.message || e}`);
+    }
+    if (!xjhd) {
+        // 回退：WX_ID 环境变量
+        xjhd = ($.isNode() ? process.env.WX_ID : $.getdata("WX_ID")) || "";
+    }
     if (!xjhd) { log(`未填写变量 WX_ID`); return false }
     xjhdArr = xjhd.split(/[\n&@]/).filter(i => i);
     return true;

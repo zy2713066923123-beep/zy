@@ -38,6 +38,16 @@ const PLUSPLUS_TOKEN = process.env.PLUSPLUS_TOKEN || "";
 
 // 从环境变量 WX_ID 读取账号，支持用换行或&分隔；未配置时自动从 yyb_go 同步存活账号
 async function getAccountList() {
+    // 优先从 yyb 拉取全部存活账号（不受 WX_ID 过滤，配 N 条只跑 N 个）
+    try {
+        const online = await new YYBClient().getOnlineAccounts();
+        if (online && online.length) {
+            console.log(`✅ 从 yyb 服务拉取到 ${online.length} 个存活账号`);
+            return online.map(a => String(a.id || a.openid || a.wxid));
+        }
+    } catch (e) {
+        console.log("[yyb] 拉取账号列表失败: " + (e && e.message ? e.message : e));
+    }
     const envList = (process.env.WX_ID || "")
         .split(/\r?\n|&/)
         .map(item => item.trim())

@@ -38,22 +38,25 @@ class Env {
   constructor(name) { this.name = name; this.userList = []; this.userIdx = 1; this.logs = []; const originalLog = console.log; console.log = (...args) => { this.logs.push(args.join(" ")); originalLog.apply(console, args); }; }
   log(...args) { console.log(...args); this.logs.push(args.join(" ")); }
   async checkEnv(ckName) {
-    let val = process.env.WX_ID || process.env[ckName];
-    if (!val) {
-      try {
-        const adapter = new YYBAdapter();
-        const accounts = await adapter.getAccounts();
-        if (accounts && accounts.length > 0) {
-          const alive = accounts.filter(a => ['alive', 'active', '', 'unknown'].includes(String(a.status || '').toLowerCase()));
-          if (alive.length > 0) {
-            val = alive.map(a => `${a.openid || a.id}#${a.nickname || a.alias || a.id}`).join('\n');
-            process.env.WX_ID = val;
-            console.log(`[getCode] 自动从 yyb_go (${adapter.serverUrl}) 成功获取到 ${alive.length} 个存活账号`);
-          }
+    let val = '';
+    // 优先从 yyb 拉取全部存活账号（不受 WX_ID 过滤，配 N 条只跑 N 个）
+    try {
+      const adapter = new YYBAdapter();
+      const accounts = await adapter.getAccounts();
+      if (accounts && accounts.length > 0) {
+        const alive = accounts.filter(a => ['alive', 'active', '', 'unknown'].includes(String(a.status || '').toLowerCase()));
+        if (alive.length > 0) {
+          val = alive.map(a => `${a.openid || a.id}#${a.nickname || a.alias || a.id}`).join('\n');
+          process.env.WX_ID = val;
+          console.log(`✅ 从 yyb_go (${adapter.serverUrl}) 成功获取到 ${alive.length} 个存活账号`);
         }
-      } catch (e) {
-        console.log(`[getCode] 连接 yyb_go 获取账号失败: ${e.message}`);
       }
+    } catch (e) {
+      console.log(`[getCode] 连接 yyb_go 获取账号失败: ${e.message}`);
+    }
+    // 回退：WX_ID 环境变量
+    if (!val) {
+      val = process.env.WX_ID || process.env[ckName];
     }
     if (val) this.userList = val.split(/[\n&]+/).map(v => String(v).split('#')[0].trim()).filter(Boolean);
     else console.log('未找到环境变量 WX_ID');

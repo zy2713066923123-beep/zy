@@ -72,6 +72,28 @@ function getAccounts() {
   return v.split(/[@\n]/).map(s => s.trim()).filter(Boolean);
 }
 
+// 优先从 yyb 拉取全部存活账号（不受 WX_ID 过滤，配 N 条只跑 N 个）
+async function fetchOnlineAccounts() {
+  try {
+    const online = await new YYBClient().getOnlineAccounts();
+    if (online && online.length) {
+      const raw = online
+        .map(acc => {
+          const id = acc.openid || acc.wxid || String(acc.id || '');
+          const note = acc.nickname || acc.alias || acc.remark || '';
+          return id ? `wx:${id}#${note}` : '';
+        })
+        .filter(Boolean)
+        .join('\n');
+      console.log(`✅ 从 yyb 服务拉取到 ${online.length} 个存活账号`);
+      return raw.split(/[@\n]/).map(s => s.trim()).filter(Boolean);
+    }
+  } catch (e) {
+    console.log(`[yyb] 拉取账号列表失败: ${e.message || e}`);
+  }
+  return [];
+}
+
 // ==================== 业务签名 ====================
 // signature = md5( base64(timestamp) + token + salt + 排序拼接后的参数 )
 function makeSign(data, ts, token) {
@@ -364,7 +386,11 @@ function printSummary() {
 
 // ==================== 主流程 ====================
 (async () => {
-  const accounts = getAccounts();
+  let accounts = await fetchOnlineAccounts();
+  if (!accounts.length) {
+    // 回退：WX_ID 环境变量
+    accounts = getAccounts();
+  }
   if (!accounts.length) {
     console.log(`未检测到账号，请配置环境变量 ${ACCOUNT_ENV}（换行 或 @ 分隔）`);
     return;

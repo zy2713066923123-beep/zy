@@ -115,8 +115,22 @@ const READ_HISTORY_FILE = path.join(CACHE_DIR, 'mmy_read_history.json');
 const summaries = [];
 
 async function main() {
+  // 优先从 yyb 拉取全部存活账号（不受 WX_ID 过滤，配 N 条只跑 N 个）
+  try {
+    const online = await new YYBClient().getOnlineAccounts();
+    if (online && online.length) {
+      ACCOUNT_VAR = online.map((a) => a.openid || a.wxid || String(a.id)).filter(Boolean).join('\n');
+      log(`✅ 从 yyb 服务拉取到 ${online.length} 个存活账号`);
+    }
+  } catch (e) {
+    log(`[yyb] 拉取账号列表失败: ${e.message || e}`);
+  }
   if (!ACCOUNT_VAR) {
-    // 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号（取 openid/wxid，兼容 isWechatProtocolId 校验）
+    // 回退：WX_ID 环境变量
+    ACCOUNT_VAR = readEnv('WX_ID') || readEnv('mmy') || readEnv('MMY') || '';
+  }
+  if (!ACCOUNT_VAR) {
+    // 兜底：自动从 yyb_go 拉取存活账号（取 openid/wxid，兼容 isWechatProtocolId 校验）
     const accs = await loadAccounts();
     if (accs && accs.length) {
       ACCOUNT_VAR = accs.map((a) => a.openid || a.wxid || String(a.id)).filter(Boolean).join('\n');

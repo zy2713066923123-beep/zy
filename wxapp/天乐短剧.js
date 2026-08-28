@@ -121,13 +121,31 @@ function envFlag(name, defaultValue) {
 async function parseAccounts() {
   const globalUserKey = parseUserKey(process.env.REELIX_USER_KEY || '');
   const sources = [];
-  const wxIdRaw = String(process.env.WX_ID || '').trim();
   const authRaw = String(process.env[ENV_NAME] || '').trim();
-  if (wxIdRaw) sources.push(wxIdRaw);
   if (authRaw) sources.push(authRaw);
+  // 优先从 yyb 拉取全部存活账号（不受 WX_ID 过滤，配 N 条只跑 N 个）
+  try {
+    const online = await new YYBClient().getOnlineAccounts();
+    if (online && online.length) {
+      const raw = online
+        .map(acc => {
+          const id = acc.openid || acc.wxid || String(acc.id || '');
+          const note = acc.nickname || acc.alias || acc.remark || '';
+          return id ? `wx:${id}#${note}` : '';
+        })
+        .filter(Boolean)
+        .join('\n');
+      if (raw) sources.push(raw);
+      console.log(`✅ 从 yyb 服务拉取到 ${online.length} 个存活账号`);
+    }
+  } catch (e) {
+    console.log(`[yyb] 拉取账号列表失败: ${e.message || e}`);
+  }
+  const wxIdRaw = String(process.env.WX_ID || '').trim();
+  if (wxIdRaw) sources.push(wxIdRaw);
   let raw = sources.join('\n');
   if (!raw.trim()) {
-    // 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+    // 兜底：自动从 yyb_go 拉取存活账号
     const auto = await resolveAccounts();
     if (auto && auto.length) {
       sources.push(auto.join('\n'));

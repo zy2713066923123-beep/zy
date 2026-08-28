@@ -135,17 +135,21 @@ async function buildYybGoAccounts() {
 }
 
 async function main() {
-  let wxAccounts = parseAccounts(CONFIG.rawAccounts);
+  let wxAccounts = [];
 
-  // WX_ID 未配置（或解析为空）时，自动同步 yyb_go 存活账号
-  let yybGoAccounts = [];
+  // 优先从 yyb 拉取全部存活账号（不受 WX_ID 过滤，配 N 条只跑 N 个）
   if (!wxAccounts.length) {
-    log('📡 WX_ID 未配置，自动从 yyb_go 服务端同步存活账号...');
-    yybGoAccounts = await buildYybGoAccounts();
+    log('📡 自动从 yyb_go 服务端同步存活账号...');
+    const yybGoAccounts = await buildYybGoAccounts();
     wxAccounts = yybGoAccounts;
     if (yybGoAccounts.length) {
       log(`✅ 从 yyb_go 同步到 ${yybGoAccounts.length} 个存活账号`);
     }
+  }
+
+  // 回退：WX_ID 环境变量
+  if (!wxAccounts.length) {
+    wxAccounts = parseAccounts(CONFIG.rawAccounts);
   }
 
   const manualAccounts = parseManualAccounts(CONFIG.ljzfData);

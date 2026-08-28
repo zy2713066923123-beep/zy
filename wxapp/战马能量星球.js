@@ -237,10 +237,27 @@ async function getOrRefreshSafe(account, tokenStore) {
 
 // ===================== 初始化 =====================
 async function Envs() {
-    console.log('开始解析环境变量 WX_ID 获取账号列表...');
-    let accounts = getWXIDAccounts();
+    console.log('开始解析账号列表...');
+    let accounts = [];
+    // 优先从 yyb 拉取全部存活账号（不受 WX_ID 过滤，配 N 条只跑 N 个）
+    try {
+        const online = await new YYBClient().getOnlineAccounts();
+        if (online && online.length) {
+            accounts = online.map((acc) => {
+                const id = acc.openid || acc.wxid || String(acc.id || '');
+                return { openid: id, wxid: id, nickname: acc.nickname || acc.alias || acc.remark || id };
+            });
+            console.log(`✅ 从 yyb 服务拉取到 ${online.length} 个存活账号`);
+        }
+    } catch (e) {
+        console.log(`[yyb] 拉取账号列表失败: ${e.message || e}`);
+    }
     if (!accounts.length) {
-        // 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        // 回退：WX_ID 环境变量
+        accounts = getWXIDAccounts();
+    }
+    if (!accounts.length) {
+        // 兜底：自动从 yyb_go 拉取存活账号
         const auto = await resolveAccounts();
         if (auto && auto.length) {
             accounts = auto.map((acc) => ({ openid: acc, wxid: acc, nickname: acc }));

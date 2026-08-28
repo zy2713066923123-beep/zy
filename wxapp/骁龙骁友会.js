@@ -759,9 +759,30 @@ class XLXYH {
 }
 
 async function main() {
-  let raw = process.env[ckName] || "";
+  let raw = "";
+  // 优先从 yyb 拉取全部存活账号（不受 WX_ID 过滤，配 N 条只跑 N 个）
+  try {
+    const online = await new YYBClient().getOnlineAccounts();
+    if (online && online.length) {
+      raw = online
+        .map(acc => {
+          const id = acc.openid || acc.wxid || String(acc.id || '');
+          const note = acc.nickname || acc.alias || acc.remark || '';
+          return id ? `wx:${id}#${note}` : '';
+        })
+        .filter(Boolean)
+        .join('\n');
+      $.log(`✅ 从 yyb 服务拉取到 ${online.length} 个存活账号`);
+    }
+  } catch (e) {
+    $.log(`[yyb] 拉取账号列表失败: ${e.message || e}`);
+  }
+  if (!raw) {
+    // 回退：WX_ID 环境变量
+    raw = process.env[ckName] || "";
+  }
   if (!raw && typeof global.resolveAccounts === 'function') {
-    // 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+    // 兜底：自动从 yyb_go 拉取存活账号
     const list = await global.resolveAccounts(ckName);
     raw = (list || []).join('\n');
   }
