@@ -280,6 +280,14 @@ class ManorClient:
     def story(self, winery_id=1):
         return self._post("/story", {"uid": self.uid, "winery_id": winery_id, "mode": "random"})
 
+    def collection(self, winery_id=1):
+        """酒柜/图鉴：查询 8 款酒的碎片收集状态"""
+        return self._post("/collection", {"uid": self.uid, "winery_id": winery_id})
+
+    def compose(self, winery_id, wine_id):
+        """合成酒款：消耗 4 种碎片合成一款酒，获得积分"""
+        return self._post("/collection/compose", {"uid": self.uid, "winery_id": winery_id, "wine_id": wine_id})
+
 # ================= 主流程 =================
 def process_account(wxid, remark):
     mask = (remark[:3] + "*****" + remark[-3:]) if len(remark) >= 7 else remark

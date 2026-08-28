@@ -141,6 +141,15 @@ class YYBClient {
                     const errMsg = body.msg || body.error || body.message || JSON.stringify(body);
                     return { ok: false, err: `[${body.code !== undefined ? body.code : -1}] ${errMsg}` };
                 }
+                // 兼容 yyb-go 的 respJson 字符串：解析后把内部字段提升到顶层
+                if (typeof body.respJson === 'string' && body.respJson.trim()) {
+                    try {
+                        const inner = JSON.parse(body.respJson);
+                        if (inner && typeof inner === 'object') {
+                            return { ok: true, data: { ...body, ...inner, respJson: body.respJson } };
+                        }
+                    } catch (e) { /* 忽略解析失败，走默认分支 */ }
+                }
                 return { ok: true, data: body.data !== undefined ? body.data : body };
             }
             return { ok: true, data: body };

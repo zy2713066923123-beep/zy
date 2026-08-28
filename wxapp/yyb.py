@@ -143,6 +143,17 @@ class YYBClient:
                 if body.get("success") is False or (body.get("code") is not None and body.get("code") not in (0, 200)):
                     err_msg = body.get("msg") or body.get("error") or body.get("message") or json.dumps(body, ensure_ascii=False)
                     return False, f"[{body.get('code', -1)}] {err_msg}"
+                # 兼容 yyb-go 的 respJson 字符串：解析后把内部字段提升到顶层
+                if isinstance(body.get("respJson"), str) and body["respJson"].strip():
+                    try:
+                        inner = json.loads(body["respJson"])
+                        if isinstance(inner, dict):
+                            merged = dict(body)
+                            merged.update(inner)
+                            merged["respJson"] = body["respJson"]
+                            return True, merged
+                    except Exception:
+                        pass
                 return True, body.get("data") if "data" in body else body
             return True, body
         except Exception as e:

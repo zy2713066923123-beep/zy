@@ -670,10 +670,24 @@ class YiPiaoDaClient:
 
 
 def load_accounts() -> List[AccountConfig]:
-    """优先 ypd_wxid；无 wxid 时回退 ypd_token。"""
+    """优先 env var；无 wxid 时自动从 yyb_go 拉取存活账号；再回退 ypd_token。"""
     wxid_raw = env("WX_ID") or env("ypd_wxid") or env("YPD_WXID") or env("ypdwxid")
     token_raw = env("ypd_token") or env("YPD_TOKEN") or env("YPDTOKEN")
     accounts: List[AccountConfig] = []
+    if not wxid_raw:
+        # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        try:
+            online = yyb.get_online_accounts()
+            if online:
+                wxid_raw = "\n".join(
+                    (acc.get("openid") or acc.get("wxid") or acc.get("id") or "")
+                    for acc in online
+                    if (acc.get("openid") or acc.get("wxid") or acc.get("id"))
+                )
+                if wxid_raw:
+                    print(f"📥 从 yyb 服务同步到 {len(online)} 个存活账号")
+        except Exception as exc:
+            print(f"⚠️ 从 yyb 服务拉取账号失败: {exc}")
     if wxid_raw:
         accounts.extend(parse_wxid_accounts(wxid_raw))
     if token_raw:
