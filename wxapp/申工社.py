@@ -1,6 +1,7 @@
 import yyb  # 自动同步 yyb_go 存活账号
-# cron: 52 13,01 * * *import os
+# cron: 52 13,01 * * *
 # name: 申工社
+import os
 import time
 import json as _json
 import pathlib

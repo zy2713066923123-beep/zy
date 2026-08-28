@@ -127,6 +127,7 @@ def mask_text(value: str) -> str:
     return f"{value[:6]}...{value[-6:]}"
 
 def parse_accounts() -> List[Dict[str, str]]:
+    global WXID_ENV
     if not WXID_ENV:
         # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
         auto = resolve_accounts()

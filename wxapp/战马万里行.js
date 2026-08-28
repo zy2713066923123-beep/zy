@@ -45,11 +45,12 @@ function brief(data, max = 320) {
 
 function isProtocolAccountId(id) {
   const s = String(id || '').trim();
-  // 支持三种账号格式：
+  // 支持四种账号格式：
   // 1. 牛子：wxid_ 开头
   // 2. 应用宝显式前缀：yyb: 开头
   // 3. 应用宝 openid：o 开头 + 20+ 位字母数字（可含 - _），如 owNAX6...
-  return s.startsWith('wxid_') || s.startsWith('yyb:') || /^o[a-zA-Z0-9_-]{20,}$/.test(s);
+  // 4. 带 wx: 前缀的 openid（yyb 拉取时自动加前缀），如 wx:owNAX6...
+  return s.startsWith('wxid_') || s.startsWith('yyb:') || /^o[a-zA-Z0-9_-]{20,}$/.test(s) || /^wx:o[a-zA-Z0-9_-]{20,}$/.test(s);
 }
 
 function parseAccounts(raw) {
