@@ -8,7 +8,10 @@ const { YYBClient, loadAccounts, getSingleCode, getSinglePhoneEncrypted } = requ
  * 变量:
  *   WX_ID        （格式 wxid#备注，多账号换行或 @ 分隔，用于筛选运行的账号）
  *   YYB_SERVER / WX_SERVICE （手机号加密数据由应用宝服务返回 encryptedData/iv，默认 192.168.4.26:8000）
- * cron: 16 11,23 * * * */
+ * cron: 16 11,23 * * * 
+ * name: 战马能量星球
+ * 
+ **/
 
 const $ = Env('战马能量星球');
 const fs = require('fs');
