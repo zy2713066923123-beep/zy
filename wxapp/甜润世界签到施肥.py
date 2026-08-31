@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-import yyb  # 自动同步 yyb_go 存活账号
+# -*- coding: utf-8 -*-
 # name: 甜润世界签到施肥
-# cron: 48 13,01 * * *# -*- coding: utf-8 -*-
+# cron: 48 13,01 * * *
+import yyb  # 自动同步 yyb_go 存活账号
 
 import os
 import re
@@ -29,35 +30,100 @@ BASE_HEADERS = {
 # ========== 从 YYB_SERVER 读取服务地址 ==========
 # ============ 统一取码（WX_ID + getCode，支持牛子/YYB 双协议自动路由）============
 
-WECHAT_SERVER = (os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or "http://127.0.0.1:8000").strip()
-YYB_SERVER = (os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or "http://127.0.0.1:8000").strip()
-if WECHAT_SERVER:
-    os.environ["WECHAT_SERVER"] = WECHAT_SERVER
-if YYB_SERVER:
-    os.environ["YYB_SERVER"] = YYB_SERVER
+# 统一解析服务地址：四个变量任取其一。
+# 仅在用户确实配置过时才回写环境变量——若把默认值写进 YYB_SERVER，
+# 会抢在 yyb.get_global_server_url() 的 WECHAT_SERVER 之前生效，导致连错服务。
+_RAW_SERVER = (
+    os.getenv("WX_SERVER")
+    or os.getenv("YYB_SERVER")
+    or os.getenv("WECHAT_SERVER")
+    or os.getenv("YINGYONGBAO_SERVER")
+    or ""
+).strip().rstrip("/")
 
-# 优先从 yyb-go 拉取存活账号（与幸荟庄园等脚本一致），失败才回退 WX_ID 白名单
-WX_IDS = []
-try:
-    accs = load_accounts()
-    if accs:
-        WX_IDS = [str(acc.get("openid") or acc.get("wxid") or acc.get("id") or "") for acc in accs
-                  if (acc.get("openid") or acc.get("wxid") or acc.get("id"))]
-        print(f"[yyb] 自动从 yyb_go 同步到 {len(WX_IDS)} 个存活账号 @ {YYB_SERVER}")
-except Exception as e:
-    print(f"[yyb] 自动拉取账号失败: {e}")
+WECHAT_SERVER = _RAW_SERVER or "http://127.0.0.1:8000"
+YYB_SERVER = WECHAT_SERVER
+
+if _RAW_SERVER:
+    os.environ["WX_SERVER"] = _RAW_SERVER
+    os.environ["YYB_SERVER"] = _RAW_SERVER
+    os.environ["WECHAT_SERVER"] = _RAW_SERVER
+else:
+    print("⚠️ 未配置 WX_SERVER/YYB_SERVER/WECHAT_SERVER，正在使用默认地址 http://127.0.0.1:8000")
+
+# ============ 账号来源：优先 yyb-go 存活账号，WX_ID 仅作兜底 ============
+ACCOUNT_NAMES: dict = {}
+
+
+def sync_yyb_accounts() -> list:
+    """直接用 YYBClient 拉取 yyb-go 存活账号，并打印排查信息。"""
+    try:
+        from yyb import YYBClient
+    except Exception as e:
+        print(f"[yyb] 无法导入 yyb 模块: {e}")
+        return []
+
+    client = YYBClient()
+    print(f"[yyb] 服务端地址: {client.server_url}")
+
+    try:
+        raw = client.get_accounts(force_refresh=True)
+    except Exception as e:
+        print(f"[yyb] 请求账号列表失败: {e}")
+        return []
+    print(f"[yyb] 服务端返回 {len(raw)} 个账号")
+
+    try:
+        accounts = client.get_online_accounts()
+    except Exception as e:
+        print(f"[yyb] 过滤存活账号失败: {e}")
+        return []
+
+    ids = []
+    for idx, acc in enumerate(accounts, 1):
+        ident = str(acc.get("openid") or acc.get("wxid") or acc.get("id") or "").strip()
+        if not ident:
+            continue
+        ids.append(ident)
+        ACCOUNT_NAMES[ident] = (
+            acc.get("remark") or acc.get("nickname") or acc.get("alias") or f"账号_{idx}"
+        )
+    if ids:
+        print(f"[yyb] 自动从 yyb_go 同步到 {len(ids)} 个存活账号")
+    else:
+        print("[yyb] yyb_go 无存活账号（可能全部离线或 hasSession 失效）")
+    return ids
+
+
+WX_IDS = sync_yyb_accounts()
 
 if not WX_IDS:
-    WX_IDS = [s.strip() for s in os.getenv("WX_ID", "").replace("&", "\n").splitlines() if s.strip()]
+    for line in os.getenv("WX_ID", "").replace("&", "\n").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        ident, _, remark = line.partition("#")
+        ident = ident.strip()
+        if not ident:
+            continue
+        WX_IDS.append(ident)
+        ACCOUNT_NAMES[ident] = remark.strip() or ident
     if WX_IDS:
-        print(f"[wx] 使用 WX_ID 白名单 {len(WX_IDS)} 个账号")
+        print(f"[wx] 回退使用 WX_ID 配置的 {len(WX_IDS)} 个账号")
 
 print(f"✅ 读取到 {len(WX_IDS)} 个微信账号，自动路由牛子/YYB 双协议")
 
 
 def code_login(openid: str) -> str | None:
     """登录获取 authToken（从 cookie 中提取 applet_auth_token）"""
-    code = get_single_code(APPID, openid)
+    try:
+        from yyb import get_single_code as _get_code
+    except Exception:
+        _get_code = globals().get("get_single_code")
+    if not _get_code:
+        print("❌ 未找到 yyb 取码函数 get_single_code")
+        return None
+    code = _get_code(APPID, openid)
     if not code:
         return None
     try:
@@ -246,7 +312,7 @@ def exhaust_fertilizer(auth_token: str) -> list:
 
 
 def run_account(openid: str) -> bool:
-    wxid = openid
+    wxid = ACCOUNT_NAMES.get(openid) or openid
     print(f"\n{'=' * 40}")
     print(f" 甜润世界 | {wxid} | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'=' * 40}")
@@ -283,13 +349,22 @@ except ImportError:
     notify = None
 
 if __name__ == "__main__":
+    if not WX_IDS:
+        msg = "未获取到任何账号：请确认 WX_SERVER/YYB_SERVER 指向 yyb-go 且有存活账号，或配置 WX_ID"
+        print(f"❌ {msg}")
+        if notify:
+            notify.send(APP_NAME, msg)
+        raise SystemExit(1)
+
     results = []
     for i, openid in enumerate(WX_IDS):
+        name = ACCOUNT_NAMES.get(openid) or openid
         ok = run_account(openid)
-        results.append(f"{openid}: {'✅' if ok else '❌'}")
+        results.append(f"{name}: {'✅' if ok else '❌'}")
         if i < len(WX_IDS) - 1:
             time.sleep(5)
 
-    print("\n".join(results))
+    summary = "\n".join(results)
+    print(summary)
     if notify:
-        notify.send(APP_NAME, "\n".join(results))
+        notify.send(APP_NAME, summary)

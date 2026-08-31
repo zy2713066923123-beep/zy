@@ -55,13 +55,24 @@ UA = (
 #   WX_ID      回退用账号白名单（可选），多账号换行或 & 分隔
 #              默认优先从 yyb_go 拉取全部存活账号，拉取失败时才回退 WX_ID
 
-# 1. 先写入服务地址，确保后续 yyb 拉取账号时能连到正确的 yyb_go 服务
-WECHAT_SERVER = (os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or "http://127.0.0.1:8000").strip()
-YYB_SERVER = (os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or "http://127.0.0.1:8000").strip()
-if WECHAT_SERVER:
-    os.environ["WECHAT_SERVER"] = WECHAT_SERVER
-if YYB_SERVER:
-    os.environ["YYB_SERVER"] = YYB_SERVER
+# 1. 统一解析服务地址：四个变量任取其一
+#    注意：只有确实配置过才回写环境变量。若把默认值写进 YYB_SERVER，
+#    会抢在 yyb.get_global_server_url() 的 WECHAT_SERVER 之前生效，导致连错服务。
+_RAW_SERVER = (
+    os.getenv("WX_SERVER")
+    or os.getenv("YYB_SERVER")
+    or os.getenv("WECHAT_SERVER")
+    or os.getenv("YINGYONGBAO_SERVER")
+    or ""
+).strip().rstrip("/")
+
+WECHAT_SERVER = _RAW_SERVER or "http://127.0.0.1:8000"
+YYB_SERVER = WECHAT_SERVER
+
+if _RAW_SERVER:
+    os.environ["WX_SERVER"] = _RAW_SERVER
+    os.environ["YYB_SERVER"] = _RAW_SERVER
+    os.environ["WECHAT_SERVER"] = _RAW_SERVER
 
 
 def fetch_accounts_from_yyb() -> list:
@@ -69,9 +80,18 @@ def fetch_accounts_from_yyb() -> list:
     try:
         client = YYBClient()
         print(f"📡 yyb_go 服务端地址: {client.server_url}")  # 诊断：确认连的是正确的 yyb_go 服务
+        if not _RAW_SERVER:
+            print("⚠️ 未配置 WX_SERVER/YYB_SERVER/WECHAT_SERVER，正在使用默认地址")
+
+        raw = client.get_accounts(force_refresh=True)
+        print(f"🔍 服务端账号总数: {len(raw) if isinstance(raw, list) else '响应非列表'}")
+
         accs = client.get_online_accounts()
         if not accs:
-            print("❌ yyb_go 未返回存活账号，请确认 WX_SERVER 已配置且服务在线")
+            if isinstance(raw, list) and raw:
+                print(f"❌ 服务端有 {len(raw)} 个账号，但全部离线或 hasSession=false（小程序号需重新登录）")
+            else:
+                print("❌ yyb_go 未返回存活账号，请确认 WX_SERVER 已配置且服务在线")
             return []
         ids = []
         for acc in accs:

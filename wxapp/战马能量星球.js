@@ -236,31 +236,66 @@ async function getOrRefreshSafe(account, tokenStore) {
     return null;
 }
 
+// 直接用 YYBClient 拉取 yyb_go 存活账号（不受 WX_ID 过滤），并打印排查信息
+async function fetchYybGoAccounts() {
+    const client = new YYBClient();
+    console.log(`[yyb] 服务端地址: ${client.serverUrl}`);
+
+    let raw = [];
+    try {
+        raw = await client.getAccounts(true);
+    } catch (e) {
+        console.log(`[yyb] 请求账号列表失败: ${e.message || e}`);
+        return [];
+    }
+    console.log(`[yyb] 服务端返回 ${Array.isArray(raw) ? raw.length : '非数组'} 个账号`);
+
+    let online = [];
+    try {
+        online = await client.getOnlineAccounts();
+    } catch (e) {
+        console.log(`[yyb] 过滤存活账号失败: ${e.message || e}`);
+        return [];
+    }
+
+    const list = [];
+    online.forEach((acc, i) => {
+        const id = String(acc.openid || acc.wxid || (acc.id != null ? acc.id : '') || '').trim();
+        if (!id) {
+            console.log(`[yyb] 账号 ${i + 1} 缺少 openid/wxid/id，跳过`);
+            return;
+        }
+        list.push({
+            openid: id,
+            wxid: id,
+            nickname: acc.remark || acc.nickname || acc.alias || `账号_${i + 1}`,
+        });
+    });
+
+    if (list.length) {
+        console.log(`✅ 从 yyb_go 服务拉取到 ${list.length} 个存活账号`);
+    } else {
+        console.log('[yyb] yyb_go 无存活账号（可能全部离线或 hasSession 失效）');
+    }
+    return list;
+}
+
 // ===================== 初始化 =====================
 async function Envs() {
     console.log('开始解析账号列表...');
-    let accounts = [];
-    // 标准入口：自动从 yyb_go 同步全部存活账号，支持 WX_ID 白名单过滤（参考 wxapp/README）
-    try {
-        const online = await loadAccounts();
-        if (online && online.length) {
-            accounts = online.map((acc) => {
-                const id = String(acc.openid || acc.wxid || acc.id || '');
-                return { openid: id, wxid: id, nickname: acc.nickname || acc.alias || acc.remark || id };
-            });
-            console.log(`✅ 从 yyb_go 服务拉取到 ${accounts.length} 个存活账号`);
-        }
-    } catch (e) {
-        console.log(`[yyb] 拉取账号列表失败: ${e.message || e}`);
-    }
+    let accounts = await fetchYybGoAccounts();
     if (!accounts.length) {
         // 回退：WX_ID 环境变量（格式 wxid#备注，多账号换行/@/& 分隔）
         accounts = getWXIDAccounts();
+        if (accounts.length) {
+            console.log(`[wx] 回退使用 WX_ID 配置的 ${accounts.length} 个账号`);
+        }
     }
     if (!accounts.length) {
         console.log('未解析到任何账号，可能原因：');
         console.log('  1) 未启动 yyb_go 服务或 WX_SERVER 地址不可达（默认 http://127.0.0.1:8000，需配置 WX_SERVER 指向正确服务）');
-        console.log('  2) 未配置 WX_ID（仅当只想跑指定账号时需要）');
+        console.log('  2) yyb_go 中账号全部离线，或微信小程序号 hasSession=false 需重新登录');
+        console.log('  3) 未配置 WX_ID（仅当只想跑指定账号时需要）');
         return false;
     }
     console.log(`共 ${accounts.length} 个账号`);

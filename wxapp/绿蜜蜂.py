@@ -289,9 +289,15 @@ def get_access_token(device_id: str, timestamp: int, timeout: float) -> Optional
 
 def get_wx_code_via_relay(wxid: str, wechat_server: str, timeout: float) -> Optional[str]:
     if wechat_server:
-        os.environ["WECHAT_SERVER"] = wechat_server
+        # 三个变量一起写入：get_global_server_url() 的优先级是
+        # WX_SERVER > YYB_SERVER > WECHAT_SERVER，只写 WECHAT_SERVER 会被
+        # 环境中已存在的 WX_SERVER / YYB_SERVER 抢先命中，导致连错服务。
+        server = wechat_server.strip().rstrip("/")
+        os.environ["WX_SERVER"] = server
+        os.environ["YYB_SERVER"] = server
+        os.environ["WECHAT_SERVER"] = server
     try:
-        print(f"[+] 使用 getCode 获取 code: appid={WX_APPID}, wxid={wxid}")
+        print(f"[+] 使用 getCode 获取 code: appid={WX_APPID}, wxid={wxid}, server={os.environ.get('WX_SERVER') or '未设置'}")
         return get_single_code(WX_APPID, wxid)
     except Exception as exc:  # noqa: BLE001
         print(f"[ERR] 获取微信 code 异常: {exc}")

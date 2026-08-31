@@ -670,27 +670,63 @@ class YiPiaoDaClient:
         return summary
 
 
+def fetch_yyb_accounts() -> List[AccountConfig]:
+    """直接用 YYBClient 拉取 yyb_go 存活账号（不受 WX_ID 过滤），并打印排查信息。"""
+    try:
+        client = yyb.YYBClient()
+    except Exception as exc:
+        print(f"⚠️ 初始化 yyb 客户端失败: {exc}")
+        return []
+    print(f"[yyb] 服务端地址: {client.server_url}")
+
+    try:
+        raw = client.get_accounts(force_refresh=True)
+    except Exception as exc:
+        print(f"[yyb] 请求账号列表失败: {exc}")
+        return []
+    print(f"[yyb] 服务端返回 {len(raw) if isinstance(raw, list) else '非列表'} 个账号")
+
+    try:
+        online = client.get_online_accounts()
+    except Exception as exc:
+        print(f"[yyb] 过滤存活账号失败: {exc}")
+        return []
+
+    accounts: List[AccountConfig] = []
+    for i, acc in enumerate(online, 1):
+        wxid = str(acc.get("openid") or acc.get("wxid") or acc.get("id") or "").strip()
+        if not wxid:
+            print(f"[yyb] 账号 {i} 缺少 openid/wxid/id，跳过")
+            continue
+        remark = acc.get("remark") or acc.get("nickname") or acc.get("alias") or f"账号{i}"
+        accounts.append(
+            AccountConfig(
+                index=len(accounts) + 1,
+                name=str(remark),
+                wxid=wxid,
+                angry_dog=clean_header_value(env("YPD_ANGRY_DOG") or env("ypd_angry_dog")),
+                cookie=clean_header_value(env("YPD_COOKIE") or env("ypd_cookie")),
+                mode="wxid",
+            )
+        )
+
+    if accounts:
+        print(f"📥 从 yyb 服务同步到 {len(accounts)} 个存活账号")
+    else:
+        print("[yyb] yyb_go 无存活账号（可能全部离线，或小程序号 hasSession=false 需重新登录）")
+    return accounts
+
+
 def load_accounts() -> List[AccountConfig]:
     """优先 env var；无 wxid 时自动从 yyb_go 拉取存活账号；再回退 ypd_token。"""
     wxid_raw = env("WX_ID") or env("ypd_wxid") or env("YPD_WXID") or env("ypdwxid")
     token_raw = env("ypd_token") or env("YPD_TOKEN") or env("YPDTOKEN")
     accounts: List[AccountConfig] = []
-    if not wxid_raw:
-        # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
-        try:
-            online = yyb.get_online_accounts()
-            if online:
-                wxid_raw = "\n".join(
-                    (acc.get("openid") or acc.get("wxid") or acc.get("id") or "")
-                    for acc in online
-                    if (acc.get("openid") or acc.get("wxid") or acc.get("id"))
-                )
-                if wxid_raw:
-                    print(f"📥 从 yyb 服务同步到 {len(online)} 个存活账号")
-        except Exception as exc:
-            print(f"⚠️ 从 yyb 服务拉取账号失败: {exc}")
     if wxid_raw:
         accounts.extend(parse_wxid_accounts(wxid_raw))
+    else:
+        # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
+        accounts.extend(fetch_yyb_accounts())
     if token_raw:
         token_accounts = parse_token_accounts(token_raw)
         base = len(accounts)
@@ -707,7 +743,10 @@ def main() -> None:
     accounts = load_accounts()
     if not accounts:
         msg = (
-            "未配置账号。请设置环境变量 ypd_wxid + WECHAT_SERVER（推荐）。\n"
+            "未获取到任何账号。可能原因：\n"
+            "  1) yyb_go 服务不可达（当前 WX_SERVER/YYB_SERVER/WECHAT_SERVER 配置有误）\n"
+            "  2) yyb_go 中账号全部离线，或小程序号 hasSession=false 需重新登录\n"
+            "  3) 未配置 ypd_wxid（仅当只想跑指定账号时需要）\n"
             "示例:\n"
             "  export ypd_wxid='wxid_xxx#备注'\n"
             "  export WX_SERVER='http://127.0.0.1:8000'\n"

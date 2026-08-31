@@ -30,6 +30,29 @@ PLATFORM = 12
 
 # ============ 统一取码（WX_ID + getCode，支持牛子/YYB 双协议自动路由）============
 
+# 统一解析服务地址：四个变量任取其一。必须在拉取账号之前完成。
+# 仅在用户确实配置过时才回写环境变量——若把默认值写进 YYB_SERVER，
+# 会抢在 yyb.get_global_server_url() 的 WECHAT_SERVER 之前生效，导致连错服务。
+_RAW_SERVER = (
+    os.getenv("WX_SERVER")
+    or os.getenv("YYB_SERVER")
+    or os.getenv("WECHAT_SERVER")
+    or os.getenv("YINGYONGBAO_SERVER")
+    or ""
+).strip().rstrip("/")
+
+WECHAT_SERVER = _RAW_SERVER or "http://127.0.0.1:8000"
+YYB_SERVER = WECHAT_SERVER
+
+if _RAW_SERVER:
+    os.environ["WX_SERVER"] = _RAW_SERVER
+    os.environ["YYB_SERVER"] = _RAW_SERVER
+    os.environ["WECHAT_SERVER"] = _RAW_SERVER
+else:
+    print("⚠️ 未配置 WX_SERVER/YYB_SERVER/WECHAT_SERVER，正在使用默认地址 http://127.0.0.1:8000")
+
+print(f"🔗 yyb_go 服务地址: {yyb.get_global_server_url()}")
+
 # ============ 账号来源：优先从 yyb-go 拉取存活账号，WX_ID 仅作兜底 ============
 WX_IDS = []
 try:
@@ -38,18 +61,13 @@ try:
         WX_IDS = [str(acc.get("openid") or acc.get("wxid") or acc.get("id") or "") for acc in accs
                   if (acc.get("openid") or acc.get("wxid") or acc.get("id"))]
         print(f"ℹ️  已从 yyb-go 同步 {len(WX_IDS)} 个存活账号")
-except Exception:
-    pass
+except Exception as _exc:
+    print(f"❌ 从 yyb-go 拉取账号失败: {_exc}")
 
 if not WX_IDS:
     WX_IDS = [s.strip() for s in os.getenv("WX_ID", "").replace("&", "\n").splitlines() if s.strip()]
     if WX_IDS:
         print(f"ℹ️  yyb-go 无存活账号，回退使用 WX_ID 配置的 {len(WX_IDS)} 个账号")
-
-WECHAT_SERVER = (os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or "http://127.0.0.1:8000").strip()
-YYB_SERVER = (os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or "http://127.0.0.1:8000").strip()
-os.environ["WECHAT_SERVER"] = WECHAT_SERVER
-os.environ["YYB_SERVER"] = YYB_SERVER
 
 if WX_IDS:
     print(f"✅ 读取到 {len(WX_IDS)} 个微信账号，自动路由牛子/YYB 双协议")

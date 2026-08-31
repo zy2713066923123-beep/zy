@@ -51,26 +51,60 @@ CLIENT_CODE = "CLI2113448692"
 # YYB_SERVER 解析
 # ============ 统一取码（WX + getCode，支持牛子/YYB 双协议自动路由）============
 
-WECHAT_SERVER = (os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or "http://127.0.0.1:8000").strip()
-YYB_SERVER = (os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or "http://127.0.0.1:8000").strip()
-if WECHAT_SERVER:
-    os.environ["WECHAT_SERVER"] = WECHAT_SERVER
-if YYB_SERVER:
-    os.environ["YYB_SERVER"] = YYB_SERVER
+# 统一解析服务地址：四个变量任取其一，避免只配了 WECHAT_SERVER 却被默认值覆盖
+_RAW_SERVER = (
+    os.getenv("WX_SERVER")
+    or os.getenv("YYB_SERVER")
+    or os.getenv("WECHAT_SERVER")
+    or os.getenv("YINGYONGBAO_SERVER")
+    or ""
+).strip().rstrip("/")
+
+WECHAT_SERVER = _RAW_SERVER or "http://127.0.0.1:8000"
+YYB_SERVER = WECHAT_SERVER
+
+# 关键：只有用户确实配置了地址时才回写环境变量。
+# 若把默认值写进 YYB_SERVER，会抢在 yyb.get_global_server_url() 的 WECHAT_SERVER 之前生效，导致连错服务。
+if _RAW_SERVER:
+    os.environ["WX_SERVER"] = _RAW_SERVER
+    os.environ["YYB_SERVER"] = _RAW_SERVER
+    os.environ["WECHAT_SERVER"] = _RAW_SERVER
 
 # 从 yyb-go 拉取存活账号（参考飞猪.py：统一使用 yyb.load_accounts）
 # 支持 WX_ID 白名单过滤（多账号用 & 或换行分隔），留空则自动拉取全部存活账号
 def load_wx_accounts() -> List[Dict[str, Any]]:
     server_url = yyb.get_global_server_url()
     print(f"🔗 yyb_go 服务地址: {server_url}")
+    if not _RAW_SERVER:
+        print("⚠️ 未配置 WX_SERVER/YYB_SERVER/WECHAT_SERVER，正在使用默认地址")
+
+    # 分层诊断：先看服务端返回的原始账号总数，再看过滤后的存活数
+    try:
+        client = yyb.YYBClient()
+        raw = client.get_accounts(force_refresh=True)
+        print(f"🔍 服务端账号总数: {len(raw) if isinstance(raw, list) else '响应非列表'}")
+        if isinstance(raw, list) and not raw:
+            print("   → 服务端返回空列表：请确认 yyb_go 已启动、地址端口正确且已登录账号")
+    except Exception as exc:
+        print(f"❌ 连接 yyb_go 失败：{exc}")
+        return []
+
     try:
         accounts = yyb.load_accounts()
     except Exception as exc:
         print(f"❌ 拉取 yyb_go 账号失败：{exc}")
         return []
+
     if not accounts:
-        print("❌ 未获取到任何在线账号，请确认 yyb_go 服务已配置且有存活账号")
+        wx_id = (os.getenv("WX_ID") or "").strip()
+        if isinstance(raw, list) and raw and wx_id:
+            print(f"❌ 服务端有 {len(raw)} 个账号，但经 WX_ID 过滤后为 0，请检查 WX_ID 是否与 openid/备注匹配")
+        elif isinstance(raw, list) and raw:
+            print(f"❌ 服务端有 {len(raw)} 个账号，但全部离线或 hasSession=false（小程序号需重新登录）")
+        else:
+            print("❌ 未获取到任何在线账号，请确认 yyb_go 服务已配置且有存活账号")
         return []
+
     print(f"✅ 从 yyb_go 同步到 {len(accounts)} 个存活账号")
     return accounts
 
