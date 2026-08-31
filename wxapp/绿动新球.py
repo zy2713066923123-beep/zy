@@ -89,29 +89,32 @@ warnings.simplefilter('ignore', InsecureRequestWarning)
 APP_NAME = "绿动新球小程序签到"
 APPID = "wxa61a45f180dec800"
  
-# ============ 统一取码（WX_ID + 统一 getCode 模块，支持牛子/YYB 双协议自动路由）============
+# ============ 统一取码（yyb_go 拉取 + 统一 getCode 模块，支持牛子/YYB 双协议自动路由）============
 # 环境变量：
-#   WX_ID      微信账号标识，格式：wxid#备注 或 openid。多账号换行或 & 分隔
+#   WX_ID      微信账号标识（可选白名单），格式：wxid#备注 或 openid。多账号换行或 & 分隔
 #              - 以 wxid_ 开头或普通标识 → 牛子协议
 #              - 纯数字 / 以 o 开头的 openid（≥20位）→ YYB 应用宝协议
 #              - 由统一 getCode 模块按标识格式自动路由，无需手动指定
+#              - 默认优先从 yyb_go 拉取全部存活账号，拉取失败时才回退 WX_ID
 #   YYB_SERVER YYB 应用宝取码服务地址（YYB 账号时使用，如 http://127.0.0.1:8088）
 #   WECHAT_SERVER 牛子取码服务地址（牛子账号时使用）
 import asyncio
 
-WX_IDS = [
-    s.strip()
-    for s in os.getenv("WX_ID", "").replace("&", "\n").splitlines()
-    if s.strip()
-]
+# ============ 账号来源：优先从 yyb-go 拉取存活账号，WX_ID 仅作兜底 ============
+WX_IDS = []
+try:
+    accs = load_accounts()
+    if accs:
+        WX_IDS = [str(acc.get("openid") or acc.get("wxid") or acc.get("id") or "") for acc in accs
+                  if (acc.get("openid") or acc.get("wxid") or acc.get("id"))]
+        print(f"ℹ️  已从 yyb-go 同步 {len(WX_IDS)} 个存活账号")
+except Exception:
+    pass
 
 if not WX_IDS:
-    try:
-        accs = load_accounts()
-        if accs:
-            WX_IDS = [acc.get("openid") or str(acc.get("id")) for acc in accs]
-    except Exception:
-        pass
+    WX_IDS = [s.strip() for s in os.getenv("WX_ID", "").replace("&", "\n").splitlines() if s.strip()]
+    if WX_IDS:
+        print(f"ℹ️  yyb-go 无存活账号，回退使用 WX_ID 配置的 {len(WX_IDS)} 个账号")
 
 YYB_SERVER = (os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or "http://127.0.0.1:8000").strip()
 WECHAT_SERVER = (os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or "http://127.0.0.1:8000").strip()

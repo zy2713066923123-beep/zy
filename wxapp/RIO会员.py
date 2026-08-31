@@ -46,7 +46,7 @@ API_BASE = f"{BASE_URL}/api/miniprogram"
 # ============ 账号来源：优先从 yyb-go 拉取存活账号，WX_ID 仅作兜底 ============
 WX_IDS = []
 try:
-    accs = load_accounts()
+    accs = yyb.load_accounts()
     if accs:
         WX_IDS = [str(acc.get("openid") or acc.get("wxid") or acc.get("id") or "") for acc in accs
                   if (acc.get("openid") or acc.get("wxid") or acc.get("id"))]
