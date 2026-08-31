@@ -3,7 +3,7 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 /*
 小程序：美孚臻享俱乐部（微信协议版）
 cron: 4 15,03 * * *必填变量：
-  WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:8000）（yyb.js 读取，例如：http://127.0.0.1:8000）
+  WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:18273）（yyb.js 读取，例如：http://127.0.0.1:18273）
   WX_ID          微信账号，多账号支持换行、&、@ 分隔
                  格式：wxid#备注（备注可选）
 
@@ -35,7 +35,7 @@ const APP_VERSION = '4.8.9';
 const CACHE_FILE = path.join(__dirname, 'mfwx.json');
 
 const CONFIG = {
-  wechatServer: trimRightSlash(process.env.WX_SERVER || process.env.YYB_SERVER || process.env.WECHAT_SERVER || process.env.MF_WECHAT_SERVER || 'http://127.0.0.1:8000'),
+  wechatServer: trimRightSlash(process.env.WX_SERVER || process.env.YYB_SERVER || process.env.WECHAT_SERVER || process.env.YINGYONGBAO_SERVER || process.env.MF_WECHAT_SERVER || 'http://127.0.0.1:18273'),
   wxAccountsRaw: process.env.WX_ID || '',
   tokenRaw: process.env.mftoken || process.env.MFTOKEN || '',
   timeout: toPositiveInt(process.env.MF_TIMEOUT, 20000),

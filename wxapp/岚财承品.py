@@ -7,8 +7,8 @@ import os
 import re
 from typing import Any, List, Optional
 
-DEFAULT_YYB_SERVER = (os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or "http://127.0.0.1:8000").rstrip("/")
-DEFAULT_NIUZI_SERVER = (os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or "http://127.0.0.1:8000").rstrip("/")
+DEFAULT_YYB_SERVER = (os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or "http://127.0.0.1:18273").rstrip("/")
+DEFAULT_NIUZI_SERVER = (os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or os.getenv("WECHAT_SERVER") or os.getenv("YINGYONGBAO_SERVER") or "http://127.0.0.1:18273").rstrip("/")
 
 
 class CodeProviderError(RuntimeError):

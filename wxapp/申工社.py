@@ -36,7 +36,7 @@ CACHE_NAME = "sgs"
                     wxid_abc123#张三
                     wxid_xyz456
 
-  WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:8000）（可选，在 yyb.py 中配置）
+  WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:18273）（可选，在 yyb.py 中配置）
 
 ========================================
 """
@@ -335,7 +335,7 @@ def should_run_today(wxid, remark, cache):
 
 if __name__ == "__main__":
 
-    WX_SERVER = (os.environ.get("WX_SERVER") or os.environ.get("WECHAT_SERVER") or "")
+    WX_SERVER = (os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or os.environ.get("YINGYONGBAO_SERVER") or "")
     if not WX_SERVER:
         log.warning("未配置 WECHAT_SERVER，请检查环境变量")
 

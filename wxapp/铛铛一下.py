@@ -7,7 +7,7 @@ name: 铛铛一下 (微信协议版)
 入口: 微信小程序
 功能: 签到、抽奖
 变量: WX_ID 账号配置，格式：wxid/openid#备注，多账号换行 / @ / & 分隔
-    WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:8000）
+    WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:18273）
     PROXY_API_URL (代理api，返回一条txt文本，内容为代理ip:端口)
 定时: 一天两次
 cron: 44 16,04 * * *更新日志------------
@@ -39,7 +39,7 @@ MULTI_ACCOUNT_PROXY = False  # 是否使用多账号代理，默认不使用，T
 
 SCRIPT_NAME = "铛铛一下"
 WX_APPID = "wxe378d2d7636c180e"
-DEFAULT_WECHAT_SERVER = os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or "http://127.0.0.1:8000"
+DEFAULT_WECHAT_SERVER = os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or os.environ.get("YINGYONGBAO_SERVER") or "http://127.0.0.1:18273"
 HOST = "vues.dd1x.cn"
 USER_AGENT = "Mozilla/5.0 (Linux; Android 12; M2012K11AC Build/SKQ1.220303.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/134.0.6998.136 Mobile Safari/537.36 XWEB/1340129 MMWEBSDK/20240301 MMWEBID/9871 MicroMessenger/8.0.48.2580(0x28003036) WeChat/arm64 Weixin NetType/WIFI Language/zh_CN ABI/arm64 MiniProgramEnv/android"
 

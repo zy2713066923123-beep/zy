@@ -15,8 +15,8 @@ import yyb  # 自动同步 yyb_go 存活账号
                   该变量同时被 getCode 模块用于账号过滤
 
   （以下变量由共享模块 getCode 读取，按需在青龙环境变量中设置）
-  WX_SERVER      yyb_go 统一协议服务地址（例如：http://127.0.0.1:8000）
-  YYB_SERVER      应用宝(YYB) 服务地址（默认 http://127.0.0.1:8000）
+  WX_SERVER      yyb_go 统一协议服务地址（例如：http://127.0.0.1:18273）
+  YYB_SERVER      应用宝(YYB) 服务地址（默认 http://127.0.0.1:18273）
   ADMIN_KEY       牛子协议管理密钥（WeChatPadPro/iwechat 需要）
   SERVER_TYPE     强制指定协议：wechat / yyb / auto（默认 auto 智能路由）
 
@@ -539,7 +539,7 @@ if __name__ == "__main__":
     import json as _json
     import pathlib
 
-    WX_SERVER = (os.environ.get("WX_SERVER") or os.environ.get("WECHAT_SERVER") or "")
+    WX_SERVER = (os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or os.environ.get("YINGYONGBAO_SERVER") or "")
     WXIDS = []
     for line in os.environ.get("WX_ID", "").replace("&", "\n").splitlines():
         line = line.strip()

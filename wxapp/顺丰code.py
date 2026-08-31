@@ -110,7 +110,7 @@ WX_SIGN_KEY = "2b08f7f6bf564a1dada1570535fd44ba"
 WX_APP_VERSION = "V17.58"
 
 # 牛子 / YYB 协议服务器（与其他脚本一致，用于 getCode 失败时的 code 回退）
-YYB_SERVER = (os.environ.get("YYB_SERVER") or os.environ.get("YINGYOGBAO_SERVER") or "").rstrip("/")
+YYB_SERVER = (os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or os.environ.get("YINGYONGBAO_SERVER") or os.environ.get("YINGYOGBAO_SERVER") or "").rstrip("/")
 
 WX_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "

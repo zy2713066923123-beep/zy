@@ -17,8 +17,8 @@
                     wxid_abc123#李四
                     owNAX6v0xxx#张三
                     wxid_xyz456
-  WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:8000）（getCode统一接口）
-                  默认：http://127.0.0.1:8000
+  WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:18273）（getCode统一接口）
+                  默认：http://127.0.0.1:18273
 
 选填：
   OCR_SERVER      滑块验证码识别服务地址（ddddocr）
@@ -127,7 +127,7 @@ WINE_STATUS = {0: "空坛", 1: "空坛", 2: "已酿好", 3: "酿造中", 4: "已
 BASE_URL = "https://apimallwm.exijiu.com"
 MAIN_BASE_URL = "https://xcx.exijiu.com/anti-channeling/public/index.php/api/v2"
 APPID = "wx489f950decfeb93e"
-DEFAULT_WECHAT_SERVER = os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or "http://127.0.0.1:8000"
+DEFAULT_WECHAT_SERVER = os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or "http://127.0.0.1:18273"
 
 # 环境变量
 _SEED_TYPE_FORCE = int(os.environ.get("GARDEN_SEED_TYPE", "0"))
@@ -211,7 +211,9 @@ class WxAdapter:
         self.server_url = (
             server_url or
             os.environ.get("WX_SERVER") or
+            os.environ.get("YYB_SERVER") or
             os.environ.get("WECHAT_SERVER") or
+            os.environ.get("YINGYONGBAO_SERVER") or
             os.environ.get("YYB_SERVER") or
             os.environ.get("YINGYONGBAO_SERVER") or
             DEFAULT_WECHAT_SERVER
@@ -1449,7 +1451,7 @@ def auto_login_with_retry(client, wxid, wx_server, ocr_server=None,
 #  主函数
 # ============================================================
 if __name__ == "__main__":
-    WX_SERVER = os.environ.get("WX_SERVER") or os.environ.get("WECHAT_SERVER") or os.environ.get("YYB_SERVER") or DEFAULT_WECHAT_SERVER
+    WX_SERVER = os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or os.environ.get("YINGYONGBAO_SERVER") or os.environ.get("YYB_SERVER") or DEFAULT_WECHAT_SERVER
     WX_ID_RAW = (os.getenv("WX_ID") or os.getenv("WXIDXJ", "")).strip()
 
     # 优先从 yyb 服务拉取账号列表（用 id 主键，最稳），环境变量 WX_ID 仅作兜底

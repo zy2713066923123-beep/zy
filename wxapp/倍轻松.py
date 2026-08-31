@@ -20,7 +20,7 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 MINI_APP_ID = "wx61457400e4212cec"
-WX_SERVER_URL = (os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or "http://127.0.0.1:8000").rstrip("/")
+WX_SERVER_URL = (os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or os.getenv("WECHAT_SERVER") or os.getenv("YINGYONGBAO_SERVER") or "http://127.0.0.1:18273").rstrip("/")
 WX_AUTH = os.getenv("WX_ID", "")
 TOKEN_CACHE_PATH = Path(__file__).with_name("BREO_token_cache.json")
 LOGIN_BASE = "https://breoplus.breo.cn/app/minic"

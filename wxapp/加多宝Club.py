@@ -23,7 +23,7 @@ import yyb  # 自动同步 yyb_go 存活账号
   8. 青龙 notify 推送
 
 环境变量：
-  WX_SERVER      yyb_go 服务地址（例如：http://127.0.0.1:8000）
+  WX_SERVER      yyb_go 服务地址（例如：http://127.0.0.1:18273）
   PROXY_API     品赞代理提取 API，可选
   PROXY_TYPE    http / socks5，默认 http
 """
@@ -60,7 +60,7 @@ _RAW_SERVER = (
     or ""
 ).strip().rstrip("/")
 
-WECHAT_SERVER = _RAW_SERVER or "http://127.0.0.1:8000"
+WECHAT_SERVER = _RAW_SERVER or "http://127.0.0.1:18273"
 YYB_SERVER = WECHAT_SERVER
 
 # 关键：只有用户确实配置了地址时才回写环境变量。

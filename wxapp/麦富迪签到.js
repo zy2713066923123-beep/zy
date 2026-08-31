@@ -10,7 +10,7 @@ cron: 36 17,05 * * *变量名：mfd
 ------------------------------------------
 
 变量：
-  WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:8000）
+  WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:18273）
   WX_ID         (可选白名单) 微信账号，多账号支持换行、& 分隔，留空自动拉取 yyb_go 所有存活账号
 
 WX_ID 格式：
@@ -60,7 +60,7 @@ const USER_AGENT =
 let ckName = "WX_ID";
 
 const wechat = new WeChatServer({
-    url: process.env.WX_SERVER || process.env.WECHAT_SERVER || "http://127.0.0.1:8000",
+    url: process.env.WX_SERVER || process.env.YYB_SERVER || process.env.WECHAT_SERVER || process.env.YINGYONGBAO_SERVER || "http://127.0.0.1:18273",
     appid: MINI_APP_ID,
     WX_ID: process.env.WX_ID || "",
 });

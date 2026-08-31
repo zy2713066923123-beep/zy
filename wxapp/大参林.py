@@ -14,7 +14,7 @@ import yyb  # 自动同步 yyb_go 存活账号
   5. 青龙 notify 推送
 
 环境变量：
-  WX_SERVER      yyb_go 服务地址（例如：http://127.0.0.1:8000）
+  WX_SERVER      yyb_go 服务地址（例如：http://127.0.0.1:18273）
   STORE_NO         门店编号，默认 1017013258
   PROXY_API        品赞代理提取 API，可选
   PROXY_TYPE       http / socks5，默认 http
@@ -56,7 +56,7 @@ _RAW_SERVER = (
     or ""
 ).strip().rstrip("/")
 
-WECHAT_SERVER = _RAW_SERVER or "http://127.0.0.1:8000"
+WECHAT_SERVER = _RAW_SERVER or "http://127.0.0.1:18273"
 YYB_SERVER = WECHAT_SERVER
 
 if _RAW_SERVER:
@@ -64,7 +64,7 @@ if _RAW_SERVER:
     os.environ["YYB_SERVER"] = _RAW_SERVER
     os.environ["WECHAT_SERVER"] = _RAW_SERVER
 else:
-    print("⚠️ 未配置 WX_SERVER/YYB_SERVER/WECHAT_SERVER，正在使用默认地址 http://127.0.0.1:8000")
+    print("⚠️ 未配置 WX_SERVER/YYB_SERVER/WECHAT_SERVER，正在使用默认地址 http://127.0.0.1:18273")
 
 print(f"🔗 yyb_go 服务地址: {yyb.get_global_server_url()}")
 

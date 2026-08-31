@@ -26,7 +26,7 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
  *
  * 【环境变量】
  *   WX_ID               微信账号标识（openid 或 wxid#备注），多账号换行 或 & 分隔（必填）
- *   WX_SERVER      yyb_go 统一协议服务地址（例如：http://127.0.0.1:8000）
+ *   WX_SERVER      yyb_go 统一协议服务地址（例如：http://127.0.0.1:18273）
  *   YYB_SERVER     (兼容别名) yyb_go 服务地址
  *   ELEME_APPID         饿了么小程序 AppID，默认 wxece3a9a4c82f58c9（可选）
  *   ELEME_LOGIN_RESULT  直接注入有效登录态（可选，走方式 B）

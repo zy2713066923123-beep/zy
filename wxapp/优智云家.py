@@ -13,7 +13,7 @@ import yyb  # 自动同步 yyb_go 存活账号
   4. 青龙 notify 推送
 
 环境变量：
-  WX_SERVER      yyb_go 服务地址（例如：http://127.0.0.1:8000）
+  WX_SERVER      yyb_go 服务地址（例如：http://127.0.0.1:18273）
   PROXY_API     品赞代理提取 API，可选
   PROXY_TYPE    http / socks5，默认 http
 """
@@ -51,7 +51,7 @@ UA = (
 
 # ============ 统一取码（yyb_go 拉取 + WX_ID 回退，支持牛子/YYB 双协议自动路由）============
 # 环境变量：
-#   WX_SERVER  yyb_go 取码服务地址（如 http://127.0.0.1:8000）
+#   WX_SERVER  yyb_go 取码服务地址（如 http://127.0.0.1:18273）
 #   WX_ID      回退用账号白名单（可选），多账号换行或 & 分隔
 #              默认优先从 yyb_go 拉取全部存活账号，拉取失败时才回退 WX_ID
 
@@ -66,7 +66,7 @@ _RAW_SERVER = (
     or ""
 ).strip().rstrip("/")
 
-WECHAT_SERVER = _RAW_SERVER or "http://127.0.0.1:8000"
+WECHAT_SERVER = _RAW_SERVER or "http://127.0.0.1:18273"
 YYB_SERVER = WECHAT_SERVER
 
 if _RAW_SERVER:

@@ -4,7 +4,7 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
  
 //  环境变量：
 //    WX_ID              必填，格式：wxid#备注，多账号换行或 & 分隔
-//   WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:8000）
+//   WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:18273）
 //    HSJJ_AUTO_CLAIM_H5 设为 '0' 或 'false' 关闭自动提现（默认开启）
  
 
@@ -20,7 +20,7 @@ const BASE_URL = 'https://index.amcfortune.com';
 // ==================== 配置区 ====================
 let ckName = "WX_ID";
 let taskVar = process.env.WX_ID || '';
-const WECHAT_SERVER = (process.env.WX_SERVER || process.env.WECHAT_SERVER || '').replace(/\/$/, '');
+const WECHAT_SERVER = (process.env.WX_SERVER || process.env.YYB_SERVER || process.env.WECHAT_SERVER || process.env.YINGYONGBAO_SERVER || '').replace(/\/$/, '');
 const debug = process.env.debug || 0;
 const APPID = 'wx1b44c3ad181bde16';
 const ACTIVITY_PAGE_ID = process.env.HSJJ_ACTIVITY_PAGE_ID || '7541';

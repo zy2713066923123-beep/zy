@@ -7,7 +7,7 @@ import yyb  # 自动同步 yyb_go 存活账号
 第一次要 手动签到 一次
 环境变量：
   WX_ID          账号配置，格式：wxid#备注，多账号换行 / & 分隔
-  WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:8000）
+  WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:18273）
   NISSAN_SKIP_COMMUNITY =1 跳过社区任务，只做签到+查询
 """
 
@@ -26,7 +26,7 @@ import requests
 
 
 # ============ 常量配置 ============
-DEFAULT_WECHAT_SERVER = os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or "http://127.0.0.1:8000"
+DEFAULT_WECHAT_SERVER = os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or "http://127.0.0.1:18273"
 WECHAT_MINI_APPID = "wxe3fd49854884240e"          # 东风日产 人车生活 小程序 appid
 ARIYA_BASE = "https://ariya-api.dongfeng-nissan.com.cn"
 WXAPI_BASE = "https://wxapi.dongfeng-nissan.com.cn"
@@ -358,7 +358,7 @@ def push_notify(title: str, content: str) -> None:
 class NissanSign:
     def __init__(self) -> None:
         self.wechat_server = build_code_url(
-            os.environ.get("WX_SERVER") or os.environ.get("WECHAT_SERVER") or os.environ.get("YYB_SERVER") or DEFAULT_WECHAT_SERVER
+            os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or os.environ.get("YINGYONGBAO_SERVER") or os.environ.get("YYB_SERVER") or DEFAULT_WECHAT_SERVER
         )
         self.skip_community = os.environ.get("NISSAN_SKIP_COMMUNITY") == "1"
         self.user_agent = (

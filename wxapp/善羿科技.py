@@ -16,7 +16,7 @@ cron: 20 09,21 * * *
 变量：
   WX_ID         微信账号（openid/wxid），多账号支持换行、& 分隔，必须配置
   WX_APP_ID     小程序 AppID（可选，默认 wxc59eee06736849e8）
-  WX_SERVER      yyb_go 统一协议服务地址（例如：http://127.0.0.1:8000）
+  WX_SERVER      yyb_go 统一协议服务地址（例如：http://127.0.0.1:18273）
   YYB_SERVER     (兼容别名) yyb_go 服务地址
 
 WX_ID 格式：

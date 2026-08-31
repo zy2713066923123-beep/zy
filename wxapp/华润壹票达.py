@@ -8,7 +8,7 @@ cron: 36 08,20 * * *
   WX_ID / ypd_wxid / YPD_WXID
       格式：wxid#备注，多账号换行或 @
       兼容：备注#wxid（备注不以 wxid_ 开头时）
-  WECHAT_SERVER   牛子协议服务，默认 http://127.0.0.1:8000
+  WECHAT_SERVER   牛子协议服务，默认 http://127.0.0.1:18273
                   （仅手机号加密包使用 /get/all/mobile；YYB 账号由 getCode 自动路由）
   YYB_SERVER      应用宝(YYB) 服务地址（getCode 读取，auto 模式自动路由）
 
@@ -45,7 +45,7 @@ DEFAULT_VER = "4.63.0"
 DEFAULT_SRC = "weixin_mini"
 DEFAULT_TERMINAL_SRC = "WEIXIN_MINI"
 DEFAULT_UTC_OFFSET = "480"
-DEFAULT_WECHAT_SERVER = os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or "http://127.0.0.1:8000"
+DEFAULT_WECHAT_SERVER = os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or os.environ.get("YINGYONGBAO_SERVER") or "http://127.0.0.1:18273"
 API_HOST = "https://crld.caiyicloud.com"
 NOTIFY_TITLE = "壹票达签到"
 
@@ -749,7 +749,7 @@ def main() -> None:
             "  3) 未配置 ypd_wxid（仅当只想跑指定账号时需要）\n"
             "示例:\n"
             "  export ypd_wxid='wxid_xxx#备注'\n"
-            "  export WX_SERVER='http://127.0.0.1:8000'\n"
+            "  export WX_SERVER='http://127.0.0.1:18273'\n"
             "可选回退: ypd_token / YPD_ANGRY_DOG / YPD_COOKIE"
         )
         print(msg)

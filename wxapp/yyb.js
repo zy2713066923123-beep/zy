@@ -28,7 +28,7 @@ function getGlobalServerUrl() {
         process.env.YYB_SERVER ||
         process.env.WECHAT_SERVER ||
         process.env.YINGYONGBAO_SERVER ||
-        'http://127.0.0.1:8000'
+        'http://127.0.0.1:18273'
     ).replace(/\/+$/, '');
 }
 

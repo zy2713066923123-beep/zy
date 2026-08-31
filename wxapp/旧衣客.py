@@ -4,7 +4,7 @@
 """
 cron: 52 11,23 * * *
 变量:
-  export WX_SERVER='http://127.0.0.1:8000'
+  export WX_SERVER='http://127.0.0.1:18273'
   export WX_ID="wxid#备注"
   多账号用换行 或 @ 分隔
 """
@@ -61,16 +61,16 @@ RETRY_BASE_DELAY = 3
 
 
 def normalize_wechat_server(raw: str) -> str:
-    server = (raw or "http://127.0.0.1:8000").strip().rstrip("/")
+    server = (raw or "http://127.0.0.1:18273").strip().rstrip("/")
     if not server:
-        return "http://127.0.0.1:8000"
+        return "http://127.0.0.1:18273"
     if not server.startswith(("http://", "https://")):
         server = "http://" + server
     for suffix in ("/api/v1", "/api"):
         if server.lower().endswith(suffix):
             server = server[: -len(suffix)].rstrip("/")
             break
-    return server or "http://127.0.0.1:8000"
+    return server or "http://127.0.0.1:18273"
 
 
 def resolve_local_path(name: str) -> Path:
@@ -82,7 +82,7 @@ def resolve_local_path(name: str) -> Path:
 
 
 WECHAT_SERVER_RAW = (
-    os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or os.getenv("YYB_SERVER") or os.getenv("YYB_WX_SERVER") or "http://127.0.0.1:8000"
+    os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or os.getenv("WECHAT_SERVER") or os.getenv("YINGYONGBAO_SERVER") or os.getenv("YYB_SERVER") or os.getenv("YYB_WX_SERVER") or "http://127.0.0.1:18273"
 )
 WECHAT_SERVER = normalize_wechat_server(WECHAT_SERVER_RAW)
 CACHE_FILE = resolve_local_path(os.getenv("JYK_CACHE_FILE") or (ENV_NAME + ".json"))

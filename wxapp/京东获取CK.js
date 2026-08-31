@@ -1,6 +1,6 @@
 require('./yyb.js'); // 自动同步 yyb_go 存活账号
 // name:京东获取CK
-// - export WX_SERVER='http://127.0.0.1:8000'
+// - export WX_SERVER='http://127.0.0.1:18273'
 // - wxjd：wxid#备注
 // cron: 36 07,19 * * *const fs = require('fs');
 const path = require('path');
@@ -12,7 +12,7 @@ const ACCOUNT_DELAY_MS = 10000;
 
 const SCRIPT_NAME = '京东协议获取CK';
 const APPID = 'wx73247c7819d61796';
-const WECHAT_SERVER = (process.env.WX_SERVER || process.env.WECHAT_SERVER || 'http://127.0.0.1:8000').trim();
+const WECHAT_SERVER = (process.env.WX_SERVER || process.env.YYB_SERVER || process.env.WECHAT_SERVER || process.env.YINGYONGBAO_SERVER || 'http://127.0.0.1:18273').trim();
 let WXJD = (process.env.wxjd || process.env.WX_ID || '').trim();
 const CACHE_FILE = path.join(__dirname, 'jd_kd_ck.json');
 const CLIENT_VER = '2.0.2';

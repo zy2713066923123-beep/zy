@@ -3,7 +3,7 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 君品荟签到
 
 变量：
-  WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:8000）
+  WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:18273）
   WX_ID         (可选白名单) 微信账号，多账号支持换行、& 分隔，留空自动拉取 yyb_go 所有存活账号
   cron: 4 09,21 * * *WX_ID 格式：
   支持直接填 wxid_xxx (牛子)

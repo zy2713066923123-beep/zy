@@ -36,7 +36,7 @@ const addFriend = 1;
     if (envServer) {
         if (!process.env.WX_SERVER) process.env.WX_SERVER = envServer;
     } else {
-        process.env.WX_SERVER = 'http://127.0.0.1:8000';
+        process.env.WX_SERVER = 'http://127.0.0.1:18273';
     }
 }
 if (!process.env.SERVER_TYPE) {

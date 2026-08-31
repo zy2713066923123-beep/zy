@@ -32,7 +32,7 @@ def get_global_server_url() -> str:
         os.getenv("YYB_SERVER") or
         os.getenv("WECHAT_SERVER") or
         os.getenv("YINGYONGBAO_SERVER") or
-        "http://127.0.0.1:8000"
+        "http://127.0.0.1:18273"
     ).rstrip("/")
 
 LOGIN_TYPE_WX = "WX"

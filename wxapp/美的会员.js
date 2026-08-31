@@ -65,7 +65,7 @@ async function getAccountList() {
     return [];
 }
 
-const SERVER = (process.env.WX_SERVER || process.env.YYB_SERVER || process.env.WECHAT_SERVER || "http://127.0.0.1:8000").trim();
+const SERVER = (process.env.WX_SERVER || process.env.YYB_SERVER || process.env.WECHAT_SERVER || process.env.YINGYONGBAO_SERVER || "http://127.0.0.1:18273").trim();
 if (!process.env.WX_SERVER) process.env.WX_SERVER = SERVER;
 
 const PLUSPLUS_TOKEN = process.env.PLUSPLUS_TOKEN || "";

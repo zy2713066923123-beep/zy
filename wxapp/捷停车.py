@@ -9,7 +9,7 @@ cron: 36 11,23 * * *脚本名称：捷停车自动任务
 环境变量：
   WX_ID           wxid 列表，格式：wxid#备注，多个账号用换行或 @ 分隔
                   该变量同时被 getCode 模块用于账号过滤
-  WX_SERVER      yyb_go 统一协议服务地址（例如：http://127.0.0.1:8000）
+  WX_SERVER      yyb_go 统一协议服务地址（例如：http://127.0.0.1:18273）
   YYB_SERVER      应用宝(YYB) 服务地址（getCode 读取）
   SERVER_TYPE     强制指定协议：wechat / yyb / auto（默认 auto 智能路由）
   PLUSPLUS_TOKEN  PushPlus token，可选，notify.py 不可用时作为兜底推送
@@ -63,7 +63,7 @@ except ImportError:
     AES = None
 
 # ===================== 配置项 =====================
-WECHAT_SERVER = (os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or "http://127.0.0.1:8000").strip().rstrip("/")
+WECHAT_SERVER = (os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or os.getenv("WECHAT_SERVER") or os.getenv("YINGYONGBAO_SERVER") or "http://127.0.0.1:18273").strip().rstrip("/")
 WXID_ENV = (os.getenv("WX_ID") or "").strip()
 
 # PushPlus 通知Token（环境变量，可选，notify.py 不可用时兜底）

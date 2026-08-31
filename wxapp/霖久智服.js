@@ -3,7 +3,7 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 /** cron: 4 17,05 * * *霖久智服 微信协议版
 
 变量：
-  WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:8000）
+  WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:18273）
   WX_ID         (可选白名单) 微信账号，多账号支持换行、& 分隔，留空自动拉取 yyb_go 所有存活账号
 
 WX_ID 格式：
@@ -34,7 +34,7 @@ const { URL } = require('url');
 const APP_NAME = '霖久智服';
 const NOTIFY_TITLE = '霖久智服_微信协议版';
 const API_BASE = 'https://linjiucloud-api.ysservice.com.cn';
-const DEFAULT_WECHAT_SERVER = 'http://127.0.0.1:8000';
+const DEFAULT_WECHAT_SERVER = 'http://127.0.0.1:18273';
 const DEFAULT_APPID = 'wx0a9f159eddb2c5f8';
 const DEFAULT_TENANT_ID = '10111';
 const DEFAULT_CLIENT_ID = '64';
@@ -42,7 +42,7 @@ const DEFAULT_PAGE_FRAME = '105';
 const CACHE_FILE = path.join(__dirname, 'ljzf_wx_cache.json');
 
 const CONFIG = {
-  wechatServer: trimRightSlash(process.env.WX_SERVER || process.env.WECHAT_SERVER || DEFAULT_WECHAT_SERVER),
+  wechatServer: trimRightSlash(process.env.WX_SERVER || process.env.YYB_SERVER || process.env.WECHAT_SERVER || process.env.YINGYONGBAO_SERVER || DEFAULT_WECHAT_SERVER),
   rawAccounts: process.env.WX_ID || process.env.WX_ID || process.env.WX_ID || '',
   ljzfData: process.env.ljzfData || '',
   delayMs: toInt(process.env.LJZF_DELAY_MS, 3000),

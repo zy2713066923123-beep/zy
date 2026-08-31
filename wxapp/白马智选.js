@@ -14,7 +14,7 @@ const zlib = require('zlib');
 const WX_APPID = 'wx51f8cb2a7578f42f';
 let ckName = "WX_ID";
 let WXID_RAW = (process.env.WX_ID || '').trim();
-const WECHAT_SERVER = (process.env.WX_SERVER || process.env.WECHAT_SERVER || '').replace(/\/$/, '');
+const WECHAT_SERVER = (process.env.WX_SERVER || process.env.YYB_SERVER || process.env.WECHAT_SERVER || process.env.YINGYONGBAO_SERVER || '').replace(/\/$/, '');
 
 const SCRIPT_NAME = '白马智选';
 const MULTI_SPLIT = ['\n', '&', '@'];

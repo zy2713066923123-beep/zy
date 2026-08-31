@@ -11,7 +11,7 @@ name: ꧁༺ 汤汤༒星球 ༻꧂ (微信协议版)
 
 环境变量配置:
   WX_ID           账号配置，格式：wxid#备注，多账号换行 / & 分隔
-  WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:8000）
+  WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:18273）
   txq             手动模式兼容，每行 备注#Authorization
 
 说明:
@@ -45,7 +45,7 @@ name = "꧁༺ 汤汤༒星球 ༻꧂"
 
 WX_APPID = "wx9bb6d5ac457bd69d"
 HOST = "https://vip.by-health.com"
-DEFAULT_WECHAT_SERVER = os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or "http://127.0.0.1:8000"
+DEFAULT_WECHAT_SERVER = os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or "http://127.0.0.1:18273"
 
 SIGN_PATH = "/vip-api/sign/daily/create"
 SIGN_ACTIVITY_ID = 11
@@ -185,7 +185,7 @@ def do_sign(authorization, label=""):
 
 def main():
     wechat_server = build_code_url(
-        os.environ.get("WX_SERVER") or os.environ.get("WECHAT_SERVER") or os.environ.get("YYB_SERVER") or DEFAULT_WECHAT_SERVER
+        os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or os.environ.get("YINGYONGBAO_SERVER") or os.environ.get("YYB_SERVER") or DEFAULT_WECHAT_SERVER
     )
 
     log_lines = []

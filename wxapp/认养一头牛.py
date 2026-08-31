@@ -85,7 +85,7 @@ if not WX_IDS:
 YYB_HOST = (
     (os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or "").strip()
     or os.getenv("WXAPP_SERVICE_URL", "").strip()
-    or (os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or "").strip()
+    or (os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or os.getenv("WECHAT_SERVER") or os.getenv("YINGYONGBAO_SERVER") or "").strip()
 )
 if YYB_HOST:
     YYB_HOST = YYB_HOST.replace("http://", "").replace("https://", "").rstrip("/")

@@ -41,7 +41,7 @@ _RAW_SERVER = (
     or ""
 ).strip().rstrip("/")
 
-WECHAT_SERVER = _RAW_SERVER or "http://127.0.0.1:8000"
+WECHAT_SERVER = _RAW_SERVER or "http://127.0.0.1:18273"
 YYB_SERVER = WECHAT_SERVER
 
 if _RAW_SERVER:
@@ -49,7 +49,7 @@ if _RAW_SERVER:
     os.environ["YYB_SERVER"] = _RAW_SERVER
     os.environ["WECHAT_SERVER"] = _RAW_SERVER
 else:
-    print("⚠️ 未配置 WX_SERVER/YYB_SERVER/WECHAT_SERVER，正在使用默认地址 http://127.0.0.1:8000")
+    print("⚠️ 未配置 WX_SERVER/YYB_SERVER/WECHAT_SERVER，正在使用默认地址 http://127.0.0.1:18273")
 
 # ============ 账号来源：优先 yyb-go 存活账号，WX_ID 仅作兜底 ============
 ACCOUNT_NAMES: dict = {}

@@ -6,7 +6,7 @@ import yyb  # 自动同步 yyb_go 存活账号
 # name: 小铛家
   WX_ID: wxid列表，格式: wxid#备注，多个账号用换行或@分隔
          （由共享 getCode 模块读取并智能路由 牛子/应用宝）
-  WECHAT_SERVER: 牛子协议地址（手机号加密包 get/all/mobile 使用，getCode 读取），默认: http://127.0.0.1:8000
+  WECHAT_SERVER: 牛子协议地址（手机号加密包 get/all/mobile 使用，getCode 读取），默认: http://127.0.0.1:18273
   YYB_SERVER: 应用宝(YYB) 服务地址（getCode 读取）
   SERVER_TYPE: 强制指定协议：wechat / yyb / auto（默认 auto 智能路由）
   PROXY_API: 品赞代理提取链接，可选
@@ -35,7 +35,7 @@ import requests
 
 
 
-DEFAULT_WECHAT_SERVER = os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or "http://127.0.0.1:8000"
+DEFAULT_WECHAT_SERVER = os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or "http://127.0.0.1:18273"
 DEFAULT_WECHAT_MINI_APPID = "wx7f5bc6f204abc629"
 DEFAULT_XIAODANJIA_APPID = "xiaodangjia"
 DEFAULT_XIAODANJIA_BASE_URL = "https://lm.api.sujh.net"
@@ -185,7 +185,7 @@ def push_notify(title: str, content: str) -> bool:
 
 class XiaodangjiaWxidSign:
     def __init__(self) -> None:
-        self.wechat_server = os.environ.get("WX_SERVER") or os.environ.get("WECHAT_SERVER") or os.environ.get("YYB_SERVER") or DEFAULT_WECHAT_SERVER
+        self.wechat_server = os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or os.environ.get("YINGYONGBAO_SERVER") or os.environ.get("YYB_SERVER") or DEFAULT_WECHAT_SERVER
         self.wechat_mini_appid = os.environ.get("WECHAT_MINI_APPID", DEFAULT_WECHAT_MINI_APPID)
         self.api_appid = os.environ.get("XIAODANJIA_APPID", DEFAULT_XIAODANJIA_APPID)
         self.base_url = os.environ.get("XIAODANJIA_BASE_URL", DEFAULT_XIAODANJIA_BASE_URL).rstrip("/")
@@ -894,7 +894,7 @@ def main() -> None:
     print("=" * 50)
     print("小铛家签到脚本")
     print("=" * 50)
-    print(f"微信中转服务端: {os.environ.get('WX_SERVER') or os.environ.get('WECHAT_SERVER') or os.environ.get('YYB_SERVER') or DEFAULT_WECHAT_SERVER}")
+    print(f"微信中转服务端: {os.environ.get('WX_SERVER') or os.environ.get('YYB_SERVER') or os.environ.get('WECHAT_SERVER') or os.environ.get('YINGYONGBAO_SERVER') or os.environ.get('YYB_SERVER') or DEFAULT_WECHAT_SERVER}")
     print(f"共 {len(accounts)} 个账号")
     if proxy_api:
         print(f"已启用品赞代理，代理类型: {proxy_type}")

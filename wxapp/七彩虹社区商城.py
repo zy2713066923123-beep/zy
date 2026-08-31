@@ -1,5 +1,5 @@
 import yyb  # 自动同步 yyb_go 存活账号
-# cron: 40 06,18 * * *# 1 环境变量 WX_SERVER 填 yyb_go 服务地址（例如：http://127.0.0.1:8000）
+# cron: 40 06,18 * * *# 1 环境变量 WX_SERVER 填 yyb_go 服务地址（例如：http://127.0.0.1:18273）
 # name: 七彩虹社区商城
 # 2 环境变量 WX_ID（可选，默认自动拉取 yyb_go 上所有存活账号，支持 wxid#备注 白名单过滤）
 #    多账号支持使用换行或 @ 分隔，例如：
@@ -87,7 +87,7 @@ def 读取配置(配置文件路径):
 
     配置 = 深度更新(配置, 内容)
 
-    环境变量中转服务 = (os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or "").strip()
+    环境变量中转服务 = (os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or os.getenv("WECHAT_SERVER") or os.getenv("YINGYONGBAO_SERVER") or "").strip()
     if 环境变量中转服务:
         配置["中转服务器"] = 环境变量中转服务
 

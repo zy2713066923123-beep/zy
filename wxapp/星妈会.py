@@ -8,7 +8,7 @@ import yyb  # 自动同步 yyb_go 存活账号
 
 环境变量:
 1. 微信协议服务地址:
-   export WX_SERVER='http://127.0.0.1:8000'
+   export WX_SERVER='http://127.0.0.1:18273'
 2. 账号变量（多账号按换行分隔，可混填）:
    export FEIHE_DATA="wxid_xxx#156
 Authorization值1#133
@@ -380,7 +380,7 @@ def get_env_data():
     import re
     # 优先读取 WX_ID，支持 fallback 到 FEIHE_DATA 兼容旧版本，不再需要解析 Authorization 等复杂变量，直接读取微信 ID
     wxid_raw = (os.getenv("WX_ID") or os.getenv("FEIHE_DATA") or "").strip()
-    wechat_server = (os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or "").strip()
+    wechat_server = (os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or os.getenv("WECHAT_SERVER") or os.getenv("YINGYONGBAO_SERVER") or "").strip()
     if not wxid_raw:
         # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
         auto = resolve_accounts()
@@ -433,7 +433,7 @@ def main():
             wxid=acc.get('wxid', ''),
             remark=acc.get('remark', ''),
             index=i,
-            wechat_server=(os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or "")
+            wechat_server=(os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or os.getenv("WECHAT_SERVER") or os.getenv("YINGYONGBAO_SERVER") or "")
         )
         client.run()
         # 账号间延迟

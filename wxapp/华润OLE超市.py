@@ -8,7 +8,7 @@ cron: 32 08,20 * * *# name: 华润OLE超市
   WX_ID           微信账号，格式 wxid#备注，多账号换行或 & / @ 分隔
                   （该变量同时被 getCode 模块用于账号过滤）
   ole_wxid        兼容旧变量名（可选）
-  WECHAT_SERVER   牛子协议服务，默认 http://127.0.0.1:8000
+  WECHAT_SERVER   牛子协议服务，默认 http://127.0.0.1:18273
                   （getCode 读取；仅手机号加密绑定使用 /get/all/mobile）
   YYB_SERVER      应用宝(YYB) 服务地址（getCode 读取，auto 模式自动路由）
   ADMIN_KEY       牛子协议管理密钥（WeChatPadPro/iwechat 需要）
@@ -57,7 +57,7 @@ DEFAULT_HEAD_IMG = (
 # 业务常量（一般不用改）
 # =========================
 WECHAT_MINI_APPID = "wx6c61aaeba1551439"  # OLE 超市小程序 appid（抓包 referer）
-DEFAULT_WECHAT_SERVER = os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or "http://127.0.0.1:8000"
+DEFAULT_WECHAT_SERVER = os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or "http://127.0.0.1:18273"
 API_BASE = "https://ole-app.crvole.com.cn"
 TENANT = "VGDT"
 TENANT_CHANNEL = "OLE"
@@ -657,7 +657,7 @@ def main() -> None:
 
     print(f"📋 共 {len(accounts)} 个账号")
     print(f"登录 code / 手机号: 通过 getCode 模块按账号协议自动路由（牛子/应用宝）")
-    print(f"牛子手机号接口: WECHAT_SERVER => {build_code_url(os.environ.get('WX_SERVER') or os.environ.get('WECHAT_SERVER') or os.environ.get('YYB_SERVER') or DEFAULT_WECHAT_SERVER)}")
+    print(f"牛子手机号接口: WECHAT_SERVER => {build_code_url(os.environ.get('WX_SERVER') or os.environ.get('YYB_SERVER') or os.environ.get('WECHAT_SERVER') or os.environ.get('YINGYONGBAO_SERVER') or os.environ.get('YYB_SERVER') or DEFAULT_WECHAT_SERVER)}")
 
     signer = OleSign()
     results: List[AccountSummary] = []

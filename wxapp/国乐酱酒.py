@@ -50,7 +50,7 @@ SERVER_URL = (
     or os.getenv("YYB_SERVER")
     or os.getenv("WECHAT_SERVER")
     or os.getenv("YINGYONGBAO_SERVER")
-    or "http://127.0.0.1:8000"
+    or "http://127.0.0.1:18273"
 ).strip().rstrip("/")
 os.environ.setdefault("WX_SERVER", SERVER_URL)
 os.environ.setdefault("YYB_SERVER", SERVER_URL)

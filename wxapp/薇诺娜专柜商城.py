@@ -27,7 +27,7 @@ import requests
 
 
 APP_ID = "wx250394ab3f680bfa"
-DEFAULT_WECHAT_SERVER = (os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or "http://127.0.0.1:8000").rstrip("/")
+DEFAULT_WECHAT_SERVER = (os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or os.getenv("WECHAT_SERVER") or os.getenv("YINGYONGBAO_SERVER") or "http://127.0.0.1:18273").rstrip("/")
 DEFAULT_QIUMEI_API_BASE = "https://api.qiumeiapp.com"
 DEFAULT_SHARE_CODE = "48d96b20"
 DEFAULT_TASK_DELAY_SECONDS = 7.0
@@ -869,7 +869,7 @@ def main() -> int:
     log("========================================")
 
     wxid_env = os.environ.get("WX_ID", "")
-    server_url = os.environ.get("WX_SERVER") or os.environ.get("WECHAT_SERVER") or os.environ.get("YYB_SERVER") or DEFAULT_WECHAT_SERVER
+    server_url = os.environ.get("WX_SERVER") or os.environ.get("YYB_SERVER") or os.environ.get("WECHAT_SERVER") or os.environ.get("YINGYONGBAO_SERVER") or os.environ.get("YYB_SERVER") or DEFAULT_WECHAT_SERVER
     api_base = os.environ.get("QIUMEI_API_BASE", DEFAULT_QIUMEI_API_BASE)
     share_code_raw = os.environ.get("WINONA_SHARE_CODE", "").strip()
 

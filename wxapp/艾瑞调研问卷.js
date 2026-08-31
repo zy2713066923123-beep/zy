@@ -13,7 +13,7 @@ cron: 32 15,03 * * *
 
 变量：
   WX_ID          (可选白名单) 微信账号，多账号换行/&分隔，留空自动拉取 yyb_go 所有存活账号
-  WX_SERVER      yyb_go 统一协议服务地址（例如：http://127.0.0.1:8000）
+  WX_SERVER      yyb_go 统一协议服务地址（例如：http://127.0.0.1:18273）
   YYB_SERVER     (兼容别名) yyb_go 服务地址
 
 WX_ID 格式：
