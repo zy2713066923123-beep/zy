@@ -251,7 +251,7 @@ async function runAccount(account, auth, cache) {
         }
         signHandled = true;
         log(`\n📝 签到：${name}`);
-        await doAction(account, auth, cache, type, name, '签到');
+        await doAction(account, auth, cache, task, '签到');
         await sleep(CONFIG.delayMs);
         continue;
       }
@@ -267,7 +267,7 @@ async function runAccount(account, auth, cache) {
       for (let count = 1; count <= remaining; count += 1) {
         const serial = progress.done + count;
         const label = `${name} ${serial}/${progress.max}`;
-        const result = await doAction(account, auth, cache, type, name, label);
+        const result = await doAction(account, auth, cache, task, label);
 
         if (result.reachedLimit) {
           log(`ℹ️ ${name} 已达上限，停止该任务`);
@@ -315,16 +315,9 @@ async function getAuth(account, cache) {
   let useCache = false;
   if (!CONFIG.forceLogin && cached.token && cached.accountId && cached.sessionKey && cached.openId && cached.memberId) {
     const cachedMobile = cached.mobile || '';
-    if (account.mobile) {
-      // 如果配置了手机号，只有当缓存的手机号未脱敏且完全一致时，才使用缓存
-      if (cachedMobile && !cachedMobile.includes('*') && cachedMobile === account.mobile) {
-        useCache = true;
-      }
-    } else {
-      // 如果未配置手机号，只要缓存里有手机号（即便脱敏）也允许使用缓存
-      if (cachedMobile) {
-        useCache = true;
-      }
+    // 脱敏手机号说明当初没走成手机号授权，必须重新授权，否则合作任务发放 0 积分
+    if (cachedMobile && !cachedMobile.includes('*')) {
+      useCache = !account.mobile || cachedMobile === account.mobile;
     }
   }
 
@@ -342,20 +335,21 @@ async function getAuth(account, cache) {
   }
   log(`🔑 获取 jsCode 成功：${mask(code, 5, 4)}`);
 
-  const quick = await quickLogin(account, code);
+  // 从 yyb_go 取手机号授权（getPhoneNumber），带进 quickLogin 才能正确绑定会员
+  const phoneAuth = await fetchYybPhoneAuth(account);
+  if (phoneAuth && phoneAuth.mobile && !account.mobile) {
+    account.mobile = phoneAuth.mobile;
+  }
+
+  const quick = await quickLogin(account, code, phoneAuth);
   let auth = normalizeAuth({ ...cached, ...quick, appid: account.appid });
   auth.mobile = account.mobile || auth.mobile || cached.mobile || '';
 
-  if (!account.mobile && !auth.mobile) {
-    try {
-      const phoneEncrypted = await getSinglePhoneEncrypted(account.appid, account.wxid);
-      if (phoneEncrypted && phoneEncrypted.mobile) {
-        account.mobile = phoneEncrypted.mobile;
-        auth.mobile = phoneEncrypted.mobile;
-        log(`📱 从 yyb_go 自动获取到手机号：${maskPhone(auth.mobile)}`);
-      }
-    } catch (e) {
-      // ignore
+  if (!auth.mobile || auth.mobile.includes('*')) {
+    const retryPhone = await fetchYybPhoneAuth(account);
+    if (retryPhone && retryPhone.mobile) {
+      account.mobile = retryPhone.mobile;
+      auth.mobile = retryPhone.mobile;
     }
   }
 
@@ -416,9 +410,47 @@ async function withAuthRetry(account, auth, cache, action, label) {
 
 // 微信 code 获取已统一走顶部的 getWxCode(yyb.js)，此处旧实现已废弃删除
 
-async function quickLogin(account, jsCode) {
+// 从 yyb_go 拉取 getPhoneNumber 授权结果（明文手机号 / code / encryptedData+iv）
+async function fetchYybPhoneAuth(account) {
+  if (typeof getSinglePhoneEncrypted !== 'function') return null;
+  try {
+    const res = await getSinglePhoneEncrypted(account.appid, account.wxid);
+    if (!res) {
+      log('⚠️ yyb_go 手机号授权未返回数据');
+      return null;
+    }
+    const mobile = res.mobile || '';
+    if (mobile) {
+      log(`📱 yyb_go 手机号授权成功：${maskPhone(mobile)}`);
+    } else if (res.code || (res.encryptedData && res.iv)) {
+      log('📱 yyb_go 返回手机号授权凭证（加密），交由服务端解密');
+    } else {
+      log('⚠️ yyb_go 手机号授权返回为空，可能未配置 get-phone 接口');
+      return null;
+    }
+    return res;
+  } catch (error) {
+    log(`⚠️ yyb_go 手机号授权失败：${error.message || error}`);
+    return null;
+  }
+}
+
+async function quickLogin(account, jsCode, phoneAuth) {
   const body = { appId: account.appid, jsCode, tenantId: DEFAULT_TENANT_ID, skipRequest: true };
-  if (account.mobile) body.mobile = account.mobile;
+  const mobile = account.mobile || (phoneAuth && phoneAuth.mobile) || '';
+  if (mobile) body.mobile = mobile;
+  if (phoneAuth) {
+    // 手机号授权凭证：不同版本服务端字段命名不同，一并带上
+    if (phoneAuth.code) {
+      body.phoneCode = phoneAuth.code;
+      body.code = phoneAuth.code;
+    }
+    if (phoneAuth.encryptedData && phoneAuth.iv) {
+      body.encryptedData = phoneAuth.encryptedData;
+      body.iv = phoneAuth.iv;
+    }
+    if (phoneAuth.cloudId) body.cloudID = phoneAuth.cloudId;
+  }
 
   const data = await apiJson('/base/uniapp/uaa/member/mp/auth/quick', { method: 'POST', account, body });
   if (Number(data.code) !== 0) throw new Error(`quickLogin 失败：${data.message || safeJson(data)}`);
@@ -447,15 +479,28 @@ async function fetchTaskList(account, auth, cache) {
   return Array.isArray(data.data) ? data.data : [];
 }
 
-async function doAction(account, auth, cache, actionType, taskName, label) {
+async function doAction(account, auth, cache, task, label) {
+  const taskName = getTaskName(task);
+  const actionType = getActionType(task);
+  const actionRecordCO = {
+    actionType,
+    actionUnit: '1',
+    channel: 'LJZF',
+    createdBy: auth.memberId,
+    unitCount: '1',
+  };
+
+  // 合作任务的积分规则挂在模板上，只送 actionType 服务端会算出 0 分
+  const tmplId = task.tmplId ?? task.templateId ?? task.tmplID;
+  const taskId = task.id ?? task.taskId ?? task.actionId;
+  if (tmplId) actionRecordCO.tmplId = String(tmplId);
+  if (task.tmplType) actionRecordCO.tmplType = String(task.tmplType);
+  if (task.tmplCode) actionRecordCO.tmplCode = String(task.tmplCode);
+  if (taskId) actionRecordCO.taskId = String(taskId);
+  if (auth.memberId) actionRecordCO.memberId = String(auth.memberId);
+
   const payload = {
-    actionRecordCO: {
-      actionType,
-      actionUnit: '1',
-      channel: 'LJZF',
-      createdBy: auth.memberId,
-      unitCount: '1',
-    },
+    actionRecordCO,
     tenantId: DEFAULT_TENANT_ID,
   };
 
@@ -475,6 +520,10 @@ async function doAction(account, auth, cache, actionType, taskName, label) {
   const message = data.message || data.msg || '未知错误';
   log(`⚠️ ${label} 失败：${message}`);
   const reachedLimit = /已完成|达到上限|已达上限|超上限|重复/.test(message);
+  // 该提示说明服务端按 memberId+模板算出 0 分，通常是手机号授权未绑定到正确会员
+  if (/发放积分或成长值为0/.test(message)) {
+    log('ℹ️ 提示：该错误多因会员未正确绑定手机号授权，可设置 LJZF_FORCE_LOGIN=1 重新走 yyb 手机号授权');
+  }
   if (!reachedLimit) addIssue(taskName, message);
   return { ok: false, reachedLimit };
 }
@@ -763,6 +812,7 @@ function printTaskList(tasks) {
 }
 
 function getTaskType(task = {}) { return task.tmplType || task.actionType || ''; }
+function getActionType(task = {}) { return task.actionType || task.tmplType || ''; }
 function getTaskName(task = {}) { return task.title || task.name || task.templateName || getTaskType(task) || '未知任务'; }
 function getTaskProgress(task = {}) {
   if (getTaskType(task) === 'SIGN_IN') return { done: task.isCompleted ? 1 : 0, max: 1 };
