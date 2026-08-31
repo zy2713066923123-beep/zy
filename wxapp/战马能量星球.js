@@ -22,9 +22,19 @@ const addFriend = 1;
 
 // ===================== 配置 =====================
 // 应用宝服务地址：手机号加密数据(encryptedData/iv)由其 /wxapp/getPhoneNumber 返回
-// 兼容旧的 WX_SERVICE 变量；战马旧版仅依赖 8000(应用宝) 服务，故默认走应用宝协议
-if (!process.env.WX_SERVER && !process.env.YYB_SERVER) {
-    process.env.WX_SERVER = process.env.WX_SERVICE || 'http://127.0.0.1:8000';
+// 优先使用环境变量中已配置的服务地址（WX_SERVER / YYB_SERVER / WECHAT_SERVER / YINGYONGBAO_SERVER / WX_SERVICE）
+// 全部为空时才回退到本地默认地址
+{
+    const envServer = process.env.WX_SERVER
+        || process.env.YYB_SERVER
+        || process.env.WECHAT_SERVER
+        || process.env.YINGYONGBAO_SERVER
+        || process.env.WX_SERVICE;
+    if (envServer) {
+        if (!process.env.WX_SERVER) process.env.WX_SERVER = envServer;
+    } else {
+        process.env.WX_SERVER = 'http://127.0.0.1:8000';
+    }
 }
 if (!process.env.SERVER_TYPE) {
     process.env.SERVER_TYPE = 'yyb';
@@ -293,7 +303,7 @@ async function Envs() {
     }
     if (!accounts.length) {
         console.log('未解析到任何账号，可能原因：');
-        console.log('  1) 未启动 yyb_go 服务或 WX_SERVER 地址不可达（默认 http://127.0.0.1:8000，需配置 WX_SERVER 指向正确服务）');
+        console.log(`  1) 未启动 yyb_go 服务或服务地址不可达（当前: ${process.env.WX_SERVER}，可用 WX_SERVER / YYB_SERVER / WECHAT_SERVER 环境变量指定）`);
         console.log('  2) yyb_go 中账号全部离线，或微信小程序号 hasSession=false 需重新登录');
         console.log('  3) 未配置 WX_ID（仅当只想跑指定账号时需要）');
         return false;
