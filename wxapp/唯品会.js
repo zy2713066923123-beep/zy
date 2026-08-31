@@ -21,8 +21,8 @@ class Env {
     }
     log(...args) { console.log(...args); this.logs.push(args.join(" ")); }
     async checkEnv(ckName) {
-        const list = await global.resolveAccounts(ckName);
-        this.userList = list;
+        // 优先从 yyb_go 服务端同步存活账号（参考霖久智服.js 的做法：拉取账号对象而非纯字符串）
+        this.userList = await buildYybGoAccounts();
         if (!this.userList.length) console.log('未找到环境变量 WX_ID，且 yyb_go 无存活账号');
     }
     async done() { 
@@ -159,16 +159,21 @@ async function request(options) {
 
 
 class Vipshop {
-  constructor(wxid) {
-    this.wxid = wxid;
-    this.openid = wxid;
-    this.account = {};
-    this.openid = this.openid || "";
-    this.token = this.account.token || "";
-    this.userId = this.account.userId || "";
-    this.vipOpenid = this.account.vipOpenid || "";
-    this.unionid = this.account.unionid || "";
-    this.marsCid = this.account.marsCid || DEFAULT_MARS_CID;
+  constructor(account) {
+    // account 支持两种形式：
+    //   1) yyb_go 账号对象：{ openid, wxid, id, remark, ... }
+    //   2) 纯字符串（wxid / openid）
+    const acc = (account && typeof account === "object") ? account : { wxid: String(account || "") };
+    // 优先 openid（应用宝），其次 wxid，再次数字 id；与 getWxCode 解析保持一致
+    this.wxid = acc.openid || acc.wxid || (acc.id != null ? String(acc.id) : "") || "";
+    this.remark = acc.remark || acc.nickname || acc.alias || "";
+    this.account = acc;
+    this.openid = this.wxid;
+    this.token = acc.token || acc.VIP_TANK || acc.vipTank || "";
+    this.userId = acc.userId || acc.uid || "";
+    this.vipOpenid = acc.vipOpenid || acc.vip_openid || acc.encryptedOpenid || "";
+    this.unionid = acc.unionid || acc.unionId || "";
+    this.marsCid = acc.marsCid || acc.mars_cid || DEFAULT_MARS_CID;
     this.cacheKey = this.openid || (this.vipOpenid ? md5(this.vipOpenid).slice(0, 16) : `account_${$.userIdx}`);
   }
 
@@ -329,6 +334,12 @@ class Vipshop {
       data: form(data),
     });
     if (status !== 200 || Number(res?.code) !== 1 || !res?.data?.tokenId) {
+      // 命中唯品会第三方登录限流（fds limit）：保留已获取的 vipOpenid，下次只需补登录
+      const msg = String(res?.msg || "");
+      if (/fds limit|third login|频率|频繁|limit/i.test(msg)) {
+        if (this.vipOpenid) this.saveCache();
+        throw new Error(`自动登录被限流(third login fds limit)，请稍后重试或降低同时登录账号数: ${short(res)}`);
+      }
       throw new Error(`自动登录失败 HTTP ${status}: ${short(res)}`);
     }
     this.token = res.data.tokenId;
@@ -342,7 +353,15 @@ class Vipshop {
       this.log(`使用缓存登录态 userId=${this.userId} VIP_TANK=${mask(this.token)}`);
       return;
     }
+    // 已有 vipOpenid 也先缓存，避免重复取 code 触发限流
+    if (this.vipOpenid) this.saveCache();
+
     const code = await getWxCode(this.wxid, MINI_APP_ID);
+    if (!code) {
+      // code 获取失败（微信 token 失效），若有 vipOpenid 则保留缓存，下次只需补登录
+      if (this.vipOpenid) this.saveCache();
+      throw new Error('获取微信 code 失败，请检查 yyb_go 中该账号登录态是否失效（token 过期/被抢新）');
+    }
     if (!this.vipOpenid) await this.getVipWechatInfo(code);
     if (!this.token || !this.userId) await this.autoLogin(code);
     this.saveCache();
@@ -406,7 +425,8 @@ class Vipshop {
 
   async run() {
     try {
-      this.log(`开始执行 ${mask(this.wxid || this.vipOpenid || this.token)}`);
+      const label = this.remark ? `${this.remark}(${mask(this.wxid)})` : mask(this.wxid || this.vipOpenid || this.token);
+      this.log(`开始执行 ${label}`);
       await this.ensureLogin();
       await this.sign();
       this.saveCache();
@@ -414,6 +434,38 @@ class Vipshop {
       this.log(`执行失败: ${e.message || e}`);
     }
   }
+}
+
+// 当 WX_ID 未配置时，自动从 yyb_go 服务端拉取存活账号（参考霖久智服.js）
+async function buildYybGoAccounts() {
+  let list = [];
+  try {
+    list = await global.loadAccounts(); // WX_ID 留空时返回 yyb_go 所有存活账号
+  } catch (e) {
+    console.log(`[yyb] 从 yyb_go 拉取账号失败: ${e.message || e}`);
+    return [];
+  }
+  if (!Array.isArray(list) || !list.length) return [];
+
+  const mapped = list
+    .map((acc, i) => {
+      // openid 优先（应用宝），其次 wxid，再次数字 id；缓存键与 getWxCode 解析保持一致
+      const wxid = acc.openid || acc.wxid || (acc.id != null ? String(acc.id) : '');
+      if (!wxid) {
+        console.log(`[yyb] 账号 ${i + 1} 缺少 openid/wxid/id，跳过: ${JSON.stringify(acc).slice(0, 120)}`);
+        return null;
+      }
+      return {
+        wxid,
+        openid: wxid,
+        id: acc.id,
+        remark: acc.remark || acc.nickname || acc.alias || `yyb_${i + 1}`,
+        unionid: acc.unionid || acc.unionId || '',
+      };
+    })
+    .filter(Boolean);
+  console.log(`[yyb] 自动从 yyb_go 同步到 ${mapped.length} 个存活账号`);
+  return mapped;
 }
 
 !(async () => {

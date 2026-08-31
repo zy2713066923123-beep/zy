@@ -148,7 +148,7 @@ def build_p_ckk(anow, phpsessid, numeric_values):
     return hashlib.md5((anow + phpsessid + r).encode("utf-8")).hexdigest()
 
 def login(code, phpsessid=""):
-    """调用 mzh.php 登录，返回 (phpsessid, uid, appkey)"""
+    """调用 mzh.php 登录，返回 (phpsessid, uid, appkey, qdn)"""
     anow = _now_ms()
     # 字段顺序必须与小程序一致
     llu = json.dumps({
@@ -269,7 +269,7 @@ class ManorClient:
         return self._post("/building/start", {"uid": self.uid, "winery_id": winery_id, "building_type": building_type, "option_id": option_id})
 
     def building_harvest(self, winery_id, building_type, task_id):
-        return self._post("/building/harvest", {"uid": self.uid, "task_id": task_id})
+        return self._post("/building/harvest", {"uid": self.uid, "winery_id": winery_id, "building_type": building_type, "task_id": task_id})
 
     def daily_tasks(self, winery_id, building_type):
         return self._post("/building/daily-tasks", {"uid": self.uid, "winery_id": winery_id, "building_type": building_type})
@@ -388,35 +388,78 @@ def process_account(wxid, remark):
             except Exception as e:
                 log.warn("    开始生产异常: %s" % e)
 
-        # 5.2 每日任务
+        # 5.2 今日任务自动完成（阅读故事/游戏挑战等，完成后获得6h加速）
         try:
             dt_resp = client.daily_tasks(winery_id, btype)
             dt_data = dt_resp.get("data") or {}
             daily_tasks = dt_data.get("daily_tasks") or []
         except Exception as e:
-            log.warn("    获取每日任务失败: %s" % e)
+            log.warn("    获取今日任务失败: %s" % e)
             daily_tasks = []
 
         for dt in daily_tasks:
             ttype = dt.get("task_type")
             tname = dt.get("name") or ttype
             if dt.get("is_completed"):
-                log.info("    每日任务[%s] 已完成" % tname)
+                log.info("    今日任务[%s] 已完成" % tname)
                 continue
-            # 阅读任务先读故事
+            # 阅读类任务：先阅读酒庄故事，再完成任务
             if ttype == "read":
                 try:
                     client.story(winery_id)
-                except Exception:
-                    pass
+                    log.info("    今日任务[%s] 已阅读故事" % tname)
+                except Exception as e:
+                    log.warn("    今日任务[%s] 阅读故事异常: %s" % (tname, e))
+            # 游戏类任务：尝试完成（若需先玩小游戏，接口会校验）
+            elif ttype == "game":
+                log.info("    今日任务[%s] 尝试完成游戏挑战" % tname)
+            # 其他未知类型任务：同样尝试完成
+            else:
+                log.info("    今日任务[%s] 尝试完成" % tname)
             try:
                 res = client.complete_daily_task(winery_id, btype, ttype)
                 if (res.get("code") or 0) in (200, 0):
-                    log.info("    ✅ 完成每日任务[%s] +6h加速" % tname)
+                    log.info("    ✅ 完成今日任务[%s] +6h加速" % tname)
                 else:
-                    log.warn("    完成每日任务[%s]失败: %s" % (tname, res.get("message")))
+                    log.warn("    完成今日任务[%s]失败: %s" % (tname, res.get("message")))
             except Exception as e:
-                log.warn("    完成每日任务[%s]异常: %s" % (tname, e))
+                log.warn("    完成今日任务[%s]异常: %s" % (tname, e))
+
+    # 5.3 酒柜自动合成（收集碎片合成酒款，获得积分）
+    log.info("   🍷 检查酒柜合成...")
+    try:
+        col = client.collection(winery_id)
+        col_data = col.get("data") or {}
+        wines = col_data.get("wines") or []
+        composable = [w for w in wines if w.get("status") == "composable"]
+        if not wines:
+            log.info("     酒柜为空，跳过合成")
+        elif not composable:
+            log.info("     暂无碎片可合成的酒款（%d 款中 %d 款已收集）" % (
+                len(wines), sum(1 for w in wines if w.get("status") == "collected")))
+        else:
+            log.info("     发现 %d 款可合成酒款，开始自动合成..." % len(composable))
+            for w in composable:
+                wine = w.get("wine") or {}
+                wid = wine.get("id")
+                wname = wine.get("name") or wid
+                reward = wine.get("reward_points", 0)
+                frags = w.get("fragments") or {}
+                log.info("     🍷 合成 [%s] 奖励+%s积分 (碎片: 风土%s/配方%s/陈酿%s/风味%s)" % (
+                    wname, reward, frags.get("terroir", 0), frags.get("recipe", 0),
+                    frags.get("aging_key", 0), frags.get("flavor_code", 0)))
+                try:
+                    res = client.compose(winery_id, wid)
+                    if (res.get("code") or 0) in (200, 0):
+                        got = (res.get("data") or {}).get("points", reward)
+                        log.info("     ✅ 合成成功! +%s 积分" % got)
+                    else:
+                        log.warn("     合成失败: %s" % res.get("message"))
+                except Exception as e:
+                    log.warn("     合成异常: %s" % e)
+                _sleep(REQUEST_DELAY_MIN, REQUEST_DELAY_MAX)
+    except Exception as e:
+        log.warn("   获取酒柜失败: %s" % e)
 
     # 6. 最终状态
     try:

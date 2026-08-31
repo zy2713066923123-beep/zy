@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+import os
+import sys
+
+# 将脚本所在目录加入搜索路径（确保能找到 yyb.py 等同目录模块，与飞猪.py 一致）
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 import yyb  # 自动同步 yyb_go 存活账号
 # name: 加多宝Club
 # cron: 12 08,20 * * *
@@ -43,16 +49,7 @@ APPID = "wx8371875e443e177f"
 CLIENT_CODE = "CLI2113448692"
 
 # YYB_SERVER 解析
-# ============ 统一取码（WX_ID + getCode，支持牛子/YYB 双协议自动路由）============
-
-WX_IDS = [s.strip() for s in os.getenv("WX_ID", "").replace("&", "\n").splitlines() if s.strip()]
-if not WX_IDS:
-    try:
-        accs = load_accounts()
-        if accs:
-            WX_IDS = [acc.get("openid") or str(acc.get("id")) for acc in accs]
-    except Exception:
-        pass
+# ============ 统一取码（WX + getCode，支持牛子/YYB 双协议自动路由）============
 
 WECHAT_SERVER = (os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or "http://127.0.0.1:8000").strip()
 YYB_SERVER = (os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or "http://127.0.0.1:8000").strip()
@@ -60,6 +57,25 @@ if WECHAT_SERVER:
     os.environ["WECHAT_SERVER"] = WECHAT_SERVER
 if YYB_SERVER:
     os.environ["YYB_SERVER"] = YYB_SERVER
+
+# 从 yyb-go 拉取存活账号（参考飞猪.py：统一使用 yyb.load_accounts）
+# 支持 WX_ID 白名单过滤（多账号用 & 或换行分隔），留空则自动拉取全部存活账号
+def load_wx_accounts() -> List[Dict[str, Any]]:
+    server_url = yyb.get_global_server_url()
+    print(f"🔗 yyb_go 服务地址: {server_url}")
+    try:
+        accounts = yyb.load_accounts()
+    except Exception as exc:
+        print(f"❌ 拉取 yyb_go 账号失败：{exc}")
+        return []
+    if not accounts:
+        print("❌ 未获取到任何在线账号，请确认 yyb_go 服务已配置且有存活账号")
+        return []
+    print(f"✅ 从 yyb_go 同步到 {len(accounts)} 个存活账号")
+    return accounts
+
+WX_ACCOUNTS = load_wx_accounts()
+WX_IDS = [str(acc.get("openid") or acc.get("id") or acc.get("wxid") or "") for acc in WX_ACCOUNTS if (acc.get("openid") or acc.get("id") or acc.get("wxid"))]
 
 print(f"✅ 读取到 {len(WX_IDS)} 个微信账号，自动路由牛子/YYB 双协议")
 
@@ -779,9 +795,13 @@ def main() -> None:
 
     results: List[Dict[str, Any]] = []
 
-    for index, openid in enumerate(WX_IDS, 1):
+    for index, account in enumerate(WX_ACCOUNTS, 1):
+        openid = str(account.get("openid") or account.get("id") or account.get("wxid") or "")
+        if not openid:
+            print(f"  [主程序] 账号{index} 缺少 id/openid/wxid，跳过")
+            continue
         try:
-            result = run_account(index, len(WX_IDS), openid)
+            result = run_account(index, len(WX_ACCOUNTS), openid)
             results.append(result)
         except Exception as exc:
             print(f"  [主程序] 执行异常: {exc}")
@@ -795,7 +815,7 @@ def main() -> None:
                 "proxyStatus": "-", "proxyIp": "-",
             })
 
-        if index < len(WX_IDS):
+        if index < len(WX_ACCOUNTS):
             print("  [间隔] 等待 2s 后处理下一个账号")
             sleep(2)
 

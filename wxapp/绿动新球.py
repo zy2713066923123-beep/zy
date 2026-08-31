@@ -34,8 +34,51 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Tuple
 from urllib.parse import quote
- 
+
 import requests
+
+# ============ Token 缓存（取码服务不可用时复用缓存 token，避免全部失败）============
+TOKEN_CACHE_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "token_caches", "绿动新球.json"
+)
+TOKEN_MAX_AGE_MS = int(os.getenv("LVDONG_TOKEN_MAX_AGE", str(6 * 3600 * 1000)))  # 默认 6 小时
+
+
+def read_token_cache() -> Dict[str, Any]:
+    try:
+        if not os.path.exists(TOKEN_CACHE_FILE):
+            return {}
+        with open(TOKEN_CACHE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f) or {}
+    except Exception:
+        return {}
+
+
+def write_token_cache(cache: Dict[str, Any]) -> None:
+    try:
+        os.makedirs(os.path.dirname(TOKEN_CACHE_FILE), exist_ok=True)
+        with open(TOKEN_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False, indent=2)
+    except Exception as exc:
+        print(f"⚠️ [缓存] 写入 token 缓存失败: {exc}")
+
+
+def get_cached_token(openid: str) -> str | None:
+    """读取某账号缓存的 token，未过期则返回，否则返回 None。"""
+    cache = read_token_cache()
+    item = cache.get(openid)
+    if not item or not item.get("token"):
+        return None
+    updated_at = int(item.get("updatedAt") or 0)
+    if updated_at and int(time.time() * 1000) - updated_at < TOKEN_MAX_AGE_MS:
+        return str(item["token"])
+    return None
+
+
+def save_cached_token(openid: str, token: str) -> None:
+    cache = read_token_cache()
+    cache[openid] = {"token": token, "updatedAt": int(time.time() * 1000)}
+    write_token_cache(cache)
  
 # 禁用SSL警告
 import warnings

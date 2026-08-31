@@ -125,10 +125,21 @@ MEMBER_BASE = os.getenv("UFS_MEMBER_BASE", "https://member.unileverfoodsolutions
 # 该值由小程序 build 决定, 对所有用户一致; 如需覆盖可设环境变量 UFS_ACCOUNT_ID
 ACCOUNT_ID = os.getenv("UFS_ACCOUNT_ID", "577c98c4905e88311f8b474a").strip()
 
-WX_IDS = [s.strip() for s in os.getenv("WX_ID", "").replace("&", "\n").splitlines() if s.strip()]
+# ============ 账号来源：优先从 yyb-go 拉取存活账号，WX_ID 仅作兜底 ============
+WX_IDS = []
+try:
+    accs = load_accounts()
+    if accs:
+        WX_IDS = [str(acc.get("openid") or acc.get("wxid") or acc.get("id") or "") for acc in accs
+                  if (acc.get("openid") or acc.get("wxid") or acc.get("id"))]
+        print(f"ℹ️  已从 yyb-go 同步 {len(WX_IDS)} 个存活账号")
+except Exception:
+    pass
+
 if not WX_IDS:
-    # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
-    WX_IDS = resolve_accounts()
+    WX_IDS = [s.strip() for s in os.getenv("WX_ID", "").replace("&", "\n").splitlines() if s.strip()]
+    if WX_IDS:
+        print(f"ℹ️  yyb-go 无存活账号，回退使用 WX_ID 配置的 {len(WX_IDS)} 个账号")
 
 # 可自动完成的任务白名单 (reward 无需真人弹窗即可领到积分)。
 # 服务端的 simple-complete 接口只认特定 code, 业务任务 (进货/报单/上传/调研/邀请/

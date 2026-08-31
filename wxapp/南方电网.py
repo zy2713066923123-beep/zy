@@ -273,10 +273,21 @@ APPID = "wx325a533aedaafe35"
 
 # 账号来自环境变量 WX_ID, 格式: wxid#备注 或 openid, 多账号换行或 & 分隔。
 # 与项目其它脚本一致, 经 getCode 自动路由牛子/YYB 协议取 code。
-WX_IDS = [s.strip() for s in os.getenv("WX_ID", "").replace("&", "\n").splitlines() if s.strip()]
+# ============ 账号来源：优先从 yyb-go 拉取存活账号，WX_ID 仅作兜底 ============
+WX_IDS = []
+try:
+    accs = load_accounts()
+    if accs:
+        WX_IDS = [str(acc.get("openid") or acc.get("wxid") or acc.get("id") or "") for acc in accs
+                  if (acc.get("openid") or acc.get("wxid") or acc.get("id"))]
+        print(f"ℹ️  已从 yyb-go 同步 {len(WX_IDS)} 个存活账号")
+except Exception:
+    pass
+
 if not WX_IDS:
-    # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
-    WX_IDS = resolve_accounts()
+    WX_IDS = [s.strip() for s in os.getenv("WX_ID", "").replace("&", "\n").splitlines() if s.strip()]
+    if WX_IDS:
+        print(f"ℹ️  yyb-go 无存活账号，回退使用 WX_ID 配置的 {len(WX_IDS)} 个账号")
 if not WX_IDS:
     print("ℹ️  未配置环境变量 WX_ID，将尝试使用环境变量/config.json 中的 token 兜底")
 

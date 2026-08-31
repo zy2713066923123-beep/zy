@@ -63,7 +63,25 @@ ANSWER_CACHE = {}
 #   YYB_SERVER    应用宝取码服务地址（手机号获取 + 自动拉取账号需要）
 #   WECHAT_SERVER 牛子取码服务地址（可选）
 #   WXAPP_SERVICE_URL  兼容别名，等价于 YYB_SERVER
-WX_IDS = [s.strip() for s in os.getenv("WX_ID", "").replace("&", "\n").splitlines() if s.strip()]
+# ============ 账号来源：优先从 yyb-go 拉取存活账号，WX_ID 仅作兜底 ============
+# 注意：本文件下方定义了本地 load_accounts()（读 token 缓存），会遮蔽 yyb 的同名函数，
+# 因此这里直接用 YYBClient 拉取 yyb_go 存活账号。
+WX_IDS = []
+try:
+    from yyb import YYBClient
+    online = YYBClient().get_online_accounts()
+    if online:
+        WX_IDS = [str(acc.get("openid") or acc.get("wxid") or acc.get("id") or "") for acc in online
+                  if (acc.get("openid") or acc.get("wxid") or acc.get("id"))]
+        print(f"ℹ️  已从 yyb-go 同步 {len(WX_IDS)} 个存活账号")
+except Exception:
+    pass
+
+if not WX_IDS:
+    WX_IDS = [s.strip() for s in os.getenv("WX_ID", "").replace("&", "\n").splitlines() if s.strip()]
+    if WX_IDS:
+        print(f"ℹ️  yyb-go 无存活账号，回退使用 WX_ID 配置的 {len(WX_IDS)} 个账号")
+
 YYB_HOST = (
     (os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or "").strip()
     or os.getenv("WXAPP_SERVICE_URL", "").strip()
@@ -591,9 +609,18 @@ def fetch_all_accounts_from_service() -> list:
         if resp.status_code != 200:
             raise Exception(f"HTTP {resp.status_code}")
         data = resp.json()
-        if data.get("code") != 0:
-            raise Exception(f"API 返回错误: {data}")
-        raw_accounts = data.get("data", [])
+        # 兼容 YYB 服务多种返回格式：
+        #   1) {"code":0, "data":[...]}
+        #   2) {"error":0, "accounts":[...]}  （YYB Go 实际返回）
+        #   3) 直接返回数组 [...]
+        if isinstance(data, list):
+            raw_accounts = data
+        elif isinstance(data, dict):
+            if data.get("code") not in (0, None) or data.get("error") not in (0, None):
+                raise Exception(f"API 返回错误: {data}")
+            raw_accounts = data.get("accounts") or data.get("data") or []
+        else:
+            raw_accounts = []
         if not raw_accounts:
             raise Exception("账号列表为空")
         print(f"[ACCOUNT] 获取到 {len(raw_accounts)} 个账号")
@@ -602,11 +629,15 @@ def fetch_all_accounts_from_service() -> list:
         return accounts
 
     for acc in raw_accounts:
-        acc_id = acc.get("id")
+        # YYB 服务返回的账号可能用 id 或 openid 标识，优先取 id，否则用 openid
+        acc_id = acc.get("id") or acc.get("openid") or acc.get("uin")
         nickname = acc.get("nickname", "未知")
         status = acc.get("status", "")
         if status and status not in ("alive", "active"):
             print(f"[SKIP] 账号 {acc_id} ({nickname}) 状态非存活: {status}")
+            continue
+        if not acc_id:
+            print(f"[SKIP] 账号 {nickname} 缺少 id/openid，跳过")
             continue
 
         ref = str(acc_id)

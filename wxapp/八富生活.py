@@ -33,15 +33,24 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # 将脚本所在目录加入搜索路径（确保能找到 yyb.py 等同目录模块）
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# ── getCode 模块（标准方式获取微信 code） ──
-# 与习酒等脚本一致：分开导入，避免某个函数不存在导致整体失败
+# ── getCode / 账号模块（标准方式从 yyb-go 获取微信 code 与账号） ──
+# 与习酒等脚本一致：优先从 yyb 直接导入，失败则降级到 import yyb 再 getattr
 try:
-    
+    from yyb import (get_single_code, get_single_phone_number,
+                     load_accounts as yyb_load_accounts)
     _HAS_GETCODE = True
 except ImportError:
-    get_single_code = None
-    get_single_phone_number = None
-    _HAS_GETCODE = False
+    try:
+        import yyb
+        get_single_code = getattr(yyb, "get_single_code", None)
+        get_single_phone_number = getattr(yyb, "get_single_phone_number", None)
+        yyb_load_accounts = getattr(yyb, "load_accounts", None)
+        _HAS_GETCODE = True
+    except ImportError:
+        get_single_code = None
+        get_single_phone_number = None
+        yyb_load_accounts = None
+        _HAS_GETCODE = False
 
 # ---------- SSL 补丁 ----------
 _ORIG_REQUEST = requests.Session.request
@@ -148,29 +157,29 @@ def feistel_encrypt(ad_id, user_id) -> str:
 
 # ---------- 账号来源 ----------
 def load_accounts():
-    """优先从 yyb 服务拉取存活账号，失败则回退到 WX_ID 环境变量（格式 wxid/openid#备注，多账号换行）"""
+    """优先从 yyb-go 服务拉取存活账号，环境变量 WX_ID 仅作兜底（格式 wxid/openid#备注，多账号换行）"""
     accounts = []
 
-    # 优先从 yyb 服务拉取存活账号
+    # 优先从 yyb-go 服务拉取存活账号
     try:
-        from yyb import YYBClient
-        online = YYBClient().get_online_accounts()
-        if online:
-            for acc in online:
-                wxid = acc.get("openid") or acc.get("wxid") or acc.get("id") or ""
-                remark = acc.get("nickname") or acc.get("alias") or acc.get("remark") or wxid
-                if wxid:
-                    accounts.append({
-                        "openid": wxid,
-                        "display_name": remark,
-                        "source": "yyb",
-                        "wxid": wxid,
-                    })
-            if accounts:
-                log(f"  📥 从 yyb 服务同步到 {len(accounts)} 个存活账号")
-                return accounts
+        if yyb_load_accounts:
+            online = yyb_load_accounts()
+            if online:
+                for acc in online:
+                    wxid = str(acc.get("openid") or acc.get("wxid") or acc.get("id") or "")
+                    remark = acc.get("remark") or acc.get("nickname") or acc.get("alias") or acc.get("id") or wxid
+                    if wxid:
+                        accounts.append({
+                            "openid": wxid,
+                            "display_name": remark,
+                            "source": "yyb",
+                            "wxid": wxid,
+                        })
+                if accounts:
+                    log(f"  📥 从 yyb-go 同步到 {len(accounts)} 个存活账号")
+                    return accounts
     except Exception as exc:
-        log(f"  ⚠️ 从 yyb 服务拉取账号失败: {exc}")
+        log(f"  ⚠️ 从 yyb-go 拉取账号失败: {exc}")
 
     wx_id_raw = os.environ.get("WX_ID", "").strip() or os.environ.get("WXIDBFSH", "").strip()
 
@@ -463,8 +472,11 @@ class BfshAccount:
     def refresh_session(self):
         return self.login(force=True)
 
-    def check_limit(self, adpid):
-        data, _, err = self._req("GET", "/ad/checkLimit", params={"adpid": adpid})
+    def check_limit(self, adpid, code=None):
+        params = {"adpid": adpid}
+        if code:
+            params["code"] = code
+        data, _, err = self._req("GET", "/ad/checkLimit", params=params)
         if err or data.get("_error"):
             return None
         d = data.get("data") or {}
@@ -483,6 +495,9 @@ class BfshAccount:
         if not self.user_id:
             log("  ❌ 缺少 user_id，无法完成广告")
             return False, "缺少 user_id"
+        if not ad_task_id:
+            log("  ❌ 缺少 ad_task_id（服务端未返回广告任务），无法完成广告")
+            return False, "缺少 ad_task_id"
         token = feistel_encrypt(ad_task_id, self.user_id)
         path = f"/ad/complete?token={token}&adpid={adpid}"
         if need_login and self.code:
@@ -566,7 +581,7 @@ class BfshAccount:
 
         watched = 0
         while True:
-            info = self.check_limit(adpid)
+            info = self.check_limit(adpid, self.code)
             if info is None:
                 result.setdefault("errors", []).append("查询广告上限失败")
                 break
@@ -604,12 +619,17 @@ class BfshAccount:
                         break
 
             time.sleep(random.uniform(AD_CHECK_GAP, AD_CHECK_GAP + 1))
-            info2 = self.check_limit(adpid)
+            info2 = self.check_limit(adpid, self.code)
             if info2 is None:
                 result.setdefault("errors", []).append("第二次 checkLimit 失败")
                 break
             ad_task_id = info2["id"]
             log(f"  📺 开始观看广告 (adTaskId={ad_task_id})...")
+
+            if not ad_task_id:
+                log("  ⚠️ 服务端未返回广告任务 id（adId=None），可能需先领取广告或需登录")
+                result.setdefault("errors", []).append("服务端未返回广告任务 id")
+                break
 
             watch_time = AD_WATCH_SECONDS + random.uniform(1, 5)
             log(f"  ⏳ 等待 {watch_time:.0f} 秒（模拟广告播放）...")

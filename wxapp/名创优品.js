@@ -1,6 +1,7 @@
 const yyb = require('./yyb.js'); // 自动同步 yyb_go 存活账号
 // name: 名创优品
-// cron: 0 09,21 * * *const axios = require('axios');
+// cron: 0 09,21 * * *
+const axios = require('axios');
 const CryptoJS = require('crypto-js');
 const fs = require('fs');
 const path = require('path');
@@ -542,12 +543,12 @@ async function main() {
     console.log('│ 名创优品小程序签到 │');
     console.log('└─────────────────────────────┘');
 
-    // 优先从 yyb 拉取全部存活账号（不受 WX_ID 过滤，配 N 条只跑 N 个）
+    // 优先从 yyb-go 拉取全部存活账号（不受 WX_ID 过滤，配 N 条只跑 N 个）
     try {
-        const online = await new YYBClient().getOnlineAccounts();
+        const online = await yyb.loadAccounts();
         if (online && online.length) {
             WX_IDS = online.map(a => a.openid || a.wxid || a._ref || String(a.id)).filter(Boolean);
-            console.log(`✅ 从 yyb 服务拉取到 ${online.length} 个存活账号`);
+            console.log(`✅ 从 yyb-go 服务拉取到 ${online.length} 个存活账号`);
         }
     } catch (e) {
         console.log(`[yyb] 拉取账号列表失败: ${e.message || e}`);
@@ -559,17 +560,8 @@ async function main() {
             .map(s => s.trim())
             .filter(Boolean);
     }
-    // 兜底：从 yyb_go 拉取所有存活账号
     if (!WX_IDS.length) {
-        try {
-            const _accs = await yyb.loadAccounts();
-            WX_IDS = _accs.map(a => a.openid || a.wxid || a._ref || String(a.id)).filter(Boolean);
-        } catch (e) {
-            console.log(`从 yyb_go 拉取账号失败: ${e.message || e}`);
-        }
-    }
-    if (!WX_IDS.length) {
-        console.log('未找到可用账号（WX_ID 未配置且 yyb_go 无存活账号）');
+        console.log('未找到可用账号（WX_ID 未配置且 yyb-go 无存活账号）');
         return;
     }
 
@@ -639,11 +631,5 @@ if (require.main === module) {
     main().catch(err => {
         console.log('✗ 脚本执行出错:', err && err.message ? err.message : err);
         process.exit(1);
-    });
-}
-
-if (require.main === module) {
-    main().catch(err => {
-        console.log('✗ 脚本执行出错:', err);
     });
 }

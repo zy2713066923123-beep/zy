@@ -461,7 +461,11 @@ async function doAction(account, auth, cache, actionType, taskName, label) {
 
   const data = await withAuthRetry(account, auth, cache, () => encryptedAction(account, auth, payload), label);
   if (Number(data.code) === 0) {
-    const points = Number(data.data && data.data.pointCount ? data.data.pointCount : 0);
+    const d = data.data || {};
+    // 优先取本次实际发放积分，其次任务展示积分；避免把“成长值/冻结”误当可用积分
+    const points = Number(
+      d.issuedPoints ?? d.pointCount ?? d.points ?? d.availablePoints ?? 0,
+    );
     stats.actionEarned += points;
     if (stats.currentAccount) stats.currentAccount.actionEarned += points;
     log(`✅ ${label} 成功，+${points}积分`);
@@ -512,7 +516,11 @@ async function fetchPoint(account, auth, cache, label = '当前积分') {
     return null;
   }
 
-  const points = Number(data.data && data.data.availablePoints ? data.data.availablePoints : 0);
+  const d = data.data || {};
+  // 优先读取总积分，其次可用积分，避免因“冻结/待生效积分”导致前后对比失真
+  const points = Number(
+    d.totalPoints ?? d.points ?? d.availablePoints ?? d.balance ?? 0,
+  );
   log(`💰 ${label}：${points}`);
   return points;
 }

@@ -257,12 +257,27 @@ class Task {
 
     async loginByWxCode() {
         try {
-            const wxData = await this.getOperateData();
+            // 1) 单独获取 wx.login code（operateWxData 不返回 code）
+            const code = await getSingleCode(MINI_APP_ID, this.accountId);
+            if (!code) throw new Error("getCode 未提取到 wx code");
+            // 2) 获取手机号加密数据 encryptedData/iv（兼容多种返回结构）
+            let wxData = await this.getOperateData();
+            let edata = wxData?.encryptedData || wxData?.encrypted_data || wxData?.data?.encryptedData || wxData?.Data?.encryptedData || "";
+            let iv = wxData?.iv || wxData?.IV || wxData?.data?.iv || wxData?.Data?.iv || "";
+            // 3) 应用宝(YYB)协议无 operate 加密载荷，退化为手机号加密数据接口
+            if (!edata || !iv) {
+                const phone = await getSinglePhoneEncrypted(MINI_APP_ID, this.accountId);
+                if (phone) {
+                    edata = phone.encryptedData || phone.encrypted_data || "";
+                    iv = phone.iv || phone.IV || "";
+                }
+            }
+            if (!edata || !iv) throw new Error(`未提取到 encryptedData/iv: ${JSON.stringify(wxData).substring(0, 300)}`);
             const articleIds = await this.getArticleIds();
             const params = {
-                edata: wxData.encryptedData,
-                iv: wxData.iv,
-                code: wxData.code,
+                edata,
+                iv,
+                code,
                 uuid: this.uuid,
                 article_ids: articleIds,
                 app_versions: "1.0.0",

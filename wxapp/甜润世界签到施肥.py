@@ -29,21 +29,28 @@ BASE_HEADERS = {
 # ========== 从 YYB_SERVER 读取服务地址 ==========
 # ============ 统一取码（WX_ID + getCode，支持牛子/YYB 双协议自动路由）============
 
-WX_IDS = [s.strip() for s in os.getenv("WX_ID", "").replace("&", "\n").splitlines() if s.strip()]
-if not WX_IDS:
-    try:
-        accs = load_accounts()
-        if accs:
-            WX_IDS = [acc.get("openid") or str(acc.get("id")) for acc in accs]
-    except Exception:
-        pass
-
 WECHAT_SERVER = (os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or "http://127.0.0.1:8000").strip()
 YYB_SERVER = (os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or "http://127.0.0.1:8000").strip()
 if WECHAT_SERVER:
     os.environ["WECHAT_SERVER"] = WECHAT_SERVER
 if YYB_SERVER:
     os.environ["YYB_SERVER"] = YYB_SERVER
+
+# 优先从 yyb-go 拉取存活账号（与幸荟庄园等脚本一致），失败才回退 WX_ID 白名单
+WX_IDS = []
+try:
+    accs = load_accounts()
+    if accs:
+        WX_IDS = [str(acc.get("openid") or acc.get("wxid") or acc.get("id") or "") for acc in accs
+                  if (acc.get("openid") or acc.get("wxid") or acc.get("id"))]
+        print(f"[yyb] 自动从 yyb_go 同步到 {len(WX_IDS)} 个存活账号 @ {YYB_SERVER}")
+except Exception as e:
+    print(f"[yyb] 自动拉取账号失败: {e}")
+
+if not WX_IDS:
+    WX_IDS = [s.strip() for s in os.getenv("WX_ID", "").replace("&", "\n").splitlines() if s.strip()]
+    if WX_IDS:
+        print(f"[wx] 使用 WX_ID 白名单 {len(WX_IDS)} 个账号")
 
 print(f"✅ 读取到 {len(WX_IDS)} 个微信账号，自动路由牛子/YYB 双协议")
 

@@ -1,4 +1,5 @@
-const yyb = require('./yyb.js'); // 自动同步 yyb_go 存活账号
+// 自动同步 yyb_go 存活账号；显式解构，避免依赖全局变量
+const { YYBClient, loadAccounts, getSingleCode, getSinglePhoneEncrypted } = require('./yyb.js');
 /**
  * 多账号：账号来源 / wx code / 手机号加密数据(encryptedData/iv) 全部统一走 yyb.js
  * （自动路由牛子/应用宝，读取 WX_ID 筛选账号）。不再直接依赖 8000 服务。
@@ -95,7 +96,7 @@ function getWXIDAccounts() {
 // 通过统一 getCode 模块获取 wx.login code（自动路由牛子/应用宝）
 function getWxCode(appid, identifier) {
     return new Promise((resolve) => {
-        yyb.getSingleCode(appid, String(identifier).split('#')[0].trim())
+        getSingleCode(appid, String(identifier).split('#')[0].trim())
             .then(code => {
                 if (code) resolve(code);
                 else { console.log('获取code失败: getSingleCode 返回空'); resolve(null); }
@@ -107,7 +108,7 @@ function getWxCode(appid, identifier) {
 // 通过统一 getCode 模块获取手机号加密数据（encryptedData/iv，由应用宝服务返回）
 function getPhoneEncrypted(appid, identifier) {
     return new Promise((resolve) => {
-        yyb.getSinglePhoneEncrypted(appid, String(identifier).split('#')[0].trim())
+        getSinglePhoneEncrypted(appid, String(identifier).split('#')[0].trim())
             .then(res => {
                 if (res && res.encryptedData && res.iv) {
                     resolve({ encryptedData: res.encryptedData, iv: res.iv });
@@ -239,32 +240,27 @@ async function getOrRefreshSafe(account, tokenStore) {
 async function Envs() {
     console.log('开始解析账号列表...');
     let accounts = [];
-    // 优先从 yyb 拉取全部存活账号（不受 WX_ID 过滤，配 N 条只跑 N 个）
+    // 标准入口：自动从 yyb_go 同步全部存活账号，支持 WX_ID 白名单过滤（参考 wxapp/README）
     try {
-        const online = await new YYBClient().getOnlineAccounts();
+        const online = await loadAccounts();
         if (online && online.length) {
             accounts = online.map((acc) => {
-                const id = acc.openid || acc.wxid || String(acc.id || '');
+                const id = String(acc.openid || acc.wxid || acc.id || '');
                 return { openid: id, wxid: id, nickname: acc.nickname || acc.alias || acc.remark || id };
             });
-            console.log(`✅ 从 yyb 服务拉取到 ${online.length} 个存活账号`);
+            console.log(`✅ 从 yyb_go 服务拉取到 ${accounts.length} 个存活账号`);
         }
     } catch (e) {
         console.log(`[yyb] 拉取账号列表失败: ${e.message || e}`);
     }
     if (!accounts.length) {
-        // 回退：WX_ID 环境变量
+        // 回退：WX_ID 环境变量（格式 wxid#备注，多账号换行/@/& 分隔）
         accounts = getWXIDAccounts();
     }
     if (!accounts.length) {
-        // 兜底：自动从 yyb_go 拉取存活账号
-        const auto = await resolveAccounts();
-        if (auto && auto.length) {
-            accounts = auto.map((acc) => ({ openid: acc, wxid: acc, nickname: acc }));
-        }
-    }
-    if (!accounts.length) {
-        console.log('未解析到任何账号，请检查环境变量 WX_ID（格式：wxid#备注，多账号换行/@/& 分隔）');
+        console.log('未解析到任何账号，可能原因：');
+        console.log('  1) 未启动 yyb_go 服务或 WX_SERVER 地址不可达（默认 http://127.0.0.1:8000，需配置 WX_SERVER 指向正确服务）');
+        console.log('  2) 未配置 WX_ID（仅当只想跑指定账号时需要）');
         return false;
     }
     console.log(`共 ${accounts.length} 个账号`);

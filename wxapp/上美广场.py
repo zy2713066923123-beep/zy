@@ -46,14 +46,21 @@ APPID = "wx383a677b99e64655"
 # YYB_SERVER 解析
 # ============ 统一取码（WX_ID + getCode，支持牛子/YYB 双协议自动路由）============
 
-WX_IDS = [s.strip() for s in os.getenv("WX_ID", "").replace("&", "\n").splitlines() if s.strip()]
+# ============ 账号来源：优先从 yyb-go 拉取存活账号，WX_ID 仅作兜底 ============
+WX_IDS = []
+try:
+    accs = load_accounts()
+    if accs:
+        WX_IDS = [str(acc.get("openid") or acc.get("wxid") or acc.get("id") or "") for acc in accs
+                  if (acc.get("openid") or acc.get("wxid") or acc.get("id"))]
+        print(f"ℹ️  已从 yyb-go 同步 {len(WX_IDS)} 个存活账号")
+except Exception:
+    pass
+
 if not WX_IDS:
-    try:
-        accs = load_accounts()
-        if accs:
-            WX_IDS = [acc.get("openid") or str(acc.get("id")) for acc in accs]
-    except Exception:
-        pass
+    WX_IDS = [s.strip() for s in os.getenv("WX_ID", "").replace("&", "\n").splitlines() if s.strip()]
+    if WX_IDS:
+        print(f"ℹ️  yyb-go 无存活账号，回退使用 WX_ID 配置的 {len(WX_IDS)} 个账号")
 
 WECHAT_SERVER = (os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or "http://127.0.0.1:8000").strip()
 YYB_SERVER = (os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or "http://127.0.0.1:8000").strip()

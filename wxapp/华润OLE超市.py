@@ -120,6 +120,11 @@ def now_text() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+def build_code_url(raw_url: str) -> str:
+    """已废弃：现使用 yyb.py 统一接口，保留兼容。"""
+    return ""
+
+
 def sleep(sec: float) -> None:
     time.sleep(sec)
 
@@ -245,10 +250,10 @@ class OleSign:
     def get_phone(self, wxid: str) -> Optional[Dict[str, Any]]:
         """获取手机号授权数据（统一 getCode 模块）。"""
         try:
-            info = get_single_phone_encrypted(WECHAT_MINI_APPID, wxid)
+            info = yyb.get_single_phone_encrypted(WECHAT_MINI_APPID, wxid)
             if info and (info.get("code") or info.get("encryptedData")):
                 return info
-            code = get_single_phone_number(WECHAT_MINI_APPID, wxid)
+            code = yyb.get_single_phone_number(WECHAT_MINI_APPID, wxid)
             if code:
                 return {"code": code}
             return None

@@ -49,24 +49,50 @@ UA = (
     "UnifiedPCWindowsWechat(0xf2541938) XWEB/19823"
 )
 
-# YYB_SERVER 解析
-# ============ 统一取码（WX_ID + getCode，支持牛子/YYB 双协议自动路由）============
+# ============ 统一取码（yyb_go 拉取 + WX_ID 回退，支持牛子/YYB 双协议自动路由）============
+# 环境变量：
+#   WX_SERVER  yyb_go 取码服务地址（如 http://127.0.0.1:8000）
+#   WX_ID      回退用账号白名单（可选），多账号换行或 & 分隔
+#              默认优先从 yyb_go 拉取全部存活账号，拉取失败时才回退 WX_ID
 
-WX_IDS = [s.strip() for s in os.getenv("WX_ID", "").replace("&", "\n").splitlines() if s.strip()]
-if not WX_IDS:
-    try:
-        accs = load_accounts()
-        if accs:
-            WX_IDS = [acc.get("openid") or str(acc.get("id")) for acc in accs]
-    except Exception:
-        pass
-
+# 1. 先写入服务地址，确保后续 yyb 拉取账号时能连到正确的 yyb_go 服务
 WECHAT_SERVER = (os.getenv("WX_SERVER") or os.getenv("WECHAT_SERVER") or "http://127.0.0.1:8000").strip()
 YYB_SERVER = (os.getenv("WX_SERVER") or os.getenv("YYB_SERVER") or "http://127.0.0.1:8000").strip()
 if WECHAT_SERVER:
     os.environ["WECHAT_SERVER"] = WECHAT_SERVER
 if YYB_SERVER:
     os.environ["YYB_SERVER"] = YYB_SERVER
+
+
+def fetch_accounts_from_yyb() -> list:
+    """从 yyb_go 服务拉取全部存活账号（参考霖久智服/幸荟庄园：优先 yyb_go，不受 WX_ID 过滤）"""
+    try:
+        client = YYBClient()
+        print(f"📡 yyb_go 服务端地址: {client.server_url}")  # 诊断：确认连的是正确的 yyb_go 服务
+        accs = client.get_online_accounts()
+        if not accs:
+            print("❌ yyb_go 未返回存活账号，请确认 WX_SERVER 已配置且服务在线")
+            return []
+        ids = []
+        for acc in accs:
+            ident = acc.get("openid") or str(acc.get("id")) or acc.get("wxid")
+            if ident:
+                ids.append(str(ident))
+        return ids
+    except Exception as exc:
+        print(f"❌ 从 yyb_go 拉取账号失败: {exc}")
+        return []
+
+
+# 2. 账号来源优先级：yyb_go 存活账号 > WX_ID 白名单（回退）
+print("📡 自动从 yyb_go 服务端同步存活账号...")
+WX_IDS = fetch_accounts_from_yyb()
+if WX_IDS:
+    print(f"✅ 从 yyb_go 拉取到 {len(WX_IDS)} 个存活账号")
+else:
+    WX_IDS = [s.strip() for s in os.getenv("WX_ID", "").replace("&", "\n").splitlines() if s.strip()]
+    if WX_IDS:
+        print(f"ℹ️  yyb_go 无可用账号，回退使用 WX_ID 配置的 {len(WX_IDS)} 个账号")
 
 print(f"✅ 读取到 {len(WX_IDS)} 个微信账号，自动路由牛子/YYB 双协议")
 

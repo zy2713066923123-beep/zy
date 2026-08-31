@@ -317,7 +317,8 @@ class YiPiaoDaClient:
             }
         )
         self.timeout = float(env("YPD_TIMEOUT") or "30")
-        self.wechat_code_url = build_code_url(env("WECHAT_SERVER") or DEFAULT_WECHAT_SERVER)
+        # 已废弃 build_code_url：现统一通过 yyb 模块（get_single_code）获取 code / 账号
+        self.wechat_code_url = env("WECHAT_SERVER") or DEFAULT_WECHAT_SERVER
         self.wechat_appid = clean_header_value(
             env("WECHAT_MINI_APPID") or env("wechat_mini_appid") or self.app_id
         )
@@ -702,7 +703,7 @@ def load_accounts() -> List[AccountConfig]:
 def main() -> None:
     print(f"壹票达签到开始 {now_text()}")
     print(f"API_HOST => {API_HOST}")
-    print(f"WECHAT_SERVER => {build_code_url(env('WECHAT_SERVER') or DEFAULT_WECHAT_SERVER)}")
+    print(f"WECHAT_SERVER => {env('WECHAT_SERVER') or DEFAULT_WECHAT_SERVER}")
     accounts = load_accounts()
     if not accounts:
         msg = (

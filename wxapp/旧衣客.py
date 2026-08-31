@@ -694,7 +694,7 @@ def load_accounts() -> List[AccountCtx]:
     if not raw:
         # 未配置 WX_ID 时，自动从 yyb_go 拉取存活账号
         try:
-            online = yyb.get_online_accounts()
+            online = yyb.load_accounts()
             if online:
                 raw = "\n".join(
                     (acc.get("openid") or acc.get("wxid") or acc.get("id") or "")
@@ -704,7 +704,7 @@ def load_accounts() -> List[AccountCtx]:
                 if raw:
                     log(f"[yyb] 自动从 yyb_go 同步到 {len(online)} 个存活账号")
         except Exception as exc:
-            log(f"[yyb] 拉取存活账号失败: {exc}", "warn")
+            log(f"[yyb] 拉取存活账号失败: {exc}")
     accounts: List[AccountCtx] = []
     for item in split_accounts(raw) if raw else []:
         p = parse_account(item)
