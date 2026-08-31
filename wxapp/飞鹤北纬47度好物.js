@@ -11,16 +11,16 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 飞鹤|北纬47度好物小程序 每日签到、自动完成任务
 
 【使用方法】
-方式A（推荐，标准模式）：使用 WX_ID + yyb.js 自动获取 code
-   - 环境变量名：WX_ID
-   - 变量值：每行一个 identifier（应用宝 openid 或 牛子 wxid），可加 #别名
-     owNAX6uNaBK4eild3eAlrLrwn-CE#156
-     wxid_854qthkdugnb21#133
-   - 支持换行或 & 分隔；wxid_ 开头走牛子，openid 格式自动走应用宝
+方式A（推荐，标准模式）：yyb_go 自动拉取存活账号 + yyb.js 自动获取 code
+   - 服务端地址（参考霖久智服，按优先级取值，全都没有才回退本地默认）：
+       WX_SERVER → YYB_SERVER → WECHAT_SERVER → YINGYONGBAO_SERVER → WX_SERVICE → http://127.0.0.1:18273
+   - 只要 yyb.js 可用，脚本即自动从 yyb_go 拉取全部存活账号执行
 
 方式B（兜底）：直接填 token
    - 环境变量名：xmtoken
    - 变量值：每行一个 token（支持多账号）
+
+说明：yyb_go 自动拉取账号与 xmtoken 会合并后统一去重，重复账号只执行一次。
 
 环境变量格式（多账号分隔符任选）：换行 / & / @
 
@@ -107,7 +107,7 @@ function __loadGetCode() {
 const getCodeModule = __loadGetCode();
 const getSingleCode = getCodeModule ? getCodeModule.getSingleCode : null;
 if (!getCodeModule) {
-  console.log('⚠️ yyb.js 模块加载失败，WX_ID 模式将不可用（请确认 yyb.js 与本脚本同目录）');
+  console.log('⚠️ yyb.js 模块加载失败，yyb_go 自动拉取将不可用（请确认 yyb.js 与本脚本同目录）');
 }
 
 let envSplitor = ["\n", "&", "@"]; //多账号分隔符，优先使用换行符
@@ -140,7 +140,7 @@ async function main() {
     let taskList = [];
     if (userList.length > 0) {
       taskList = await userList[0].getTaskList();
-      $.log(`� 获取到 ${taskList.length} 个账号任务\n`);
+      $.log(`📋 获取到 ${taskList.length} 个任务\n`);
     }
     
     for (let user of userList) {
@@ -561,54 +561,55 @@ async function getWxToken(code) {
   }
 }
 
-//检查code服务器（标准模式：WX_ID + yyb.js 双协议）
+// 服务端地址：参考霖久智服的环境变量模式，按优先级取值，全都没有才回退本地默认
+function getServerUrl() {
+  return (
+    process.env.WX_SERVER ||
+    process.env.YYB_SERVER ||
+    process.env.WECHAT_SERVER ||
+    process.env.YINGYONGBAO_SERVER ||
+    process.env.WX_SERVICE ||
+    'http://127.0.0.1:18273'
+  ).replace(/\/+$/, '');
+}
+
+//检查 yyb_go 存活账号（自动拉取，返回 token 数组，供入口统一去重）
 async function checkCodeServer(appid) {
   if (!getSingleCode) {
-    $.log(`❌ yyb.js 模块加载失败，无法使用 WX_ID 模式`);
+    $.log(`❌ yyb.js 模块加载失败，无法自动拉取账号`);
     return [];
   }
-  // 解析 WX_ID：支持换行 / & 分隔，每行格式 identifier#alias
-  let rawWx = '';
-  // 优先从 yyb 拉取全部存活账号（不受 WX_ID 过滤，配 N 条只跑 N 个）
+  // 从 yyb_go 拉取全部存活账号
+  let rawList = [];
   try {
-    const online = await new YYBClient().getOnlineAccounts();
+    const client = new YYBClient();
+    $.log(`[yyb] 服务端地址: ${client.serverUrl}`);
+    const online = await client.getOnlineAccounts();
     if (online && online.length) {
-      rawWx = online
+      rawList = online
         .map(acc => {
           const id = acc.openid || acc.wxid || String(acc.id || '');
-          const note = acc.nickname || acc.alias || acc.remark || '';
-          return id ? `wx:${id}#${note}` : '';
+          return id ? id.trim() : '';
         })
-        .filter(Boolean)
-        .join('\n');
-      $.log(`✅ 从 yyb 服务拉取到 ${online.length} 个存活账号`);
+        .filter(Boolean);
+      $.log(`✅ 从 yyb 服务拉取到 ${rawList.length} 个存活账号`);
+    } else {
+      $.log(`[yyb] yyb_go 无存活账号（可能全部离线或 hasSession 失效）`);
     }
   } catch (e) {
     $.log(`[yyb] 拉取账号列表失败: ${e.message || e}`);
   }
-  if (!rawWx) {
-    // 回退：WX_ID 环境变量
-    rawWx = (process.env.WX_ID || '').trim();
-  }
-  if (!rawWx) {
-    // 兜底：自动从 yyb_go 拉取存活账号
-    const auto = await resolveAccounts();
-    if (auto && auto.length) rawWx = auto.join('\n');
-  }
-  const rawList = rawWx.split(/[\n&]+/).map(v => v.trim()).filter(Boolean);
   if (!rawList.length) {
-    $.log(`❌未配置 WX_ID 环境变量`);
+    $.log(`❌ yyb_go 无存活账号`);
     return [];
   }
-  // 逐个获取 code（双协议：wxid_ 开头 → 牛子，openid 格式 → 应用宝）
-  // token 缓存：有效期内复用，避免每次运行都重新取 code（规避微信限流）
-  const users = [];
-  for (const entry of rawList) {
-    const identifier = entry.split('#')[0].trim();
+  // 逐个获取 code → token（token 缓存：有效期内复用，避免每次运行都取 code 规避微信限流）
+  const tokens = [];
+  for (const identifier of rawList) {
     const cached = getCachedToken('feihe', identifier, { maxAgeMs: 6 * 3600 * 1000 });
     if (cached && cached.token) {
       $.log(`✅ ${identifier} 命中token缓存，跳过取code`);
-      users.push({ token: cached.token });
+      tokens.push(cached.token);
       continue;
     }
     try {
@@ -628,14 +629,12 @@ async function checkCodeServer(appid) {
         continue;
       }
       saveCachedToken('fh', identifier, { token: newToken });
-      users.push({ token: newToken });
+      tokens.push(newToken);
     } catch (e) {
       $.log(`❌获取code失败: ${identifier} => ${e.message || e}`);
     }
   }
-  return users
-    .filter(value => value && Object.keys(value).length !== 0)
-    .map(u => new UserInfo(u));
+  return tokens;
 }
 
 // 独立 refreshToken（供 checkCodeServer 调用，换取长期 token）
@@ -665,49 +664,31 @@ async function refreshTokenStandalone(token) {
     return null;
   }
 }
-//检查环境变量
-async function checkEnv() {
-  try {
-    if (!userCookie) {
-      throw new Error(`❌未检测到环境变量 ${ckName}，请先配置`);
-    }
-
-    let usersToAdd = [];
-
-    // 如果是字符串，尝试解析
-    if (typeof userCookie === 'string') {
-      // 尝试解析为JSON
-      try {
-        const parsed = JSON.parse(userCookie);
-        if (Array.isArray(parsed)) {
-          usersToAdd = parsed;
-        } else {
-          usersToAdd = [parsed];
-        }
-      } catch (e) {
-        // 不是JSON格式，按分隔符处理
-        const separator = envSplitor.find(s => userCookie.includes(s)) || envSplitor[0];
-        const tokens = userCookie.split(separator).map(t => t.trim()).filter(Boolean);
-        usersToAdd = tokens.map(token => ({ token }));
+// 解析 xmtoken 环境变量，返回 token 数组（支持 JSON 数组 / 换行 & @ 分隔）
+function parseXmToken(raw) {
+  if (!raw) return [];
+  let usersToAdd = [];
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        usersToAdd = parsed;
+      } else {
+        usersToAdd = [parsed];
       }
-    } else if (Array.isArray(userCookie)) {
-      usersToAdd = userCookie;
-    } else {
-      usersToAdd = [userCookie];
+    } catch (e) {
+      const separator = envSplitor.find(s => raw.includes(s)) || envSplitor[0];
+      const tokens = raw.split(separator).map(t => t.trim()).filter(Boolean);
+      usersToAdd = tokens.map(token => ({ token }));
     }
-
-    if (!usersToAdd.length) {
-      throw new Error(`❌未找到有效的token数据`);
-    }
-
-    userList.push(...usersToAdd.map(n => new UserInfo(n)).filter(Boolean));
-
-    userCount = userList.length;
-    console.log(`✅ 共找到 ${userCount} 个账号`);
-    return true;
-  } catch (e) {
-    throw new Error(`❌checkEnv run error => ${e}`)
+  } else if (Array.isArray(raw)) {
+    usersToAdd = raw;
+  } else {
+    usersToAdd = [raw];
   }
+  return usersToAdd
+    .map(u => String((u && u.token) || u || '').trim())
+    .filter(Boolean);
 }
 //请求二次封装
 async function Request(o) {
@@ -809,21 +790,36 @@ function getFhNonceStr(t) { var e, r, n = "", o = (t = function (t) { return t |
   if (typeof $request != "undefined") {
     await getCookie();
   } else {
-    // 同时支持 WX_ID 与 xmtoken，两套账号合并后一起跑
-    if (process.env.WX_ID && getSingleCode) {
-      const wxUsers = await checkCodeServer($.appid); // 已包装为 UserInfo 实例
-      userList.push(...wxUsers);
+    // yyb_go 自动拉取存活账号 + xmtoken 合并后统一去重
+    const allTokens = [];
+    // 1. yyb_go 自动拉取存活账号 → token
+    if (getSingleCode) {
+      const yybTokens = await checkCodeServer($.appid); // 返回 token 数组
+      allTokens.push(...yybTokens);
     }
+    // 2. xmtoken 环境变量
     if (userCookie) {
-      // checkEnv 内部会把 xmtoken 账号 push 到全局 userList
-      await checkEnv();
+      const xmTokens = parseXmToken(userCookie);
+      allTokens.push(...xmTokens);
     }
-    if (userList.length === 0) {
-      throw new Error(`❌未检测到 WX_ID / xmtoken 环境变量，请先配置`);
+    // 3. 合并后统一去重（按 token）
+    const seen = new Set();
+    const finalTokens = [];
+    for (const t of allTokens) {
+      const token = String(t || '').trim();
+      if (!token) continue;
+      if (seen.has(token)) {
+        $.log(`⚠️ 去重跳过重复账号: ${token.slice(0, 8)}...`);
+        continue;
+      }
+      seen.add(token);
+      finalTokens.push(token);
     }
-    // 兜底归一化：确保全部为 UserInfo 实例，避免个别来源漏包装导致 getTaskList is not a function
-    userList = userList.map(u => (u instanceof UserInfo ? u : new UserInfo(u)));
-    $.log(`✅ 合计待执行账号: ${userList.length} 个（WX_ID + xmtoken）\n`);
+    if (finalTokens.length === 0) {
+      throw new Error(`❌未检测到 yyb_go 存活账号 / xmtoken 环境变量，请先配置`);
+    }
+    userList = finalTokens.map(t => new UserInfo({ token: t }));
+    $.log(`✅ 合计待执行账号: ${userList.length} 个（yyb_go 自动拉取 + xmtoken，已去重）\n`);
     if (userList.length > 0) await main();
   }
 })()
