@@ -4,11 +4,8 @@
 协议优先级：YYB Go 协议 > 牛子 WechatCodeAdapter > 手动模式
 """
 import os
-import re
 import json
 import time
-import base64
-import hashlib
 import logging
 import subprocess
 import requests
@@ -47,7 +44,18 @@ except Exception as _e:
 
 # ============ 工具函数 ============
 def get_nested(data, *keys, default=None):
-    """安全地获取嵌套字典值"""
+    """安全地获取嵌套字典值。
+
+    兼容两种调用方式：
+      get_nested(data, "data", "rspMsg", "")      # 最后一个 "" 视为 default
+      get_nested(data, "data", "result", "token") # 全部为 key
+    """
+    if not keys:
+        return default
+    # 若最后一个参数是空字符串，视为 default（兼容旧调用写法）
+    if keys[-1] == "":
+        keys = keys[:-1]
+        default = ""
     cur = data
     for k in keys:
         if isinstance(cur, dict):
@@ -59,52 +67,64 @@ def get_nested(data, *keys, default=None):
     return cur
 
 
-def recursive_find_first_value(obj, key):
-    """递归查找第一个匹配 key 的值"""
+def recursive_find_first_value(obj, keys):
+    """递归查找第一个命中的字段值（keys 可为单个 key 或 key 列表）"""
+    if isinstance(keys, str):
+        keys = [keys]
     if isinstance(obj, dict):
-        if key in obj:
-            return obj[key]
+        for k in keys:
+            if k in obj and obj[k] is not None:
+                return obj[k]
         for v in obj.values():
-            r = recursive_find_first_value(v, key)
+            r = recursive_find_first_value(v, keys)
             if r is not None:
                 return r
     elif isinstance(obj, list):
         for v in obj:
-            r = recursive_find_first_value(v, key)
+            r = recursive_find_first_value(v, keys)
             if r is not None:
                 return r
     return None
 
 
-def find_phone(data):
-    """从数据中提取手机号"""
-    if isinstance(data, str):
-        m = re.search(r"1[3-9]\d{9}", data)
-        return m.group(0) if m else None
-    if isinstance(data, dict):
-        for k, v in data.items():
-            if k in ("phone", "phoneNumber", "mobile", "purePhoneNumber"):
-                if isinstance(v, str) and re.match(r"^1[3-9]\d{9}$", v):
-                    return v
-            r = find_phone(v)
-            if r:
-                return r
-    elif isinstance(data, list):
-        for v in data:
-            r = find_phone(v)
-            if r:
-                return r
-    return None
+# ============ 汤星球（汤臣倍健）后端配置 ============
+# 后端: vip.by-health.com，小程序 appid: wx9bb6d5ac457bd69d
+HOST = "https://vip.by-health.com"
+SIGN_PATH = "/vip-api/sign/daily/create"
+DRAW_PATH = "/vip-api/sign/daily/draw"
+DETAIL_PATH = "/vip-api/sign/activity/detail"
+SIGN_ACTIVITY_ID = 11
+LOGIN_PATH = "/vip-api/auth/ma/login"
+AUTH_PHONE_PATH = "/vip-api/auth/ma/authPhone"
+REWARD_TYPE_MAP = {0: "积分", 1: "微信红包", 2: "实物"}
 
 
 def build_headers(token=None, extra=None):
-    """构造请求头"""
+    """构造请求头（汤臣倍健后端专用）"""
     h = {
-        "User-Agent": "Mozilla/5.0 (Linux; Android 12; 2201123C Build/SKQ1.211006.001) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/89.0.4389.72 Safari/537.36 MicroMessenger/8.0.30",
-        "Content-Type": "application/json",
+        "Host": "vip.by-health.com",
+        "Content-Type": "application/json;charset=utf-8",
+        "Referer": f"https://servicewechat.com/{_APPID}/devtools/page-frame.html",
+        "sec-ch-ua-mobile": "?1",
+        "Accept": "*/*",
+        "User-Agent": (
+            "Mozilla/5.0 (Linux; Android 10; MI 8 Build/QKQ1.190828.002; wv) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/134.0.6998.136 "
+            "Mobile Safari/537.36 XWEB/1340129 MMWEBSDK/20250201 MMWEBID/6533 "
+            "MicroMessenger/8.0.60.2860(0x28003C51) WeChat/arm64 Weixin NetType/WIFI "
+            f"Language/zh_CN ABI/arm64 miniProgram/{_APPID}"
+        ),
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Dest": "empty",
+        "sec-ch-ua-platform": "Android",
+        "sec-ch-ua": '"Chromium";v="134", "Not:A-Brand";v="24", "Android WebView";v="134"',
+        "x-requested-with": "com.tencent.mm",
+        "accept-language": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
     }
     if token:
-        h["Authorization"] = f"Bearer {token}"
+        h["Authorization"] = token
+        h["Origin"] = "https://vip.by-health.com"
     if extra:
         h.update(extra)
     return h
@@ -167,199 +187,304 @@ def _get_code_yyb(wxid):
         return None
 
 
-def _get_phone_number_yyb(wxid):
-    """通过 YYB 获取手机号授权数据（复用 yyb 库）"""
-    if not _yyb_client:
-        return None
-    try:
-        return _yyb_client.get_phone_number(wxid, _APPID)
-    except Exception as e:
-        log.warning(f"YYB getPhoneNumber 异常: {e}")
-        return None
 
-
-def _extract_phone_auth_from_yyb(data):
-    """从 YYB 返回中提取手机号授权信息。
-
-    微信小程序 getPhoneNumber 通常返回 code（需后端换取手机号），
-    部分协议直接返回明文手机号，这里两种都兼容。
-    """
-    if not data:
-        return None
-    # 优先取授权 code
-    code = data.get("code") if isinstance(data, dict) else None
-    if code and isinstance(code, str) and len(code) > 8:
-        return {"code": code}
-    # 其次取明文手机号
-    phone = data.get("mobile") or data.get("masked_phone") if isinstance(data, dict) else None
-    if not phone:
-        phone = find_phone(data)
-    if phone:
-        return {"phone": phone}
-    return None
 
 
 # ============ 登录 ============
 def _login_with_code(code, appid):
-    """使用 code 登录，返回 token"""
-    url = "https://api.tangxingqiu.com/api/login"
+    """使用微信 OAuth code 换取 Authorization token（汤臣倍健后端）"""
+    url = f"{HOST}{LOGIN_PATH}"
+    body = {"appId": appid, "code": code}
     try:
-        r = requests.post(url, json={"code": code, "appid": appid}, timeout=15)
-        data = r.json()
-        token = get_nested(data, "data", "token") or get_nested(data, "token")
+        r = requests.post(url, headers=build_headers(), json=body, timeout=15)
+        data = r.json() if r.text else {}
+        if not data.get("success"):
+            log.warning(f"登录失败: {json.dumps(data, ensure_ascii=False)[:200]}")
+            return None
+        token = get_nested(data, "data", "result", "token")
         if token:
-            return token
-        log.warning(f"登录失败: {data}")
+            return str(token)
+        log.warning(f"未找到 token: {json.dumps(data, ensure_ascii=False)[:200]}")
     except Exception as e:
         log.warning(f"登录异常: {e}")
     return None
 
 
-def _auth_phone(token, phone_data, retry=2):
-    """会员授权手机号，处理'请先注册成为会员'。
+def _auth_phone(token, auth_code, appid):
+    """调用 authPhone 接口完成会员注册/手机号授权，返回新 token 或 None。
 
-    支持两种授权数据：
-      - {"code": "..."}  微信 getPhoneNumber 授权 code
-      - {"phone": "..."} 明文手机号
-    失败自动重试，遇到"请先注册成为会员"则提示并返回 False。
+    当签到返回 REGISTER_REQUIRED（请先注册成为会员）时，需要先用
+    YYB 获取手机号授权 code，再调用本接口换取新的 Authorization。
     """
-    url = "https://api.tangxingqiu.com/authPhone"
-    for attempt in range(retry + 1):
+    if not auth_code:
+        return None
+    url = f"{HOST}{AUTH_PHONE_PATH}"
+    headers = build_headers(token)
+    headers["Referer"] = f"https://servicewechat.com/{appid}/112/page-frame.html"
+    body = {
+        "appId": appid,
+        "code": auth_code,
+        "nickName": "微信用户",
+        "scene": "memberCenter",
+        "channel": "memberCenter",
+        "source": "ma",
+    }
+    try:
+        r = requests.post(url, headers=headers, json=body, timeout=15)
+        data = r.json() if r.text else {}
+    except Exception as e:
+        log.warning(f"authPhone 请求异常: {e}")
+        return None
+    if not data.get("success"):
+        log.warning(f"authPhone 失败: {json.dumps(data, ensure_ascii=False)[:240]}")
+        return None
+    new_token = get_nested(data, "data", "result", "token") or get_nested(data, "data", "token")
+    if new_token:
+        log.info(f"authPhone 成功! token={str(new_token)[:8]}...")
+        return str(new_token)
+    log.warning(f"authPhone 未返回 token: {json.dumps(data, ensure_ascii=False)[:240]}")
+    return None
+
+
+def _extract_phone_auth_from_yyb(token, wxid, appid, label=""):
+    """从 YYB 获取手机号授权 code 并完成 authPhone，返回新 token 或 None。
+
+    直接请求 /wxapp/getPhoneNumber 拿原始响应，递归提取 authCode/auth_code/code，
+    兼容不同服务端返回结构（参考授权版 _get_phone_number_yyb）。
+    """
+    if not _yyb_client or not wxid:
+        return None
+    try:
+        resolved = _yyb_client._resolve_ref(wxid)
+        raw = _yyb_client._request_with_fallback(
+            "POST", ["/api/yyb/get-phone", "/wxapp/getPhoneNumber"],
+            json_data={"openid": resolved, "appid": appid},
+        )
+    except Exception as e:
+        log.warning(f"{label}获取手机号授权异常: {e}")
+        return None
+
+    # 兼容 yyb-go 的 respJson 字符串
+    if isinstance(raw, dict) and isinstance(raw.get("respJson"), str) and raw["respJson"].strip():
         try:
-            r = requests.post(url, json=phone_data, headers=build_headers(token), timeout=15)
-            data = r.json()
-            if data.get("code") == 0 or data.get("success"):
-                log.info("手机号授权成功")
-                return True
-            msg = str(data.get("msg") or data.get("message") or "")
-            if "会员" in msg or "注册" in msg:
-                log.warning(f"需要先注册会员: {msg}")
-                return False
-            if attempt < retry:
-                log.warning(f"授权失败({msg})，重试 {attempt + 1}/{retry}")
-                time.sleep(1)
-                continue
-            log.warning(f"授权失败: {data}")
-        except Exception as e:
-            if attempt < retry:
-                log.warning(f"authPhone 异常({e})，重试 {attempt + 1}/{retry}")
-                time.sleep(1)
-                continue
-            log.warning(f"authPhone 异常: {e}")
-    return False
+            inner = json.loads(raw["respJson"])
+            if isinstance(inner, dict):
+                raw = dict(raw)
+                raw.update(inner)
+        except Exception:
+            pass
+
+    root = raw
+    if isinstance(raw, dict):
+        root = raw.get("data") or raw.get("result") or raw
+    auth_code = recursive_find_first_value(root, ["authCode", "auth_code", "code"])
+    if not auth_code:
+        log.warning(f"{label}未获取到手机号授权 code: {str(raw)[:300]}")
+        return None
+    new_token = _auth_phone(token, str(auth_code), appid)
+    if new_token:
+        mobile = recursive_find_first_value(root, ["mobile", "phone", "phoneNumber", "masked_phone"]) or ""
+        if mobile:
+            log.info(f"{label}手机号授权成功：{mobile}")
+        else:
+            log.info(f"{label}手机号授权成功")
+    return new_token
 
 
 # ============ 签到与宝箱 ============
-def _do_draw(token, task_id, retry=2):
-    """领取宝箱奖励"""
-    url = "https://api.tangxingqiu.com/draw"
-    for attempt in range(retry + 1):
-        try:
-            r = requests.post(url, json={"taskId": task_id}, headers=build_headers(token), timeout=15)
-            data = r.json()
-            if data.get("code") == 0 or data.get("success"):
-                log.info(f"宝箱领取成功: taskId={task_id}")
-                return data
-            if attempt < retry:
-                log.warning(f"draw 失败，重试 {attempt + 1}/{retry}")
-                time.sleep(1)
-                continue
-            log.warning(f"draw 失败: {data}")
-            return data
-        except Exception as e:
-            if attempt < retry:
-                log.warning(f"draw 异常({e})，重试 {attempt + 1}/{retry}")
-                time.sleep(1)
-                continue
-            log.warning(f"draw 异常: {e}")
-    return None
-
-
-def _check_and_draw_pending(token, days):
-    """检查并领取宝箱（7/14/21/28 天节点）"""
-    url = "https://api.tangxingqiu.com/detail"
+def _do_draw(token, reward_record_id, label=""):
+    """领取宝箱奖励，返回 reward 信息字符串或 None。"""
+    url = f"{HOST}{DRAW_PATH}"
     try:
-        r = requests.get(url, headers=build_headers(token), timeout=15)
+        r = requests.post(url, headers=build_headers(token), json={"rewardRecordId": reward_record_id}, timeout=15)
         data = r.json()
-        boxes = get_nested(data, "data", "boxes") or get_nested(data, "data", "rewardList") or []
-        for box in boxes:
-            # 兼容多种字段命名：status / finishFlag+drawnFlag
-            status = box.get("status")
-            finish = box.get("finishFlag", 0)
-            drawn = box.get("drawnFlag", 0)
-            day = box.get("day") or box.get("days")
-            task_id = box.get("id") or box.get("taskId") or box.get("rewardRecordId")
-            if not task_id:
-                continue
-            if day == days and (status == "pending" or (finish and not drawn)):
-                _do_draw(token, task_id)
     except Exception as e:
-        log.warning(f"detail 异常: {e}")
+        log.warning(f"{label}领取宝箱异常: {e}")
+        return None
 
+    if not data.get("success"):
+        log.warning(f"{label}领取宝箱失败: {json.dumps(data, ensure_ascii=False)[:120]}")
+        return None
 
-def _create_sign(token, retry=2):
-    """补签"""
-    url = "https://api.tangxingqiu.com/sign/create"
-    for attempt in range(retry + 1):
-        try:
-            r = requests.post(url, headers=build_headers(token), timeout=15)
-            data = r.json()
-            if data.get("code") == 0 or data.get("success"):
-                return data
-            if attempt < retry:
-                log.warning(f"补签失败，重试 {attempt + 1}/{retry}")
-                time.sleep(1)
-                continue
-            return data
-        except Exception as e:
-            if attempt < retry:
-                log.warning(f"补签异常({e})，重试 {attempt + 1}/{retry}")
-                time.sleep(1)
-                continue
-            log.warning(f"补签异常: {e}")
+    rsp_code = get_nested(data, "data", "rspCode", "")
+    rsp_msg = get_nested(data, "data", "rspMsg", "")
+    result = get_nested(data, "data", "result") or {}
+    if rsp_code == "00" and result:
+        reward_name = result.get("msg") or f"奖励类型{result.get('rewardType', '?')} x{result.get('rewardValue', '?')}"
+        log.info(f"{label}宝箱领取成功：{reward_name}")
+        return reward_name
+    log.warning(f"{label}宝箱领取：{rsp_msg}")
     return None
 
 
-def _log_sign_success(token, days):
-    """记录签到成功"""
-    log.info(f"签到成功，累计 {days} 天")
+def _check_and_draw_pending(token, label=""):
+    """调用 detail 接口检查签到进度 & 领取漏领的宝箱。
+
+    detail 返回 rewardList，包含 7/14/21/28 天四个宝箱节点：
+      finishFlag=1 drawnFlag=0 rewardRecordId=<ID> → 已达成但未领取 → 自动 draw
+      finishFlag=1 drawnFlag=1 → 已领取
+      finishFlag=0 → 未达成
+
+    返回 (sign_flag, drew_any)。
+    """
+    url = f"{HOST}{DETAIL_PATH}"
+    try:
+        r = requests.post(url, headers=build_headers(token), json={}, timeout=15)
+        data = r.json()
+    except Exception as e:
+        log.warning(f"{label}获取签到详情失败: {e}")
+        return None, False
+
+    if not data.get("success"):
+        return None, False
+
+    result = get_nested(data, "data", "result") or {}
+    current_count = result.get("currentCount", "?")
+    sign_flag = result.get("signFlag", 0)
+    reward_list = result.get("rewardList") or []
+
+    pending = []
+    for reward in reward_list:
+        day = reward.get("day", "?")
+        finish_flag = reward.get("finishFlag", 0)
+        drawn_flag = reward.get("drawnFlag", 0)
+        record_id = reward.get("rewardRecordId")
+        reward_name = reward.get("rewardName") or ""
+        reward_type = REWARD_TYPE_MAP.get(reward.get("rewardType"), "未知")
+        reward_value = reward.get("rewardValue", "")
+        if finish_flag and not drawn_flag and record_id:
+            display = reward_name or f"{reward_type} x{reward_value}"
+            pending.append((day, record_id, display))
+
+    if pending:
+        for day, record_id, display in pending:
+            log.info(f"{label}第{day}天宝箱待领取：{display}，正在领取...")
+            _do_draw(token, record_id, label)
+        return sign_flag, True
+
+    next_milestone = None
+    for reward in reward_list:
+        if not reward.get("finishFlag", 0):
+            next_milestone = reward
+            break
+    if next_milestone:
+        next_day = next_milestone.get("day", "?")
+        remaining = next_milestone.get("remainingDay", "?")
+        next_name = next_milestone.get("rewardName") or ""
+        next_type = REWARD_TYPE_MAP.get(next_milestone.get("rewardType"), "")
+        next_value = next_milestone.get("rewardValue", "")
+        next_display = next_name or f"{next_type} x{next_value}"
+        log.info(f"{label}签到进度：第{current_count}天，距第{next_day}天宝箱（{next_display}）还有{remaining}天")
+    else:
+        log.info(f"{label}签到进度：第{current_count}天，本期宝箱已全部领取")
+    return sign_flag, False
 
 
-def do_sign(token, retry=2):
-    """执行签到主流程"""
-    url = "https://api.tangxingqiu.com/sign"
-    for attempt in range(retry + 1):
+def _create_sign(token):
+    """调用签到接口，返回 JSON dict。"""
+    url = f"{HOST}{SIGN_PATH}"
+    r = requests.post(url, headers=build_headers(token), json={"activityId": SIGN_ACTIVITY_ID}, timeout=15)
+    return r.json()
+
+
+def _log_sign_success(result, label="", prefix=""):
+    """打印签到成功日志。"""
+    coins = result.get("dailyPointReward")
+    accumulate = result.get("accumulateDay", "?")
+    remaining = result.get("remainingDay", "?")
+    log.info(f"{label}{prefix}签到成功：+{coins} 积分（累计{accumulate}天，距下次宝箱{remaining}天）")
+
+
+def do_sign(token, label="", account=None, member_retry=False):
+    """执行签到，返回 True/False。
+
+    完整流程：
+    1. 先调 detail 检查签到进度 & 领取漏领的宝箱（7/14/21/28天节点）
+    2. 调 create 签到：
+       - 宝箱挡签（undrawnFlag=1）：先 draw 再补 create
+       - 正常签到：dailyPointReward 有值
+       - 今日已签：dailyPointReward=null 无宝箱
+       - REGISTER_REQUIRED（请先注册成为会员）：先 authPhone 授权再重签
+    """
+    # 步骤1：detail 预检，领取漏领宝箱
+    sign_flag, drew_any = _check_and_draw_pending(token, label)
+
+    # 步骤2：签到
+    data = None
+    for retry in range(3):
         try:
-            r = requests.post(url, headers=build_headers(token), timeout=15)
-            data = r.json()
-            days = get_nested(data, "data", "days") or get_nested(data, "data", "accumulateDay") or 0
-            if data.get("code") == 0 or data.get("success"):
-                _log_sign_success(token, days)
-                for d in (7, 14, 21, 28):
-                    if days >= d:
-                        _check_and_draw_pending(token, d)
-                return True
-            msg = str(data.get("msg") or data.get("message") or "")
-            if "已签" in msg or "已完成" in msg:
-                log.info(f"今日已签到: {msg}")
-                return True
-            if attempt < retry:
-                log.warning(f"签到失败({msg})，重试 {attempt + 1}/{retry}")
-                time.sleep(1)
-                continue
-            log.warning(f"签到失败: {data}")
+            data = _create_sign(token)
+            break
         except Exception as e:
-            if attempt < retry:
-                log.warning(f"签到异常({e})，重试 {attempt + 1}/{retry}")
-                time.sleep(1)
-                continue
-            log.warning(f"签到异常: {e}")
-    return False
+            if retry >= 2:
+                log.warning(f"{label}签到异常: {e}")
+                return False
+            time.sleep(1)
+    if data is None:
+        return False
+
+    if not data.get("success"):
+        log.warning(f"{label}签到失败: {json.dumps(data, ensure_ascii=False)[:120]}")
+        return False
+
+    result = get_nested(data, "data", "result") or {}
+    rsp_msg = get_nested(data, "data", "rspMsg", "") or ""
+    rsp_code = get_nested(data, "data", "rspCode", "") or ""
+
+    if rsp_code != "00":
+        if "已签" in rsp_msg or "已完成" in rsp_msg:
+            log.info(f"{label}签到：{rsp_msg}")
+            return True
+        if "请先注册成为会员" in rsp_msg and account and not member_retry:
+            log.warning(f"{label}{rsp_msg}")
+            wxid = str(account.get("id") or account.get("openid") or account.get("wxid") or "").strip()
+            new_token = _extract_phone_auth_from_yyb(token, wxid, _APPID, label)
+            if new_token:
+                log.info(f"{label}会员授权后重新签到...")
+                return do_sign(new_token, label, account=account, member_retry=True)
+        log.warning(f"{label}{rsp_msg or json.dumps(data, ensure_ascii=False)[:80]}")
+        return False
+
+    coins = result.get("dailyPointReward")
+    undrawn_flag = result.get("undrawnFlag", 0)
+    undrawn_record_id = result.get("undrawnRecordId")
+
+    # 情况1：签到成功
+    if coins is not None:
+        _log_sign_success(result, label)
+        if undrawn_flag and undrawn_record_id:
+            undrawn_name = result.get("undrawnRewardName", "宝箱奖励")
+            log.info(f"{label}发现待领取宝箱：{undrawn_name}")
+            _do_draw(token, undrawn_record_id, label)
+        return True
+
+    # 情况2：dailyPointReward 为 null 且有宝箱ID → 宝箱挡在签到前，先领宝箱再补签
+    if undrawn_flag and undrawn_record_id:
+        undrawn_name = result.get("undrawnRewardName", "宝箱奖励")
+        log.info(f"{label}到达宝箱节点，签到前先领宝箱：{undrawn_name}")
+        _do_draw(token, undrawn_record_id, label)
+        time.sleep(1)
+        try:
+            data2 = _create_sign(token)
+        except Exception as e:
+            log.warning(f"{label}领取宝箱后补签异常: {e}")
+            return False
+        if data2.get("success") and get_nested(data2, "data", "rspCode", "") == "00":
+            result2 = get_nested(data2, "data", "result") or {}
+            if result2.get("dailyPointReward") is not None:
+                _log_sign_success(result2, label, prefix="宝箱领取后")
+                return True
+        log.info(f"{label}宝箱已处理，今日签到状态以服务端为准")
+        return True
+
+    # 情况3：全字段 null 且无宝箱 → 今日已签到过
+    log.info(f"{label}今日已签到过")
+    return True
 
 
 # ============ 任务类 ============
-# 汤星球小程序 appid（与 yyb 取码共用）
-_APPID = os.getenv("TXQ_APPID", "wx1234567890")
+# 汤星球小程序 appid（与 yyb 取码共用）——汤臣倍健小程序
+_APPID = os.getenv("TXQ_APPID", "wx9bb6d5ac457bd69d")
 
 
 class AutoTask:
@@ -427,14 +552,8 @@ class AutoTask:
                 if not token:
                     self.log(f"账号 {wxid} 登录失败")
                     continue
-                # 自动授权手机号（会员注册/授权）
-                phone_data = _extract_phone_auth_from_yyb(
-                    _get_phone_number_yyb(wxid)
-                )
-                if phone_data:
-                    _auth_phone(token, phone_data)
-                # 签到 + 宝箱
-                do_sign(token)
+                # 签到 + 宝箱（account 用于 REGISTER_REQUIRED 时手机号授权重签）
+                do_sign(token, account=acc)
                 # 账号间延时，规避限流
                 if i < len(accounts):
                     time.sleep(2)
