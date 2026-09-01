@@ -3,7 +3,8 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
  日期：2026-4-15
  软件：全棉时代
  定时：一天3次
- cron:0 08,20 * * * */
+ cron:0 08,20 * * * 
+ */
 
 const $ = new Env('全棉时代');
 const axios = require('axios');

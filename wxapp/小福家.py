@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 import yyb  # 自动同步 yyb_go 存活账号
 # name: 小福家
-# cron: 8 10,22 * * *# -*- coding: utf-8 -*-
+# cron: 8 10,22 * * *
+# -*- coding: utf-8 -*-
 
 """
 小福家小程序登录 - 纯 YYB Go 版

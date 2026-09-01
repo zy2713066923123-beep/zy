@@ -1,11 +1,14 @@
 require('./yyb.js'); // 自动同步 yyb_go 存活账号
-﻿// name:红色火箭
-// cron: 32 14,02 * * *//  红色火箭（华泰基金指慧家）
+// name:红色火箭
+// cron: 32 14,02 * * *
+//  红色火箭（华泰基金指慧家）
  
 //  环境变量：
-//    WX_ID              必填，格式：wxid#备注，多账号换行或 & 分隔
+//    WX_ID              格式：wxid#备注，多账号换行或 & 分隔（留空则自动从 yyb_go 拉取存活账号）
 //   WX_SERVER      yyb_go 协议服务地址（例如：http://127.0.0.1:18273）
 //    HSJJ_AUTO_CLAIM_H5 设为 '0' 或 'false' 关闭自动提现（默认开启）
+//    HSJJ_WATCHWORD     可选，活动口令（如「中证半导」），填写后额外执行一次口令红包兑换
+//    HSJJ_ACTIVITY_PAGE_ID 可选，活动页 ID（默认 7541，运行时优先用首页动态发现的结果）
  
 
 'use strict';
@@ -158,6 +161,85 @@ function hexToBytes(hex) {
     return bytes;
 }
 
+// 稳健解码 encryptKey：兼容 URL-safe base64（-/_）与缺失的 `=` 填充。
+// 云函数返回常不带填充、或用 URL-safe 字母表，直接 base64 解会解错/解空，
+// 退化成明文提交后被服务端 7005 拒绝。
+function decodeEncryptKey(s) {
+    let t = String(s || '').trim().replace(/-/g, '+').replace(/_/g, '/');
+    t += '='.repeat((4 - (t.length % 4)) % 4);
+    return Buffer.from(t, 'base64');
+}
+
+// 把 encryptKey 解成原始字节：优先 base64（含 url-safe / 缺填充），再尝试 hex；失败返回空数组。
+function keyBytesFrom(ek) {
+    const s = String(ek || '').trim();
+    if (!s) return [];
+    try {
+        const b = decodeEncryptKey(s);
+        if (b.length) return Array.from(b);
+    } catch (e) { /* 继续尝试 hex */ }
+    try {
+        if (s.length % 2 === 0 && /^[0-9a-fA-F]+$/.test(s)) return hexToBytes(s);
+    } catch (e) { /* 落到空数组 */ }
+    return [];
+}
+
+/**
+ * 把业务明文按 encryptKey 包成 SM4 密文 {msg}。
+ * 无 key / 密钥长度异常 / 加密异常一律退化为明文提交（沿用容错策略：服务端若强制
+ * 校验会回 7005，由调用方重登重试），这里把几处重复收敛到一处。
+ */
+function packPayload(plain, encryptKey, label = '') {
+    if (!encryptKey) {
+        log('  ⚠️ 无encryptKey，' + label + '明文提交');
+        return plain;
+    }
+    try {
+        const keyBytes = keyBytesFrom(encryptKey);
+        if (keyBytes.length !== 16) {
+            log('  ⚠️ encryptKey长度异常(' + keyBytes.length + 'bytes，原文 ' +
+                String(encryptKey).substring(0, 8) + '…/' + String(encryptKey).length + '字符)，' +
+                label + '明文提交');
+            return plain;
+        }
+        const encrypted = sm4Encrypt(JSON.stringify(plain), keyBytes);
+        log('  🔐 ' + label + 'SM4加密完成');
+        return { msg: encrypted };
+    } catch (e) {
+        log('  ⚠️ ' + label + 'SM4加密失败: ' + e.message + '，明文提交');
+        return plain;
+    }
+}
+
+// 时间戳(秒/毫秒)或日期字符串 → 可读时间；无法识别则原样返回。
+function toTimeStr(v) {
+    try {
+        const raw = String(v ?? '').trim();
+        if (raw === '' || !/^-?\d+$/.test(raw)) return String(v ?? '');
+        let t = Number(raw);
+        if (t > 1e12) t = Math.floor(t / 1000);   // 毫秒
+        if (t > 1e9) {
+            const d = new Date(t * 1000);
+            const p = (x) => String(x).padStart(2, '0');
+            return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
+                   ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+        }
+    } catch (e) { /* 原样返回 */ }
+    return String(v ?? '');
+}
+
+// 从红包/兑换记录里挑一个时间字段（领取/中奖/兑换/创建），best-effort。
+function pickTime(item) {
+    if (!item || typeof item !== 'object') return '';
+    for (const k of ['receiveTime', 'winTime', 'exchangeTime', 'drawTime', 'createTime', 'gmtCreate', 'getTime']) {
+        if (item[k]) return toTimeStr(item[k]);
+    }
+    for (const [k, v] of Object.entries(item)) {
+        if (v && /time|date/i.test(k)) return toTimeStr(v);
+    }
+    return '';
+}
+
 // 签名算法：排序参数 -> 拼接 -> MD5 -> Base64
 function buildSignature(params) {
     const sortedKeys = Object.keys(params).sort();
@@ -278,18 +360,6 @@ function putEncryptKeyCache(cache, key, data) {
 }
 
 // ==================== HTTP 请求 ====================
-function createAxios(token) {
-    return axios.create({
-        baseURL: BASE_URL,
-        headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json, text/plain, */*',
-            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.70',
-        },
-        timeout: 30000
-    });
-}
-
 async function apiRequest(method, url, data, token, encryptVer, openId, userId, appSecret, retries = 1, options = {}) {
     try {
         const headers = buildHeaders(data || {}, token, encryptVer, openId, userId, appSecret, options);
@@ -344,11 +414,6 @@ async function getPhoneCodeInfo(wxid) {
     return { phoneCode: '', mobile: '' };
 }
 
-async function getPhoneCode(wxid) {
-    const info = await getPhoneCodeInfo(wxid);
-    return info.phoneCode;
-}
-
 // 缓存 CK 有效但旧缓存没有手机号时，只补手机号，不触发业务重登。
 async function fillCachedMobileIfMissing(wxid, cache, cacheKey) {
     const cached = getCache(cache, cacheKey);
@@ -385,6 +450,8 @@ async function refreshProtocolSession(wxid, cache, cacheKey, reason = '') {
         isRegister: loginData.isRegister || '',
     });
     saveCache(cache);
+    // 登录态换了，缓存的 encryptKey 作废，避免继续拿旧密钥签名再吃一次 7005。
+    invalidateEncryptKey(wxid);
     return {
         token: loginData.token,
         openId: ids.openId,
@@ -461,14 +528,33 @@ async function discoverActivityEntry(token, openId, userId) {
     return { pageId: ACTIVITY_PAGE_ID, registerChannel: buildDailyRegisterChannel(), skipAddr: '' };
 }
 
-// 获取加密密钥配置
-async function getEncryptConfig(token, openId) {
-    const resp = await apiRequest('GET', '/fundex-activity/knowledgeBase/findKnowledgeInfoListByKeyList', { knowledgeKeyList: 'secure_path' }, token, '', openId);
-    if (resp?.code === '200' && Array.isArray(resp?.data)) {
-        const content = resp.data[0]?.knowledgeContent || '';
-        return content.split(',').filter(Boolean);
+// ---- encryptKey 运行内缓存 ----
+// 签到 / ROE 兑换 / 口令兑换三处都要签名，若各调一次协议服务就是三次网络往返。
+// 同一登录态下密钥不变，取一次即可复用；重登（7005）时由 invalidateEncryptKey 作废。
+const _encryptKeyRunCache = new Map();
+
+function invalidateEncryptKey(wxid) {
+    _encryptKeyRunCache.delete(wxid);
+}
+
+// 取 encryptKey（优先协议服务，失败回退落盘缓存），并按 wxid 在本次运行内缓存。
+async function ensureEncryptKey(wxid, cache, cacheKey) {
+    if (_encryptKeyRunCache.has(wxid)) return _encryptKeyRunCache.get(wxid);
+    let data = { encryptKey: '', version: '' };
+    try {
+        data = await getEncryptKey(wxid);
+        if (data?.encryptKey) {
+            putEncryptKeyCache(cache, cacheKey, data);
+            saveCache(cache);
+            log('  🔑 encryptKey获取成功, version=' + data.version);
+        }
+    } catch (e) {
+        log('  ⚠️ encryptKey获取失败，尝试缓存: ' + e.message);
+        data = getEncryptKeyCache(cache, cacheKey);
+        if (data.encryptKey) log('  🔑 使用缓存encryptKey, version=' + data.version);
     }
-    return [];
+    _encryptKeyRunCache.set(wxid, data);
+    return data;
 }
 
 // 获取加密密钥：先尝试养鸡场“最新用户key”接口，失败再兜底调用小程序的 getUserCryptoManager。
@@ -544,14 +630,14 @@ async function getEncryptKey(wxid) {
     const isYyb = /^\d+$/.test(cleanWxid) || /^o[a-zA-Z0-9_-]{20,}$/.test(cleanWxid);
 
     try {
-        const res = await getSingleOperateWxData(APPID, cleanWxid, { api_name: 'webapi_getuserencryptkey' });
+        const res = await getSingleUserEncryptKey(APPID, cleanWxid);
         respData = res;
     } catch (e) {
         log(`  ⚠️ 获取 userencryptkey 异常: ${e.message || e}`);
     }
 
-    // 原始响应始终打印（便于排查 YYB/牛子 不同返回格式），不再依赖 debug 开关
-    log('  [encryptKey][raw] ' + JSON.stringify(respData).substring(0, 1500));
+    // 原始响应可能很长且含账号相关信息，只在 debug 下打印（排查 YYB/牛子 不同返回格式时开）。
+    if (debug) log('  [encryptKey][raw] ' + JSON.stringify(respData).substring(0, 1500));
 
     if (respData && (respData.Code === 0 || respData.code === 0 || respData.Success === true || respData.Data || respData.data || respData.result || respData.openid)) {
         try {
@@ -626,16 +712,7 @@ async function doSign(session, wxid, cache, cacheKey) {
             return true;
         }
     }
-    let encryptKeyData = { encryptKey: '', version: '' };
-    try {
-        encryptKeyData = await getEncryptKey(wxid);
-        putEncryptKeyCache(cache, cacheKey, encryptKeyData);
-        saveCache(cache);
-        log('  🔑 签到encryptKey刷新成功, version=' + encryptKeyData.version);
-    } catch (e) {
-        log('  ⚠️ 签到encryptKey刷新失败，尝试缓存: ' + e.message);
-        encryptKeyData = getEncryptKeyCache(cache, cacheKey);
-    }
+    const encryptKeyData = await ensureEncryptKey(wxid, cache, cacheKey);
     // HAR 中 userSignIn body 为 {"submitCode":"","requestId":""}，且需要 key_version/signature。
     const resp = await apiRequest('POST', '/fundex-activity/point/sign/userSignIn', {
         submitCode: '',
@@ -688,18 +765,8 @@ async function doRoeReward(session, wxid, cache, cacheKey, activityEntry = null)
 
     // 提交加密接口前必须尽量使用最新 encryptKey/version。
     // 0624 抓包中手动提交为 key_version=9，而旧缓存 version=7 会触发 7005。
-    // 因此这里先刷新，刷新失败才兜底使用缓存。
-    let encryptKeyData = { encryptKey: '', version: '' };
-    try {
-        encryptKeyData = await getEncryptKey(wxid);
-        log('  🔑 encryptKey刷新成功, version=' + encryptKeyData.version);
-        putEncryptKeyCache(cache, cacheKey, encryptKeyData);
-        saveCache(cache);
-    } catch (e) {
-        log('  ⚠️ encryptKey刷新失败，尝试使用缓存: ' + e.message);
-        encryptKeyData = getEncryptKeyCache(cache, cacheKey);
-        if (encryptKeyData.encryptKey) log('  🔑 使用缓存encryptKey, version=' + encryptKeyData.version);
-    }
+    // 因此这里先取最新，取不到才兜底使用缓存（运行内已缓存则直接复用，不重复调协议服务）。
+    const encryptKeyData = await ensureEncryptKey(wxid, cache, cacheKey);
 
     const pageActivityId = activityEntry?.pageId || ACTIVITY_PAGE_ID;
     const actResp = await apiRequest('GET', '/fundex-activity/financial/getActivityInfoV2', { id: pageActivityId }, token, '', openId, loginData.userId);
@@ -719,13 +786,14 @@ async function doRoeReward(session, wxid, cache, cacheKey, activityEntry = null)
     // - 真正要看的是 activitystatusResponseVo.status，HAR 中为 "1" 才表示活动可用。
     const activity = actResp?.data || null;
     const activityStatus = String(activity?.activitystatusResponseVo?.status ?? activity?.status ?? '');
+    // 统一返回对象（原本这里返回 false，调用方 roeResult?.activity 会拿不到活动信息）
     if (actResp?.code !== '200' || !activity) {
         log(`  ⚠️ 活动接口无数据（code=${actResp?.code || '-'}）`);
-        return false;
+        return { success: false, existingClaim: { claimed: 0, amount: 0 }, activity: null };
     }
     if (activityStatus && activityStatus !== '1') {
         log(`  ⚠️ 活动已结束（status=${activityStatus}）`);
-        return false;
+        return { success: false, existingClaim: { claimed: 0, amount: 0 }, activity };
     }
     log('  📋 活动: ' + activity.title + ` | status=${activityStatus || '-'}`);
 
@@ -763,23 +831,8 @@ async function doRoeReward(session, wxid, cache, cacheKey, activityEntry = null)
     let payload = { watchword: roeAnswer, openId: openId, activityId: exchangeActivityId };
     log('  🎯 兑换活动ID: ' + exchangeActivityId);
 
-    // SM4加密
-    if (encryptKeyData.encryptKey) {
-        try {
-            const keyBytes = hexToBytes(Buffer.from(encryptKeyData.encryptKey, 'base64').toString('hex'));
-            if (keyBytes.length === 16) {
-                const encrypted = sm4Encrypt(JSON.stringify(payload), keyBytes);
-                payload = { msg: encrypted };
-                log('  🔐 SM4加密完成');
-            } else {
-                log('  ⚠️ encryptKey长度异常(' + keyBytes.length + 'bytes)，明文提交');
-            }
-        } catch (e) {
-            log('  ⚠️ SM4加密失败: ' + e.message + '，明文提交');
-        }
-    } else {
-        log('  ⚠️ 无encryptKey，明文提交');
-    }
+    // SM4加密（无 key / 长度异常 / 加密失败会退化为明文提交）
+    const submitPayload = packPayload(payload, encryptKeyData.encryptKey, '');
 
     // 提交口令
     // 0624 抓包里 doExchange 的 register_channel 为空；
@@ -789,7 +842,7 @@ async function doRoeReward(session, wxid, cache, cacheKey, activityEntry = null)
     const resp = await apiRequest(
         'POST',
         '/fundex-activity/watchWordCustom/doExchange',
-        payload,
+        submitPayload,
         token,
         encryptKeyData.version,
         openId,
@@ -862,6 +915,100 @@ async function doRoeReward(session, wxid, cache, cacheKey, activityEntry = null)
     }
     log('  ⚠️ 提交失败: ' + (resp?.message || JSON.stringify(resp)));
     return { success: false, existingClaim: existingClaimResult };
+}
+
+// 查询本期口令兑换是否开启图形验证码
+async function getVerificationCode(token, openId, userId) {
+    const resp = await apiRequest('GET', '/fundex-activity/redPacket/getVerificationCode', {}, token, '', openId, userId);
+    return resp?.data || {};
+}
+
+/**
+ * 手动口令兑换红包（例如活动口令「中证半导」）：POST /fundex-activity/redPacket/exchangeRedPacket。
+ * 明文结构照搬小程序 redPkt-password 组件 realExchange：
+ *   {watchword, openId, activityId, activityTemplateId, registerChannel}
+ * 与 ROE doExchange 同一套 SM4(encryptKey) 加密，密文包成 {msg}。
+ * 口令由环境变量 HSJJ_WATCHWORD 提供，未配置则整段跳过。
+ */
+async function doWatchwordRedpacket(session, wxid, cache, cacheKey, activityEntry, watchword) {
+    watchword = String(watchword || '').trim();
+    if (!watchword) return { success: false, amount: 0 };
+
+    log('  🎟️ 口令红包：用口令「' + watchword + '」兑换...');
+    const encryptKeyData = await ensureEncryptKey(wxid, cache, cacheKey);
+
+    const pageId = activityEntry?.pageId || ACTIVITY_PAGE_ID;
+    const actResp = await apiRequest('GET', '/fundex-activity/financial/getActivityInfoV2',
+        { id: pageId }, session.token, '', session.openId, session.userId);
+    const activity = actResp?.data || null;
+    const statusVo = activity?.activitystatusResponseVo || {};
+    const activityId = statusVo.activityId || activity?.id;
+    const activityStatus = String(statusVo.status ?? activity?.status ?? '');
+    if (!activityId) {
+        log(`  ⚠️ 口令红包：未取到 activityId（code=${actResp?.code || '-'}），跳过`);
+        return { success: false, amount: 0 };
+    }
+    if (activityStatus && activityStatus !== '1') {
+        log(`  ⚠️ 口令红包：活动未开始/已结束（status=${activityStatus}），跳过`);
+        return { success: false, amount: 0 };
+    }
+
+    // 图形验证码开关：本期若开启，纯协议暂不自动过码
+    const verify = await getVerificationCode(session.token, session.openId, session.userId);
+    if (verify?.verifyCodeSwitch) {
+        log('  ⚠️ 口令红包：本期开启了图形验证码，纯协议暂不支持自动过码，跳过');
+        return { success: false, amount: 0, needCaptcha: true };
+    }
+
+    // channelCode 不带前导 &
+    const registerChannel = String(activityEntry?.registerChannel || '').replace(/^&/, '');
+    const plain = {
+        watchword,
+        openId: session.openId,
+        activityId,
+        activityTemplateId: /^\d+$/.test(String(pageId)) ? Number(pageId) : pageId,
+        registerChannel,
+    };
+    const payload = packPayload(plain, encryptKeyData.encryptKey, '口令红包 ');
+
+    const resp = await apiRequest('POST', '/fundex-activity/redPacket/exchangeRedPacket', payload,
+        session.token, encryptKeyData.version, session.openId, session.userId,
+        encryptKeyData.encryptKey, 2);
+    if (resp?.code !== '200') {
+        const msg = resp?.msg || resp?.message || '兑换失败';
+        log('  ⚠️ 口令兑换失败: ' + msg);
+        return { success: false, amount: 0, message: msg };
+    }
+
+    const data = resp.data || {};
+    const rewardAmount = Number(data.rewardAmount || 0);
+    log('  🎉 口令兑换成功! ' + (data.title || watchword) +
+        (rewardAmount ? ' 红包: ' + formatMoney(rewardAmount) + '元' : ''));
+
+    const requestId = data.redPacketRequestId || data.requestId || '';
+    const ticketCode = data.tickCode || data.ticketCode || '';
+    let claimed = 0;
+    if (AUTO_CLAIM_H5_RED_PACKET && requestId && ticketCode) {
+        log('  💰 开始自动领取口令红包...');
+        await updateRedPacketGetStatus(session.token, session.openId, session.userId, {
+            requestId,
+            activityId,
+            activityType: String(data.activityType || '4'),
+        });
+        const claimResult = await claimRedPacket(
+            session.token, session.openId, session.userId,
+            requestId, ticketCode, activityId, String(data.activityType || '4'),
+            '', wxid, cache, cacheKey
+        );
+        if (claimResult?.success) {
+            claimed = Number(claimResult.amount || rewardAmount);
+            log('  ✅ 口令红包领取成功: ' + formatMoney(claimed) + '元' +
+                (claimResult.message ? ' (' + claimResult.message + ')' : ''));
+        } else {
+            log('  ⚠️ 口令红包领取失败（可在未领取红包里补领）: ' + (claimResult?.message || '未知'));
+        }
+    }
+    return { success: true, amount: rewardAmount, claimed, requestId: String(requestId || '') };
 }
 
 // 查询红包活动列表
@@ -1059,7 +1206,9 @@ async function claimExistingWatchRewards(session, wxid, cache, cacheKey, activit
         const amount = Number(item.rewardAmount || 0);
         const status = String(item.receiveStatus || '');
 
-        log(`  📦 发现历史红包: ${formatMoney(amount)}元, 券码: ${ticketCode || '无'}, receiveStatus=${status || '-'}`);
+        const when = pickTime(item);
+        log(`  📦 发现历史红包: ${formatMoney(amount)}元, 券码: ${ticketCode || '无'}, receiveStatus=${status || '-'}` +
+            (when ? `, 时间: ${when}` : ''));
 
         if (!AUTO_CLAIM_H5_RED_PACKET) continue;
 
@@ -1193,6 +1342,15 @@ async function runTask(accountInfo) {
         // 记录已领取的 requestId，避免 claimExistingWatchRewards 和 unclaimedList 重复领取
         const claimedRequestIds = new Set();
 
+        // 口令红包：配置了 HSJJ_WATCHWORD 才执行；兑换到的红包并入本次自动领取
+        const watchword = (process.env.HSJJ_WATCHWORD || '').trim();
+        if (watchword) {
+            const wr = await doWatchwordRedpacket(session, wxid, cache, cacheKey, activityEntry, watchword);
+            if (wr?.requestId) claimedRequestIds.add(wr.requestId);
+            if (wr?.claimed) claimedAmount += Number(wr.claimed) || 0;
+            await sleep(randomInt(1000, 2000));
+        }
+
         // 从 ROE 兑换结果中提取已领取金额
         if (roeResult?.existingClaim) {
             claimedAmount += roeResult.existingClaim.amount || 0;
@@ -1226,7 +1384,9 @@ async function runTask(accountInfo) {
                 if (packet.ticketCode || packet.requestId) {
                     const amount = Number(packet.amount || 0);
                     pendingRedPacketAmount += amount;
-                    log('  🎯 未领红包: ' + (packet.describe || '') + ' 金额: ' + amount + '元 (ticketCode: ' + (packet.ticketCode || packet.requestId) + ')');
+                    const when = pickTime(packet);
+                    log('  🎯 未领红包: ' + (packet.describe || '') + ' 金额: ' + formatMoney(amount) + '元 (ticketCode: ' + (packet.ticketCode || packet.requestId) + ')' +
+                        (when ? ', 时间: ' + when : ''));
 
                     // 自动提现：领取未领取红包（跳过已处理的）
                     const pktRequestId = packet.requestId || '';
@@ -1332,7 +1492,7 @@ async function main() {
     }
 
     // 解析账号：WX_ID 格式 wxid#备注，多账号换行或 & 分隔
-    const accounts = [];
+    let accounts = [];
     const lines = taskVar.split(/[&\n]/);
     for (const line of lines) {
         const trimmed = line.trim();
@@ -1342,6 +1502,17 @@ async function main() {
         const note = parts[1] || '';
         if (wxid) accounts.push({ wxid, note });
     }
+
+    // 去重：yyb_go 拉取的存活账号可能与 WX_ID 配置重复，同一账号只跑一次
+    const seenWxid = new Set();
+    accounts = accounts.filter(a => {
+        if (seenWxid.has(a.wxid)) {
+            log('⚠️ 重复账号已跳过: ' + a.wxid);
+            return false;
+        }
+        seenWxid.add(a.wxid);
+        return true;
+    });
 
     log('📋 账号数: ' + accounts.length);
 

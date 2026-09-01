@@ -1,6 +1,7 @@
 const yyb = require('./yyb.js'); // 自动同步 yyb_go 存活账号
 // name: 美的会员
-// cron: 8 15,03 * * *//
+// cron: 8 15,03 * * *
+// //
 // 微信小程序 - 美的会员动态 code 签到版
 // APPID: wx49a622805968d156
 //

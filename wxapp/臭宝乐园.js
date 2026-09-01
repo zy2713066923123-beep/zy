@@ -4,7 +4,8 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 @Author: sm
 @Date: 2024.06.07 19:15
 @Description:  
-cron: 28 15,03 * * *#Notice:   
+cron: 28 15,03 * * *
+#Notice:   
 臭宝乐园 微信小程序 签到得积分 换螺蛳粉
 抓https://cb-bags-slb.weinian.com.cn 请求头token 仅支持单账号
 变量名称：choubaoleyuan

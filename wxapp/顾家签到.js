@@ -5,7 +5,8 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 @Date: 2026.05.31
 @Update: 2026.08.06 (merge v1.1.3 社区互动重做逻辑)
 @Description: 顾家小程序签到 + 社区互动赚积分
-cron: 12 17,05 * * *变量名：gujiajiaju / WX_ID
+cron: 12 17,05 * * *
+变量名：gujiajiaju / WX_ID
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
 ------------------------------------------
 

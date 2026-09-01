@@ -4,7 +4,8 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 @Author: sm
 @Date: 2026.05.31
 @Description: 谭木匠会员俱乐部签到
-cron: 16 16,04 * * *变量名：tmj
+cron: 16 16,04 * * *
+变量名：tmj
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
 ------------------------------------------
 

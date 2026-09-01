@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # name: 国乐酱酒
-# cron: 28 09,21 * * *# -*- coding: utf-8 -*-
+# cron: 28 09,21 * * *
+# -*- coding: utf-8 -*-
 
 # yyb-go 协议通用库：自动同步 yyb_go 存活账号、统一取码（参考幸荟庄园.py）
 try:

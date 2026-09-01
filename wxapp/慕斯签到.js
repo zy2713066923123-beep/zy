@@ -4,7 +4,8 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 @Author: sm
 @Date: 2024.06.07 19:15
 @Description:  
-cron: 8 11,23 * * *#Notice:   
+cron: 8 11,23 * * *
+#Notice:   
 慕斯小程序签到 
 变量名称：musi
 ⚠️【免责声明】

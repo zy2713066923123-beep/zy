@@ -4,7 +4,8 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 @Author: sm (Modified by AI)
 @Date: 2024.06.07 19:15
 @Description:  
-cron: 12 14,02 * * *#Notice:   
+cron: 12 14,02 * * *
+#Notice:   
 米其林会员 每日任务
 变量名称：miqilin
 ⚠️【免责声明】

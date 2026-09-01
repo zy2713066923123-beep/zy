@@ -4,7 +4,8 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 @Author: sm
 @Date: 2026.06.01
 @Description: 绿鼻子微信小程序签到
-cron: 56 14,02 * * *变量名：lvbizi
+cron: 56 14,02 * * *
+变量名：lvbizi
 变量值：wx_server 里的 openid/账号标识，多账号用 & 或换行
   wxid#备注  多个换行
 ------------------------------------------

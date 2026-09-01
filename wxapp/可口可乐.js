@@ -4,7 +4,8 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 @Author: sm
 @Date: 2024.06.07 19:15
 @Description:  
-cron: 52 08,20 * * *#Notice:   
+cron: 52 08,20 * * *
+#Notice:   
 可口可乐 微信小程序 签到得积分 
 变量名称：kekoukele
 ⚠️【免责声明】

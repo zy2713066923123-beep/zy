@@ -1,5 +1,6 @@
 import yyb  # 自动同步 yyb_go 存活账号
-# cron: 0 07,19 * * *#!/usr/bin/env python3
+# cron: 0 07,19 * * *
+#!/usr/bin/env python3
 # name: 东风日产
 """
 东风日产 人车生活 小程序签到脚本（code版）

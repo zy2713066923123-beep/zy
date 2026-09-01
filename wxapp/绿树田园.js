@@ -16,7 +16,8 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
  *
  * 依赖：axios（已在 package.json）；crypto 内置；sendNotify（仓库统一推送）；getCode（统一取码，双协议路由）
  * name: 绿树田园
- * cron: 48 14,02 * * * */
+ * cron: 48 14,02 * * * 
+ * */
 
 const crypto = require('crypto');
 const axios = require('axios');

@@ -15,7 +15,8 @@ import yyb  # 自动同步 yyb_go 存活账号
 # -*- coding: utf-8 -*-
 """
 name: 八富生活（看广告赚金币）
-cron: 4 08,20 * * *进入小程序:
+cron: 4 08,20 * * *
+进入小程序:
     环境变量 WX_ID（多账号换行分隔，格式 wxid/openid#备注）
 """
 
