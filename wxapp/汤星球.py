@@ -20,9 +20,30 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 log = logging.getLogger("汤星球")
 
 # ============ 环境变量配置 ============
-YYB_SERVER = os.getenv("YYB_SERVER", "jxz.lttech.vip:65259")
 txq_wxid_data = os.getenv("txq_wxid_data", "")
 txq = os.getenv("txq", "")
+
+# ============ 复用 yyb 统一协议库（端点 fallback / 频率控制 / 账号解析） ============
+# 参考蒙娜丽莎.py / 上美广场.py：服务地址按优先级取环境变量，未配置才回退本地默认。
+# 仅在用户确实配置过时才回写环境变量，避免默认值抢在 yyb.get_global_server_url() 之前生效。
+try:
+    import yyb
+    _raw_server = (
+        os.getenv("WX_SERVER")
+        or os.getenv("YYB_SERVER")
+        or os.getenv("WECHAT_SERVER")
+        or os.getenv("YINGYONGBAO_SERVER")
+        or ""
+    ).strip().rstrip("/")
+    if _raw_server:
+        os.environ["WX_SERVER"] = _raw_server
+        os.environ["YYB_SERVER"] = _raw_server
+        os.environ["WECHAT_SERVER"] = _raw_server
+    _yyb_client = yyb.YYBClient(_raw_server or None)
+    log.info(f"已加载 yyb 协议库 @ {_yyb_client.server_url}")
+except Exception as _e:
+    _yyb_client = None
+    log.warning(f"加载 yyb 协议库失败: {_e}")
 
 # ============ 工具函数 ============
 def get_nested(data, *keys, default=None):
@@ -106,41 +127,52 @@ def _get_wechat_adapter():
         return None
 
 
-# ============ YYB Go 协议 ============
-def _get_code_yyb(server, wxid):
-    """通过 YYB 协议获取微信 code"""
-    url = f"http://{server}/wxapp/getCode"
+# ============ YYB Go 协议（复用 yyb 库） ============
+def _fetch_yyb_accounts():
+    """从 YYB 拉取存活账号列表（复用 yyb 库的端点 fallback 与解析）。
+
+    参考蒙娜丽莎.py：优先走 yyb.load_accounts()（内部会优先使用
+    WX_ID / txq_wxid_data 环境变量过滤，未配置时自动同步 yyb_go 存活账号），
+    返回账号 dict 列表，兼容 _parse_yyb_accounts。
+    """
+    if not _yyb_client:
+        return []
     try:
-        r = requests.post(url, json={"wxid": wxid}, timeout=15)
-        data = r.json()
-        code = get_nested(data, "data", "code") or get_nested(data, "code")
-        if code:
-            return code
-        log.warning(f"YYB getCode 无 code: {data}")
+        # 1) 优先用 load_accounts：支持 WX_ID / txq_wxid_data 过滤，返回 dict 列表
+        accs = yyb.load_accounts()
+        if accs:
+            return accs
+        # 2) 回退：get_online_accounts（过滤 hasSession=false 的小程序号）
+        accs = _yyb_client.get_online_accounts()
+        if accs:
+            return accs
+        # 3) 再回退：get_accounts（不过滤，尽量拉取全部账号）
+        accs = _yyb_client.get_accounts(force_refresh=True)
+        if accs:
+            log.warning("get_online_accounts 过滤后为空，改用 get_accounts 全量账号")
+            return accs
+    except Exception as e:
+        log.warning(f"YYB 拉取账号异常: {e}")
+    return []
+
+
+def _get_code_yyb(wxid):
+    """通过 YYB 协议获取微信 code（复用 yyb 库，自动处理 openid/appid 与 fallback）"""
+    if not _yyb_client:
+        return None
+    try:
+        return _yyb_client.get_code(wxid, _APPID)
     except Exception as e:
         log.warning(f"YYB getCode 异常: {e}")
-    return None
+        return None
 
 
-def _fetch_yyb_accounts(server):
-    """从 YYB 拉取账号列表"""
-    url = f"http://{server}/accounts"
+def _get_phone_number_yyb(wxid):
+    """通过 YYB 获取手机号授权数据（复用 yyb 库）"""
+    if not _yyb_client:
+        return None
     try:
-        r = requests.get(url, timeout=10)
-        data = r.json()
-        return data.get("data") or data.get("accounts") or []
-    except Exception as e:
-        log.warning(f"YYB accounts 异常: {e}")
-        return []
-
-
-def _get_phone_number_yyb(server, wxid):
-    """通过 YYB 获取手机号授权"""
-    url = f"http://{server}/wxapp/getPhoneNumber"
-    try:
-        r = requests.post(url, json={"wxid": wxid}, timeout=10)
-        data = r.json()
-        return data
+        return _yyb_client.get_phone_number(wxid, _APPID)
     except Exception as e:
         log.warning(f"YYB getPhoneNumber 异常: {e}")
         return None
@@ -155,11 +187,13 @@ def _extract_phone_auth_from_yyb(data):
     if not data:
         return None
     # 优先取授权 code
-    code = recursive_find_first_value(data, "code")
+    code = data.get("code") if isinstance(data, dict) else None
     if code and isinstance(code, str) and len(code) > 8:
         return {"code": code}
     # 其次取明文手机号
-    phone = find_phone(data)
+    phone = data.get("mobile") or data.get("masked_phone") if isinstance(data, dict) else None
+    if not phone:
+        phone = find_phone(data)
     if phone:
         return {"phone": phone}
     return None
@@ -324,8 +358,12 @@ def do_sign(token, retry=2):
 
 
 # ============ 任务类 ============
+# 汤星球小程序 appid（与 yyb 取码共用）
+_APPID = os.getenv("TXQ_APPID", "wx1234567890")
+
+
 class AutoTask:
-    def __init__(self, appid="wx1234567890"):
+    def __init__(self, appid=_APPID):
         self.appid = appid
         self.adapter = None
 
@@ -367,17 +405,21 @@ class AutoTask:
     def run(self, mode="yyb"):
         """主运行入口"""
         if mode == "yyb":
-            accounts = _fetch_yyb_accounts(YYB_SERVER)
-            if not accounts:
-                self.log("YYB 未拉取到账号")
+            if not _yyb_client:
+                self.log("yyb 协议库未加载，无法拉取账号")
                 return
-            self.log(f"共拉取 {len(accounts)} 个账号")
+            accounts = _fetch_yyb_accounts()
+            if not accounts:
+                self.log("YYB 未拉取到存活账号")
+                return
+            self.log(f"共拉取 {len(accounts)} 个存活账号")
             for i, acc in enumerate(self._parse_yyb_accounts(accounts), 1):
-                wxid = acc.get("wxid") or acc.get("id")
+                # 优先用自增 id（纯数字），保证 yyb._resolve_ref 走 isdigit 分支直接命中
+                wxid = str(acc.get("id") or acc.get("openid") or acc.get("wxid") or "").strip()
                 if not wxid:
                     continue
                 self.log(f"处理账号 [{i}/{len(accounts)}]: {wxid}")
-                code = _get_code_yyb(YYB_SERVER, wxid)
+                code = _get_code_yyb(wxid)
                 if not code:
                     self.log(f"账号 {wxid} 获取 code 失败")
                     continue
@@ -387,7 +429,7 @@ class AutoTask:
                     continue
                 # 自动授权手机号（会员注册/授权）
                 phone_data = _extract_phone_auth_from_yyb(
-                    _get_phone_number_yyb(YYB_SERVER, wxid)
+                    _get_phone_number_yyb(wxid)
                 )
                 if phone_data:
                     _auth_phone(token, phone_data)
