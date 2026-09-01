@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# cron: 44 10,17 * * *
 """
 大潮
 

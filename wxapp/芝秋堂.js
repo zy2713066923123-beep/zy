@@ -1,7 +1,7 @@
 require('./yyb.js'); // 自动同步 yyb_go 存活账号
 /*
  * name: 芝秋堂
- * cron: 36 15,03 * * * * 
+ * cron: 36 15,03 * * * 
  * 芝秋堂 小程序（appId: wxaf8488e1dfc13384）积分任务脚本
  * 能力：每日签到、看视频时长(taskType=2)、看课程时长(taskType=3) 等所有可自动化奖励接口
  *

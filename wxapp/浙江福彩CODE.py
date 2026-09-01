@@ -8,7 +8,8 @@ name: 浙江福彩签到 (微信协议版)
 变量: 填写WX_ID中的openid/账号标识，多账号换行分割
 需要配置WECHAT_SERVER、WX_ID，用于获取wx.login code
 账号变量名:zjfc
-cron: 0 13,01 * * *"""
+cron: 0 13,01 * * *
+"""
 # name: 浙江福彩签到
 
 import requests

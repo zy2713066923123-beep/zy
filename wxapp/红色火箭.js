@@ -485,6 +485,20 @@ async function login(phoneCode, openId, unionId) {
     return null;
 }
 
+// 完整协议登录：wx.login code → openId/unionId → 手机号授权code → uc/login。
+// 手机号授权 code 单次有效，登录失败多为 code 已被消费/过期，调用方可重试一次取新 code。
+async function protocolLogin(wxid) {
+    const code = await getWxCode(wxid, APPID);
+    if (!code) throw new Error('wx.login code获取失败');
+    log('  ✅ wx.login code获取成功');
+    const ids = await getOpenIdAndUnionId(code);
+    log('  ✅ openId: ' + ids.openId.substring(0, 10) + '...');
+    const phoneInfo = await getPhoneCodeInfo(wxid);
+    log('  ✅ 手机号授权code获取成功' + (phoneInfo.mobile ? '，手机号：' + phoneInfo.mobile : ''));
+    const loginData = await login(phoneInfo.phoneCode, ids.openId, ids.unionId);
+    return { loginData, ids, phoneInfo };
+}
+
 async function getOpenIdAndUnionId(code) {
     const headers = buildHeaders({ code }, '', '');
     const resp = await axios.post(BASE_URL + '/fundex-uc/uc/v1/getWxOpenIdAndUnionId', { code }, { headers });
@@ -562,48 +576,48 @@ async function getEncryptKey(wxid) {
     const tryParseEncryptKey = (obj) => {
         try {
             if (!obj) return null;
+            // 收集全部 encrypt_key 候选：云函数返回可能含多个 key 字段（如 iv/短串/错误字段），
+            // 参考 Python 版做法，优先选能解出 16 字节（SM4/AES-128 密钥长度）的候选，避免选错导致 7005。
+            const candidates = [];
             const walk = (node, depth = 0) => {
-                if (depth > 8 || node == null) return null;
+                if (depth > 8 || node == null) return;
                 if (typeof node === 'string') {
                     // 1) base64（24+ 可见字符）解码后可能是嵌套 JSON
                     if (/^[A-Za-z0-9+/=]{24,}$/i.test(node)) {
                         try {
                             const decoded = Buffer.from(node, 'base64').toString('utf8');
-                            if (decoded) return walk(JSON.parse(decoded), depth + 1);
+                            if (decoded) walk(JSON.parse(decoded), depth + 1);
                         } catch {}
                     }
                     // 2) 直接是 JSON 字符串（YYB: {"encrypt_key":"...","version":...,"iv":...}）
                     if (node.trim().startsWith('{')) {
                         try {
-                            return walk(JSON.parse(node), depth + 1);
+                            walk(JSON.parse(node), depth + 1);
                         } catch {}
                     }
-                    return null;
+                    return;
                 }
                 if (Array.isArray(node)) {
-                    for (const item of node) {
-                        const found = walk(item, depth + 1);
-                        if (found) return found;
-                    }
-                    return null;
+                    node.forEach(item => walk(item, depth + 1));
+                    return;
                 }
                 if (typeof node === 'object') {
                     const key = node.encryptKey || node.encrypt_key || node.key || node.EncryptKey;
                     if (key) {
-                        return {
+                        candidates.push({
                             encryptKey: String(key),
                             version: String(node.version || node.Version || node.encryptVer || '1'),
                             iv: node.iv || '',
-                        };
+                        });
                     }
-                    for (const v of Object.values(node)) {
-                        const found = walk(v, depth + 1);
-                        if (found) return found;
-                    }
+                    Object.values(node).forEach(v => walk(v, depth + 1));
                 }
-                return null;
             };
-            return walk(obj);
+            walk(obj);
+            for (const cand of candidates) {
+                if (keyBytesFrom(cand.encryptKey).length === 16) return cand;
+            }
+            return candidates.length ? candidates[0] : null;
         } catch {
             return null;
         }
@@ -756,6 +770,42 @@ async function getTotalPoint(token, openId, userId) {
     return 0;
 }
 
+// 兼容 getActivityInfoV2 可能把活动信息包在 data.activityInfo / data.pageInfo 等子字段里的情况。
+function extractActivity(obj) {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return obj;
+    for (const k of ['activityInfo', 'activity', 'pageInfo', 'page']) {
+        const child = obj[k];
+        if (child && typeof child === 'object' && !Array.isArray(child)) {
+            // 只解一层：子对象里必须带活动特征字段才算包装层
+            if (child.activitystatusResponseVo || child.skipLink || child.title || child.activityId) {
+                return child;
+            }
+        }
+    }
+    return obj;
+}
+
+// 依次尝试候选活动页 ID，返回第一个能取到有效活动信息的页面。
+// 动态发现的 pageId 可能已下线（getActivityInfoV2 返回 code=200 但 data=null），
+// 此时兜底到默认页 ACTIVITY_PAGE_ID，避免用 null activityId 提交导致 400 参数异常。
+async function fetchActivityInfo(token, openId, userId, activityEntry) {
+    const candidates = [];
+    if (activityEntry?.pageId) candidates.push(String(activityEntry.pageId));
+    if (ACTIVITY_PAGE_ID && !candidates.includes(String(ACTIVITY_PAGE_ID))) candidates.push(String(ACTIVITY_PAGE_ID));
+    for (const pageId of candidates) {
+        const actResp = await apiRequest('GET', '/fundex-activity/financial/getActivityInfoV2', { id: pageId }, token, '', openId, userId);
+        const activity = extractActivity(actResp?.data);
+        if (activity && (activity.activitystatusResponseVo?.activityId || activity.id)) {
+            if (pageId !== String(activityEntry?.pageId)) {
+                log(`  🧭 活动页 ${pageId} 有效（动态页 ${activityEntry?.pageId || '-'} 无数据，已兜底）`);
+            }
+            return { actResp, activity, pageId };
+        }
+        if (debug) log(`  [activity] pageId=${pageId} 无活动数据（code=${actResp?.code || '-'}）`);
+    }
+    return { actResp: null, activity: null, pageId: '' };
+}
+
 // 查询ROE并提交口令
 async function doRoeReward(session, wxid, cache, cacheKey, activityEntry = null) {
     const token = session.token;
@@ -768,8 +818,9 @@ async function doRoeReward(session, wxid, cache, cacheKey, activityEntry = null)
     // 因此这里先取最新，取不到才兜底使用缓存（运行内已缓存则直接复用，不重复调协议服务）。
     const encryptKeyData = await ensureEncryptKey(wxid, cache, cacheKey);
 
-    const pageActivityId = activityEntry?.pageId || ACTIVITY_PAGE_ID;
-    const actResp = await apiRequest('GET', '/fundex-activity/financial/getActivityInfoV2', { id: pageActivityId }, token, '', openId, loginData.userId);
+    const fetched = await fetchActivityInfo(token, openId, loginData.userId, activityEntry);
+    const actResp = fetched.actResp;
+    const activity = fetched.activity;
     if (actResp?.code === '7005' && !session._roeReloginDone) {
         const fresh = await refreshProtocolSession(wxid, cache, cacheKey, '兑换活动信息返回7005');
         if (fresh) {
@@ -784,13 +835,11 @@ async function doRoeReward(session, wxid, cache, cacheKey, activityEntry = null)
     // 说明：
     // - 这个接口在 HAR 里虽然 success=false，但只要 data 存在就是活动有效。
     // - 真正要看的是 activitystatusResponseVo.status，HAR 中为 "1" 才表示活动可用。
-    const activity = actResp?.data || null;
-    const activityStatus = String(activity?.activitystatusResponseVo?.status ?? activity?.status ?? '');
-    // 统一返回对象（原本这里返回 false，调用方 roeResult?.activity 会拿不到活动信息）
-    if (actResp?.code !== '200' || !activity) {
-        log(`  ⚠️ 活动接口无数据（code=${actResp?.code || '-'}）`);
+    if (!activity) {
+        log(`  ⚠️ 未获取到活动信息（动态页=${activityEntry?.pageId || '-'}，默认页=${ACTIVITY_PAGE_ID}），跳过ROE兑换`);
         return { success: false, existingClaim: { claimed: 0, amount: 0 }, activity: null };
     }
+    const activityStatus = String(activity.activitystatusResponseVo?.status ?? activity.status ?? '');
     if (activityStatus && activityStatus !== '1') {
         log(`  ⚠️ 活动已结束（status=${activityStatus}）`);
         return { success: false, existingClaim: { claimed: 0, amount: 0 }, activity };
@@ -828,6 +877,10 @@ async function doRoeReward(session, wxid, cache, cacheKey, activityEntry = null)
     // - activitystatusResponseVo.activityId 才是 doExchange 兑换接口使用的真实活动 ID，例如 131003
     // 如果误用页面配置 ID，接口会返回“本次活动已结束”等误导性错误。
     const exchangeActivityId = activity?.activitystatusResponseVo?.activityId || activity.id;
+    if (!exchangeActivityId) {
+        log('  ⚠️ 未取到兑换活动ID，跳过ROE兑换');
+        return { success: false, existingClaim: existingClaimResult, activity };
+    }
     let payload = { watchword: roeAnswer, openId: openId, activityId: exchangeActivityId };
     log('  🎯 兑换活动ID: ' + exchangeActivityId);
 
@@ -937,15 +990,14 @@ async function doWatchwordRedpacket(session, wxid, cache, cacheKey, activityEntr
     log('  🎟️ 口令红包：用口令「' + watchword + '」兑换...');
     const encryptKeyData = await ensureEncryptKey(wxid, cache, cacheKey);
 
-    const pageId = activityEntry?.pageId || ACTIVITY_PAGE_ID;
-    const actResp = await apiRequest('GET', '/fundex-activity/financial/getActivityInfoV2',
-        { id: pageId }, session.token, '', session.openId, session.userId);
-    const activity = actResp?.data || null;
+    const fetched = await fetchActivityInfo(session.token, session.openId, session.userId, activityEntry);
+    const activity = fetched.activity;
+    const pageId = fetched.pageId || activityEntry?.pageId || ACTIVITY_PAGE_ID;
     const statusVo = activity?.activitystatusResponseVo || {};
     const activityId = statusVo.activityId || activity?.id;
     const activityStatus = String(statusVo.status ?? activity?.status ?? '');
     if (!activityId) {
-        log(`  ⚠️ 口令红包：未取到 activityId（code=${actResp?.code || '-'}），跳过`);
+        log(`  ⚠️ 口令红包：未取到 activityId（动态页=${activityEntry?.pageId || '-'}，默认页=${ACTIVITY_PAGE_ID}），跳过`);
         return { success: false, amount: 0 };
     }
     if (activityStatus && activityStatus !== '1') {
@@ -1277,27 +1329,32 @@ async function runTask(accountInfo) {
         } else {
             if (cached) log('  ⚠️ 缓存CK失效，重新协议登录');
 
-            // 2. 获取微信code
-            const code = await getWxCode(wxid, APPID);
-            log('  ✅ wx.login code获取成功');
-
-            // 3. 获取openId和unionId
-            const ids = await getOpenIdAndUnionId(code);
-            openId = ids.openId;
-            unionId = ids.unionId;
-            log('  ✅ openId: ' + openId.substring(0, 10) + '...');
-
-            // 4. 获取手机号授权code
-            const phoneInfo = await getPhoneCodeInfo(wxid);
-            const phoneCode = phoneInfo.phoneCode;
-            log('  ✅ 手机号授权code获取成功' + (phoneInfo.mobile ? '，手机号：' + phoneInfo.mobile : ''));
-
-            // 5. 登录
-            loginData = await login(phoneCode, openId, unionId);
-            if (!loginData) {
+            // 2~5. 完整协议登录（登录失败重试一次：重新取 wx.login code 与手机号授权 code）
+            let proto;
+            try {
+                proto = await protocolLogin(wxid);
+            } catch (e) {
+                log('  ⚠️ 协议登录异常: ' + (e.message || e));
                 log('❌ ' + display + ' 登录失败');
                 return false;
             }
+            if (!proto.loginData) {
+                log('  🔄 登录失败，3秒后取新code重试一次...');
+                await sleep(3000);
+                try {
+                    proto = await protocolLogin(wxid);
+                } catch (e) {
+                    log('  ⚠️ 协议登录重试异常: ' + (e.message || e));
+                }
+            }
+            if (!proto?.loginData) {
+                log('❌ ' + display + ' 登录失败');
+                return false;
+            }
+            loginData = proto.loginData;
+            openId = proto.ids.openId;
+            unionId = proto.ids.unionId;
+            const phoneInfo = proto.phoneInfo;
             token = loginData.token;
             log('  ✅ 登录成功, userId: ' + loginData.userId);
 

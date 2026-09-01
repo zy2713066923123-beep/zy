@@ -3,7 +3,7 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 // name:问问农
 /**
  * 问问农
- * cron: 52 16,04 * * * *
+ * cron: 52 16,04 * * * 
  * 功能：
  * 1) wx.login code -> /users/wechat-pre-login -> loginInfoAtom(token)
  * 2) 查询 /v2/profile/{yaraUserId}/signin

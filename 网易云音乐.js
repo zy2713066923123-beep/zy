@@ -20,7 +20,6 @@
  * 环境变量：
  * NETEASE_MUSIC_U - MUSIC_U cookie值
  * 
- * cron: 0 9 * * *
  * 
  * 
  * ⚠️ 免责声明：
