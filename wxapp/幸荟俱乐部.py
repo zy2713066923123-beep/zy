@@ -1,3 +1,5 @@
+# cron: 0 7,13,19,23 * * *
+# name: 幸荟俱乐部
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -268,8 +270,9 @@ class ManorClient:
     def building_start(self, winery_id, building_type, option_id):
         return self._post("/building/start", {"uid": self.uid, "winery_id": winery_id, "building_type": building_type, "option_id": option_id})
 
-    def building_harvest(self, winery_id, building_type, task_id):
-        return self._post("/building/harvest", {"uid": self.uid, "winery_id": winery_id, "building_type": building_type, "task_id": task_id})
+    def building_harvest(self, task_id):
+        # 源码 harvestBuilding 只传 {uid, task_id}
+        return self._post("/building/harvest", {"uid": self.uid, "task_id": task_id})
 
     def daily_tasks(self, winery_id, building_type):
         return self._post("/building/daily-tasks", {"uid": self.uid, "winery_id": winery_id, "building_type": building_type})
@@ -287,6 +290,226 @@ class ManorClient:
     def compose(self, winery_id, wine_id):
         """合成酒款：消耗 4 种碎片合成一款酒，获得积分"""
         return self._post("/collection/compose", {"uid": self.uid, "winery_id": winery_id, "wine_id": wine_id})
+
+# ================= 任务中心 (做任务领红包) =================
+# 页面: home/moneyTask/moneyTask, 活动 hid=17, 抽奖 cjHid=101
+# 所有请求 POST 到 mzh.php, 带 p_cko/p_ckk 签名, header 用 psession
+TASK_HID = 17
+LOTTERY_HID = 101
+MZH_URL = "https://xcx.fenggewenhua.com/xcx/mzh.php"
+
+def _signed_post(phpsessid, params, currpg="home/moneyTask/moneyTask"):
+    """
+    带签名的通用请求 (与小程序 inc/func.js 的 post 一致):
+    - 加 ver / currpg
+    - 加 anow (毫秒时间戳)
+    - 计算 p_cko / p_ckk
+    - POST 到 mzh.php, header 带 psession
+    """
+    anow = _now_ms()
+    data = dict(params)
+    data["ver"] = "1.0"
+    data["currpg"] = currpg
+    data["anow"] = anow
+    keys = list(data.keys())
+    numeric = [str(v) for v in data.values() if re_match_numeric(v)]
+    data["p_cko"] = build_p_cko(keys, anow)
+    data["p_ckk"] = build_p_ckk(anow, phpsessid, numeric)
+    headers = {
+        "content-type": "application/x-www-form-urlencoded",
+        "User-Agent": _random_ua(),
+        "psession": phpsessid,
+    }
+    resp = requests.post(MZH_URL, data=data, headers=headers, timeout=15)
+    resp.raise_for_status()
+    return resp.json()
+
+def task_center(phpsessid):
+    """任务中心: 签到, 获取任务列表, 自动完成可领取任务, 每日抽奖, 查询余额"""
+    log.info("   💰 任务中心(做任务领红包)...")
+    # 0. 每日签到 (hid=177)
+    try:
+        _daily_sign(phpsessid)
+    except Exception as e:
+        log.warn("   每日签到异常: %s" % e)
+
+    # 1. 获取任务列表
+    try:
+        tl = _signed_post(phpsessid, {"ajax": "hd/rwu_new", "act": "getRWuList", "aid": TASK_HID, "reg": 1})
+    except Exception as e:
+        log.warn("   获取任务列表失败: %s" % e)
+        return
+    if (tl.get("code") or 0) != 200:
+        log.warn("   获取任务列表失败: %s" % tl.get("mess"))
+        return
+
+    # 2. 遍历各任务分组, 尝试完成
+    groups = {
+        "tuwen": "图文任务", "fx": "分享任务", "yxyq": "邀请任务",
+        "goxcx": "跳转小程序", "go": "活动任务", "gz": "关注任务",
+        "shop": "下单任务", "jqwq": "加群任务", "gzhkl": "公众号口令",
+    }
+    done = 0
+    for key, label in groups.items():
+        items = tl.get(key) or []
+        if not items:
+            continue
+        for it in items:
+            # 图文任务: twid 是图文ID, id 是任务ID(rwid)
+            # 依据 page-frame.html: /event/web/web?twid={item.twid}&jty={item.jty}&url={item.url}&title={item.title}&rwid={item.id}
+            if key == "tuwen":
+                twid = it.get("twid") or it.get("id")
+                rwid = it.get("id") or it.get("rwid")
+            else:
+                rwid = it.get("id") or it.get("rwid")
+                twid = None
+            title = it.get("title") or it.get("ztitle") or label
+            jty = it.get("jty")
+            if not rwid:
+                continue
+            # 已完成/不可做任务跳过 (小程序源码: status != -1 才加入可做列表)
+            if it.get("status") == -1:
+                continue
+            # 图文任务: 需先"阅读"再上报 (web.js loadOK 调 duRWuTwMoney)
+            if key == "tuwen":
+                try:
+                    if not twid:
+                        log.info("   任务[%s] 无 twid, 跳过" % title)
+                        continue
+                    # 先获取等待时长(ydSeconds), 模拟阅读后再上报
+                    yd = 0
+                    try:
+                        hi = _signed_post(phpsessid, {"ajax": "hd_info", "act": "hdinfo", "hid": TASK_HID})
+                        yd = int((hi.get("var") or {}).get("ydSeconds") or 0)
+                    except Exception:
+                        yd = 0
+                    log.info("   阅读任务[%s] twid=%s rwid=%s ydSeconds=%s" % (title, twid, rwid, yd))
+                    if yd > 0:
+                        log.info("   阅读任务[%s] 阅读 %ss 后上报..." % (title, yd))
+                        _sleep(yd, yd + 1)
+                    res = _signed_post(phpsessid, {
+                        "act": "duRWuTwMoney", "ajax": "hd/rwu_new",
+                        "hid": TASK_HID, "twid": twid, "rwid": rwid,
+                    })
+                    if (res.get("code") or 0) == 200:
+                        money = res.get("money") or 0
+                        jfen = res.get("jfen") or 0
+                        if money or jfen:
+                            log.info("   ✅ 阅读任务[%s] +%s元/%s积分" % (title, money, jfen))
+                            done += 1
+                        else:
+                            log.info("   ✅ 阅读任务[%s] (无奖励)" % title)
+                    else:
+                        log.info("   阅读任务[%s] 未完成: %s" % (title, res.get("mess")))
+                except Exception as e:
+                    log.warn("   阅读任务[%s] 异常: %s" % (title, e))
+                _sleep(REQUEST_DELAY_MIN, REQUEST_DELAY_MAX)
+                continue
+            # 其他任务: 尝试完成
+            try:
+                res = _signed_post(phpsessid, {"act": "okGoXcx", "ajax": "hd/rwu_new", "appid": "", "rwid": rwid})
+                if (res.get("code") or 0) == 200:
+                    money = res.get("money") or 0
+                    jfen = res.get("jfen") or 0
+                    if money or jfen:
+                        log.info("   ✅ 完成任务[%s] +%s元/%s积分" % (title, money, jfen))
+                        done += 1
+                    else:
+                        log.info("   ✅ 完成任务[%s] (无奖励)" % title)
+                else:
+                    log.info("   任务[%s] 未完成: %s" % (title, res.get("mess")))
+            except Exception as e:
+                log.warn("   任务[%s] 异常: %s" % (title, e))
+            _sleep(REQUEST_DELAY_MIN, REQUEST_DELAY_MAX)
+
+    # 3. 每日抽奖
+    try:
+        _daily_lottery(phpsessid)
+    except Exception as e:
+        log.warn("   每日抽奖异常: %s" % e)
+
+    # 4. 查询余额
+    try:
+        m = _signed_post(phpsessid, {"act": "getRWuMoney", "ajax": "hd/rwu", "hid": TASK_HID})
+        if (m.get("code") or 0) == 200:
+            log.info("   💰 可提现余额: %s 元 (最低 %s 元)" % (m.get("y_money"), m.get("min_money")))
+    except Exception as e:
+        log.warn("   查询余额失败: %s" % e)
+
+def _daily_sign(phpsessid):
+    """每日签到 (hid=177): qDao ty:0 查询, ty:1 签到, 若奖励为抽奖则 cjiang"""
+    log.info("   📅 每日签到...")
+    try:
+        # 查询签到状态
+        q = _signed_post(phpsessid, {"act": "qDao", "ty": 0})
+        if (q.get("code") or 0) != 200:
+            log.warn("   查询签到状态失败: %s" % q.get("mess"))
+            return
+        qdn = int(q.get("qdn") or 0)
+        tday = int(q.get("tday") or 0)
+        if tday != 0:
+            log.info("   今日已签到 (累计 %s 天)" % qdn)
+            return
+        # 执行签到
+        s = _signed_post(phpsessid, {"act": "qDao", "ty": 1})
+        if (s.get("code") or 0) != 200:
+            log.warn("   签到失败: %s" % s.get("mess"))
+            return
+        lxqd = s.get("lxqd") or []
+        if lxqd:
+            reward = lxqd[0]
+            # reward[3]==1 表示奖励为抽奖
+            if len(reward) > 3 and reward[3] == 1:
+                log.info("   ✅ 签到成功! 获得抽奖机会, 开始抽奖...")
+                _sign_lottery(phpsessid)
+            else:
+                log.info("   ✅ 签到成功! 获得 %s 金币" % (reward[0] if reward else "?"))
+        else:
+            log.info("   ✅ 签到成功!")
+    except Exception as e:
+        log.warn("   每日签到异常: %s" % e)
+
+def _sign_lottery(phpsessid):
+    """签到抽奖 (hid=177)"""
+    try:
+        r = _signed_post(phpsessid, {"ajax": "mzh/cjiang", "act": "cjiang", "hid": 177})
+        if (r.get("code") or 0) == 200:
+            jpin = r.get("jpin") or {}
+            ty = jpin.get("ty")
+            if ty == 3:
+                log.info("   🎉 签到抽奖: +%s 元" % jpin.get("money"))
+            elif ty == 4:
+                log.info("   🎉 签到抽奖: +%s 金币" % jpin.get("jfen"))
+            else:
+                log.info("   🎉 签到抽奖: %s" % (jpin.get("name") or "未中奖"))
+        else:
+            log.warn("   签到抽奖失败: %s" % r.get("mess"))
+    except Exception as e:
+        log.warn("   签到抽奖异常: %s" % e)
+
+def _daily_lottery(phpsessid):
+    """每日抽奖 (cjHid=101)"""
+    log.info("   🎰 每日抽奖...")
+    try:
+        c = _signed_post(phpsessid, {"ajax": "mzh/cjiang", "act": "cj_count", "hid": LOTTERY_HID})
+        if (c.get("code") or 0) != 200:
+            log.warn("   查询抽奖次数失败: %s" % c.get("mess"))
+            return
+        count = c.get("count") or {}
+        today = count.get("cj_today", 0)
+        total = count.get("daycjiang", 0)
+        if today >= total:
+            log.info("   今日抽奖次数已用完 (%s/%s)" % (today, total))
+            return
+        # 抽奖
+        r = _signed_post(phpsessid, {"ajax": "mzh/cjiang", "act": "cjiang", "hid": LOTTERY_HID, "zdc": 100})
+        if (r.get("code") or 0) == 200:
+            jpin = r.get("jpin") or {}
+            log.info("   🎉 抽奖结果: %s" % (jpin.get("name") or jpin.get("money") or "未中奖"))
+        else:
+            log.warn("   抽奖失败: %s" % r.get("mess"))
+    except Exception as e:
+        log.warn("   每日抽奖异常: %s" % e)
 
 # ================= 主流程 =================
 def process_account(wxid, remark):
@@ -319,6 +542,12 @@ def process_account(wxid, remark):
         return
 
     client = ManorClient(uid, phpsessid)
+
+    # 2.5 任务中心(做任务领红包) + 每日抽奖
+    try:
+        task_center(phpsessid)
+    except Exception as e:
+        log.warn("任务中心异常: %s" % e)
 
     # 3. 获取状态
     try:
@@ -359,13 +588,16 @@ def process_account(wxid, remark):
 
         if task:
             tid = task.get("id")
-            can_harvest = task.get("can_harvest")
             remaining = task.get("remaining_seconds", 0)
             reward = task.get("reward_points", 0)
+            # 可收获判断：can_harvest 为真，或 status=running 且剩余时间<=0
+            status = task.get("status")
+            can_harvest = bool(task.get("can_harvest")) or (
+                status == "running" and remaining <= 0)
             log.info("    任务进行中: 剩余 %ss, 可收获=%s, 奖励=%s" % (remaining, can_harvest, reward))
             if can_harvest:
                 try:
-                    h = client.building_harvest(winery_id, btype, tid)
+                    h = client.building_harvest(tid)
                     if (h.get("code") or 0) in (200, 0):
                         log.info("    ✅ 收获成功! +%s 积分" % reward)
                     else:
@@ -440,10 +672,10 @@ def process_account(wxid, remark):
         else:
             log.info("     发现 %d 款可合成酒款，开始自动合成..." % len(composable))
             for w in composable:
-                wine = w.get("wine") or {}
-                wid = wine.get("id")
-                wname = wine.get("name") or wid
-                reward = wine.get("reward_points", 0)
+                # 源码 adaptCollection 里 wine 是扁平结构，字段直接在 wine 上
+                wid = w.get("id")
+                wname = w.get("name") or wid
+                reward = w.get("rewardPoints", 0)
                 frags = w.get("fragments") or {}
                 log.info("     🍷 合成 [%s] 奖励+%s积分 (碎片: 风土%s/配方%s/陈酿%s/风味%s)" % (
                     wname, reward, frags.get("terroir", 0), frags.get("recipe", 0),
