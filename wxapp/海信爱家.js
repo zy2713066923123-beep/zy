@@ -2830,6 +2830,7 @@ async function main() {
   let ok = 0;
   let fail = 0;
   const notifyLines = [];
+  let yybAutoTried = false;
 
   for (let i = 0; i < accounts.length; i++) {
     const fromEnv = accounts[i];
@@ -2860,6 +2861,17 @@ async function main() {
       });
       cache.accounts[getCacheKey(toSave)] = toSave;
       saveCache(cache);
+
+      // 若 refreshToken 账号失效（缺少 customerId / token 不可用），自动从 yyb_go 拉取存活账号补充
+      if (!yybAutoTried && /缺少 customerId|token不可用|缺少 accessToken|refreshToken/.test(err.message)) {
+        yybAutoTried = true;
+        console.log('[通道] refreshToken 账号失效，自动从 yyb_go 拉取存活账号补充...');
+        const auto = await autoLoginFromYYB();
+        if (auto.length) {
+          accounts.push(...auto);
+          console.log(`[通道] 补充 ${auto.length} 个 yyb 存活账号，继续执行`);
+        }
+      }
     }
   }
 
