@@ -59,7 +59,7 @@ class Env {
     }
 }
 
-const $ = new Env("友盈浇水签到");
+const $ = new Env("友羊玩");
 
 // ============ 微信 Code 获取 ============
 async function getCode(wxid) {
@@ -181,7 +181,7 @@ class Task {
 
 // ============ 主流程 ============
 !(async () => {
-    $.log(`## 友盈浇水签到开始 ${new Date().toLocaleString()}`);
+    $.log(`## 友羊玩签到开始 ${new Date().toLocaleString()}`);
     await $.checkEnv("WX_ID");
     $.log(`📋 账号总数：${$.userList.length}`);
     let idx = 1;
