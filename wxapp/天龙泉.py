@@ -20,11 +20,12 @@
 - 账号备注：# 后为备注，展示保留，请求时去掉
 
 可选开关：
-- TLYZ_ENABLE_PHOTO_PUNCH=1      # 拍照打卡，默认开启
-- TLYZ_ENABLE_SECOND_BEAT=1      # 幸运拍一拍，默认开启
-- TLYZ_ENABLE_TURNTABLE=0        # 积分抽奖，默认关闭
+- TLYZ_ENABLE_PHOTO_PUNCH=1       # 拍照打卡，默认开启
+- TLYZ_ENABLE_SECOND_BEAT=1       # 幸运拍一拍，默认开启
+- TLYZ_ENABLE_TURNTABLE=0         # 积分抽奖，默认关闭
 - TLYZ_LIKE_INTERVAL=2            # 点赞请求之间的间隔秒数
-- TLYZ_VIDEO_SECONDS=0             # 观看视频秒数，0 表示使用服务端配置
+- TLYZ_VIDEO_SECONDS=0            # 观看视频秒数，0 表示使用服务端配置
+- TLYZ_ACCOUNT_INTERVAL=5         # 多账号之间的间隔秒数，缓解连续签到触发风控
 
 拍照打卡参数：
 - 经纬度查询网站：https://jingweidu.bmcx.com
@@ -1059,11 +1060,15 @@ def sign_one_account(client: TlyzClient) -> Tuple[bool, str]:
         lines.append("今日签到：触发风控/验证码")
         return False, "\n".join(lines)
 
+    if "操作频繁" in msg or "请勿重复" in msg:
+        lines.append("今日签到：操作频繁，请勿重复点击")
+        return False, "\n".join(lines)
+
     if code == 200:
         reward = None
         if isinstance(data, dict):
             reward = data.get("currentSignIntegral")
-        lines.append(f"今日签到：成功{f'，奖励 {reward} 积分' if reward is not None else ''}")
+        lines.append(f"今日签到：{f'成功，奖励 {reward} 积分' if reward is not None else '成功'}")
         try:
             new_integral = client.query_cust_integral()
             if isinstance(new_integral, dict):
@@ -1568,7 +1573,12 @@ def main() -> None:
 
     results_for_notify: List[str] = []
 
+    account_interval = max(0.0, get_env_float("TLYZ_ACCOUNT_INTERVAL", 5.0))
     for idx, raw in enumerate(accounts, 1):
+        if idx > 1 and account_interval:
+            log(f"等待 {account_interval:g} 秒后处理下一个账号...")
+            time.sleep(account_interval)
+
         display, explicit_protocol, account = parse_account_item(raw)
         if not account:
             log(f"[{idx}] 跳过空账号：{display}")

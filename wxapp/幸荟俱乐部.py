@@ -247,7 +247,12 @@ class ManorClient:
                     time.sleep(backoff)
                     continue
                 resp.raise_for_status()
-                return resp.json()
+                try:
+                    return resp.json()
+                except ValueError:
+                    body = (resp.text or "").strip()
+                    raise RuntimeError("接口 %s 返回非 JSON (HTTP %s): %s" % (
+                        path, resp.status_code, body[:200] if body else "<空响应>"))
             except requests.exceptions.HTTPError as e:
                 if e.response is not None and e.response.status_code == 429 and attempt < MAX_RETRY:
                     delay = RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 2)
@@ -511,6 +516,27 @@ def _daily_lottery(phpsessid):
     except Exception as e:
         log.warn("   每日抽奖异常: %s" % e)
 
+def _wine_field(wine, keys, default=None):
+    """
+    从酒款对象中取字段，兼容两种返回结构：
+    - 扁平: {"id":.., "name":.., "status":.., "fragments":{..}}
+    - 嵌套: {"status":.., "fragments":{..}, "wine":{"id":.., "name":..}}
+    先查顶层，再查下一层的字典子对象。
+    """
+    if not isinstance(wine, dict):
+        return default
+    for k in keys:
+        v = wine.get(k)
+        if v is not None and v != "":
+            return v
+    for sub in wine.values():
+        if isinstance(sub, dict):
+            for k in keys:
+                v = sub.get(k)
+                if v is not None and v != "":
+                    return v
+    return default
+
 # ================= 主流程 =================
 def process_account(wxid, remark):
     mask = (remark[:3] + "*****" + remark[-3:]) if len(remark) >= 7 else remark
@@ -672,11 +698,14 @@ def process_account(wxid, remark):
         else:
             log.info("     发现 %d 款可合成酒款，开始自动合成..." % len(composable))
             for w in composable:
-                # 源码 adaptCollection 里 wine 是扁平结构，字段直接在 wine 上
-                wid = w.get("id")
-                wname = w.get("name") or wid
-                reward = w.get("rewardPoints", 0)
-                frags = w.get("fragments") or {}
+                # 返回结构可能是扁平的，也可能把酒款信息放在子对象里，统一兼容取值
+                wid = _wine_field(w, ["wine_id", "id", "wineId"])
+                wname = _wine_field(w, ["name", "wine_name", "title"]) or wid
+                reward = _wine_field(w, ["rewardPoints", "reward_points", "points"], 0)
+                frags = _wine_field(w, ["fragments", "fragment", "frags"]) or {}
+                if not wid:
+                    log.warn("     跳过一款酒: 未取到 wine_id, 原始数据=%s" % json.dumps(w, ensure_ascii=False)[:300])
+                    continue
                 log.info("     🍷 合成 [%s] 奖励+%s积分 (碎片: 风土%s/配方%s/陈酿%s/风味%s)" % (
                     wname, reward, frags.get("terroir", 0), frags.get("recipe", 0),
                     frags.get("aging_key", 0), frags.get("flavor_code", 0)))
@@ -686,7 +715,7 @@ def process_account(wxid, remark):
                         got = (res.get("data") or {}).get("points", reward)
                         log.info("     ✅ 合成成功! +%s 积分" % got)
                     else:
-                        log.warn("     合成失败: %s" % res.get("message"))
+                        log.warn("     合成失败: %s" % (res.get("message") or res.get("mess")))
                 except Exception as e:
                     log.warn("     合成异常: %s" % e)
                 _sleep(REQUEST_DELAY_MIN, REQUEST_DELAY_MAX)

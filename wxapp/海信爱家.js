@@ -6,7 +6,7 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
  *
  * 账号来源：自动从 yyb_go 拉取存活账号并自动登录（参考红色火箭）
  *   无需配置 refreshToken / 控制台，只要 yyb_go 有存活账号即可。
- *   通过 yyb.js 的 getSingleCode + getSinglePhoneEncrypted 获取微信 code 与手机号授权数据，
+ *   通过 yyb.js 的 getSinglePhoneEncrypted 获取手机号授权 code，
  *   再调海信 login4MiniAPPByPhone 完成登录。
  *
  * 说明：
@@ -1350,43 +1350,75 @@ function pickField(obj, keys) {
 }
 
 // 自动从 yyb_go 拉取存活账号并自动登录海信（无需配置 refreshToken / 控制台）
-// 复用 yyb.js 的 getSingleCode + getSinglePhoneEncrypted，再调 login4MiniAPPByPhone 完成登录
+// 复用 yyb.js 的 getSinglePhoneEncrypted，再调 login4MiniAPPByPhone 完成登录
 const HSAJ_WX_APP_ID = 'wxf488d623a17cd7b5';
+
+function generateUUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+// 与真实小程序一致：随机 len 位小写 hex
+function generateRadomHex(len = 8) {
+  let s = '';
+  for (let i = 0; i < len; i++) s += '0123456789abcdef'[Math.floor(Math.random() * 16)];
+  return s;
+}
+
+// 与真实小程序一致：deviceId = FEATURE_CODE + ("0"+MINI_ID+"0"+Date.now().toString(16)+hex(8)+hex(8)).slice(0,32)
+// FEATURE_CODE = "86100300000100100000fffe"，MINI_ID = "105"
+function generateDeviceId() {
+  const t = ('0' + '105' + '0' + Date.now().toString(16) + generateRadomHex(8) + generateRadomHex(8)).slice(0, 32);
+  return '86100300000100100000fffe' + t;
+}
 
 async function loginByYYBAuto(acc) {
   const ref = String(acc.openid || acc.wxid || acc.id || acc._ref || '').trim();
   if (!ref) throw new Error('[yyb] 账号缺少 openid/id');
   const remark = acc.remark || acc.nickname || acc.alias || ref.slice(0, 8) || '未命名账号';
 
-  // 1. 获取微信 code
-  const code = await getSingleCode(HSAJ_WX_APP_ID, ref);
-  if (!code) throw new Error('[yyb] 未获取到微信 code');
-
-  // 2. 获取手机号授权加密数据
+  // 1. 获取手机号授权 code（真实小程序 login4MiniAPPByPhone 只需要 phoneCode，
+  //    不需要 wx.login 的 loginCode，也不需要 encryptedData/iv）
   const phone = await getSinglePhoneEncrypted(HSAJ_WX_APP_ID, ref);
-  if (!phone || !phone.encryptedData || !phone.iv) {
-    throw new Error('[yyb] 未获取到手机号授权数据(encryptedData/iv)');
+  if (!phone || !phone.code) {
+    throw new Error('[yyb] 未获取到手机号授权 code');
   }
 
-  // 3. 登录海信
-  const login4 = await request('POST', 'https://api-app.wx.hisense.com/v1/customer/login4MiniAPPByPhone', {
-    data: {
-      code,
-      encryptedData: phone.encryptedData,
-      iv: phone.iv,
-      appType: 'wxapp',
-      wxAppId: HSAJ_WX_APP_ID,
-      occurTerminal: 'MINI_PROGRAM',
-    },
+  // 2. 登录海信（海信爱家小程序真实接口：public-wxtv.hismarttv.com/weixintv/oauth/login4MiniAPPByPhone）
+  // deviceId 优先从缓存恢复（真实小程序首次生成后持久化不变），否则按真实格式生成
+  let deviceId = acc.deviceId;
+  if (!deviceId) {
+    const cache = loadCache();
+    const cached = findCachedAccount(cache, acc);
+    if (cached && cached.deviceId) deviceId = cached.deviceId;
+  }
+  if (!deviceId) deviceId = generateDeviceId();
+  const sid = generateUUID();
+  // 字段与顺序严格对齐真实抓包：_t, deviceId, phoneCode, miniId, sid, sign, appKey
+  const loginData = {
+    _t: Date.now(),
+    deviceId,
+    phoneCode: phone.code,
+    miniId: '105',
+    sid,
+  };
+  // WEB_CN 签名：sign + appKey 放在 data 里（签名参与字段必须与最终请求体一致）
+  loginData.sign = sign(loginData, { appKey: CONSTS.APP_KEY, postAndJSON: true });
+  loginData.appKey = CONSTS.APP_KEY;
+  const login4 = await request('POST', 'https://public-wxtv.hismarttv.com/weixintv/oauth/login4MiniAPPByPhone', {
+    headers: { 'content-type': 'application/json', charset: 'utf-8' },
+    data: loginData,
   });
   const body = login4.data || {};
-  if (!body.success) {
+  if (body.resultCode !== 0 || !body.token) {
     throw new Error(`login4MiniAPPByPhone 失败: ${JSON.stringify(body)}`);
   }
-  const d = body.data || {};
-  const customerId = d.customerId || d.customer?.customerId || d.customer?.id;
-  const token = d.token || d.accessToken || d.access_token;
-  const refreshToken = d.refreshToken || d.refresh_token;
+  const customerId = body.customerId || body.customer?.customerId || body.customer?.id;
+  const token = body.token || body.accessToken || body.access_token;
+  const refreshToken = body.refreshToken || body.refresh_token;
   if (!token) throw new Error('loginByYYBAuto 未返回 token');
   return {
     customerId,
@@ -1457,7 +1489,7 @@ function mergeWithCache(acc, cache) {
   merged.phone = phoneInfo.phone;
   merged.phoneEncrypted = phoneInfo.phoneEncrypted;
   if (!merged.deviceId) {
-    merged.deviceId = md5(merged.customerId || merged.token || merged.refreshToken || merged.remark || '').slice(0, 16);
+    merged.deviceId = generateDeviceId();
   }
   if (!merged.remark) merged.remark = merged.customerId || '未命名账号';
   return merged;
