@@ -1499,6 +1499,77 @@ async function loginByYYB(entry) {
   };
 }
 
+// 通道三：自动从 yyb_go 拉取存活账号并自动登录海信（无需配置 hsaj_token / refreshToken）
+// 复用 yyb.js 的 getSingleCode + getSinglePhoneEncrypted，再调 login4MiniAPPByPhone 完成登录
+const HSAJ_WX_APP_ID = 'wxad5a4b605b0593aa';
+
+async function loginByYYBAuto(acc) {
+  const ref = String(acc.openid || acc.wxid || acc.id || acc._ref || '').trim();
+  if (!ref) throw new Error('[yyb] 账号缺少 openid/id');
+  const remark = acc.remark || acc.nickname || acc.alias || ref.slice(0, 8) || '未命名账号';
+
+  // 1. 获取微信 code
+  const code = await getSingleCode(HSAJ_WX_APP_ID, ref);
+  if (!code) throw new Error('[yyb] 未获取到微信 code');
+
+  // 2. 获取手机号授权加密数据
+  const phone = await getSinglePhoneEncrypted(HSAJ_WX_APP_ID, ref);
+  if (!phone || !phone.encryptedData || !phone.iv) {
+    throw new Error('[yyb] 未获取到手机号授权数据(encryptedData/iv)');
+  }
+
+  // 3. 登录海信
+  const login4 = await request('POST', 'https://api-app.wx.hisense.com/v1/customer/login4MiniAPPByPhone', {
+    data: {
+      code,
+      encryptedData: phone.encryptedData,
+      iv: phone.iv,
+      appType: 'wxapp',
+      wxAppId: HSAJ_WX_APP_ID,
+      occurTerminal: 'MINI_PROGRAM',
+    },
+  });
+  const body = login4.data || {};
+  if (!body.success) {
+    throw new Error(`login4MiniAPPByPhone 失败: ${JSON.stringify(body)}`);
+  }
+  const d = body.data || {};
+  const customerId = d.customerId || d.customer?.customerId || d.customer?.id;
+  const token = d.token || d.accessToken || d.access_token;
+  const refreshToken = d.refreshToken || d.refresh_token;
+  if (!token) throw new Error('loginByYYBAuto 未返回 token');
+  return {
+    customerId,
+    token,
+    refreshToken,
+    remark,
+    taskPhone: phone.mobile || phone.masked_phone || '',
+    encryptTaskPhone: phone.mobile || phone.masked_phone || '',
+    source: 'yyb',
+  };
+}
+
+// 自动从 yyb_go 拉取存活账号并逐个登录
+async function autoLoginFromYYB() {
+  const online = await getAccounts();
+  if (!online || !online.length) {
+    console.log('[yyb] yyb_go 无存活账号');
+    return [];
+  }
+  console.log(`[通道] 自动从 yyb_go 拉取到 ${online.length} 个存活账号`);
+  const out = [];
+  for (const acc of online) {
+    try {
+      const logged = await loginByYYBAuto(acc);
+      out.push(logged);
+      console.log(`  - 自动登录成功: ${logged.remark || logged.taskPhone}`);
+    } catch (err) {
+      console.log(`  - 自动登录失败 ${acc.remark || acc.nickname || acc.openid || acc.id}: ${err.message}`);
+    }
+  }
+  return out;
+}
+
 function parseAccounts(raw) {
   return raw
     .split(/[\n@&\r]+/)
@@ -2742,8 +2813,15 @@ async function main() {
     }
   }
 
+  // 通道三：未配置 refreshToken / 控制台时，自动从 yyb_go 拉取存活账号并自动登录
   if (!accounts.length) {
-    throw new Error('未配置账号：请设置变量 WX_ID/hsaj（refreshToken）或 hsaj_token（应用宝控制台）');
+    console.log('[通道] 未配置 refreshToken/控制台，尝试自动从 yyb_go 拉取存活账号...');
+    const auto = await autoLoginFromYYB();
+    accounts.push(...auto);
+  }
+
+  if (!accounts.length) {
+    throw new Error('未配置账号：请设置变量 WX_ID/hsaj（refreshToken）、hsaj_token（应用宝控制台）或确保 yyb_go 有存活账号');
   }
 
   console.log(`${SCRIPT_NAME} 启动，账号数: ${accounts.length}`);
