@@ -2,9 +2,9 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
 /*
 ------------------------------------------
 @Author: sm
-@Date: 2026.07.29
-@Description:  大物是也小程序签到
-cron: 36 09,21 * * *
+@Date: 2026.09.02
+@Description: 友羊玩
+cron: 20 09,21 * * *
 ------------------------------------------
 
 变量：
@@ -15,13 +15,19 @@ cron: 36 09,21 * * *
 WX_ID 格式：
   wxid#备注   多个换行
   openid#备注（应用宝协议）
+
+说明：
+  基于解包源码 wx5ea3041cb47942b9_unpacked 分析：
+  - 登录接口：POST /login?code=<wx.login code>&shareUserId=<可选>
+  - 浇水签到接口：POST /pointsUserDetail/signIn?token=<token>
+  - 返回 { point, totalPoints }，point 为本次获得积分，totalPoints 为总积分
 */
 
 const axios = require("axios");
 
 // ============ 配置 ============
-const APP_ID = "wx9d7354501dec9fe8";
-const API_BASE = "https://api.dawushiye.com/api";
+const APP_ID = "wx5ea3041cb47942b9";
+const API_BASE = "https://www.gblvyou.com/api";
 const USER_AGENT =
     "Mozilla/5.0 (Linux; Android 15; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/146.0.7680.178 Mobile Safari/537.36 XWEB/1460249 MMWEBSDK/20260502 MicroMessenger/8.0.76.3141(0x28004C38) WeChat/arm64 Weixin MiniProgramEnv/android";
 const REFERER = `https://servicewechat.com/${APP_ID}/23/page-frame.html`;
@@ -53,7 +59,7 @@ class Env {
     }
 }
 
-const $ = new Env("大物是也签到");
+const $ = new Env("友盈浇水签到");
 
 // ============ 微信 Code 获取 ============
 async function getCode(wxid) {
@@ -70,16 +76,18 @@ class Task {
         this.token = "";
     }
 
-    async request({ path, method = "post", body = null, auth = true }) {
+    // 通用请求：token 作为 query 参数（与小程序 request.js 一致）
+    async request({ path, method = "post", body = null, token = this.token }) {
         const headers = {
             "Content-Type": "application/json; charset=utf-8",
             "User-Agent": USER_AGENT,
             Referer: REFERER,
         };
-        if (auth) headers["Authorization"] = this.token;
+        const sep = path.includes("?") ? "&" : "?";
+        const url = API_BASE + path + (token ? `${sep}token=${encodeURIComponent(token)}` : "");
 
         const resp = await axios({
-            url: API_BASE + path,
+            url,
             method,
             headers,
             data: body,
@@ -87,16 +95,15 @@ class Task {
         });
 
         const d = resp.data || {};
-        if (d.resultCode === 0) return d.data;
-        throw new Error(d.errorMessage || `resultCode=${d.resultCode}`);
+        if (d.code === 200) return d.data;
+        throw new Error(d.message || `code=${d.code}`);
     }
 
     async login() {
         // token 缓存：有效期内复用，避免每次运行都重新取 code（规避微信限流）
-        const cached = getCachedToken('dawu', this.wxid, { maxAgeMs: 6 * 3600 * 1000 });
+        const cached = getCachedToken('youying', this.wxid, { maxAgeMs: 6 * 3600 * 1000 });
         if (cached && typeof cached.token === 'string' && cached.token) {
             this.token = cached.token;
-            this.needReg = !!cached.needReg;
             this.fromCache = true;
             $.log(`✅ ${this.remark} 命中token缓存，跳过取code`);
             return;
@@ -108,58 +115,37 @@ class Task {
         this.fromCache = false;
         const code = await getCode(this.wxid);
         if (!code) throw new Error("获取微信 code 失败");
+        // 登录接口：POST /login?code=<code>&shareUserId=<shareUserId>
         const data = await this.request({
-            path: "/Wechat/Member/CheckMemberReg",
+            path: `/login?code=${encodeURIComponent(code)}&shareUserId=`,
             method: "post",
-            auth: false,
-            body: {
-                appId: APP_ID,
-                jsCode: code,
-                introId: null,
-                introOpenId: null,
-            },
+            token: "",
         });
         if (!data || !data.token) throw new Error("登录未返回 token");
         this.token = data.token;
-        this.needReg = !!data.needReg;
-        saveCachedToken('dawu', this.wxid, { token: this.token, needReg: this.needReg });
+        saveCachedToken('youying', this.wxid, { token: this.token });
     }
 
-    async getMemberDetail() {
-        try {
-            const data = await this.request({
-                path: "/Wechat/Member/GetMemberDetail",
-                method: "get",
-                auth: true,
-            });
-            return data;
-        } catch (e) {
-            return null;
-        }
-    }
-
-    // 探测 token 是否仍被服务端接受（含 JWT 格式错误、过期等情况）
+    // 探测 token 是否仍被服务端接受
     async checkToken() {
         try {
             await this.request({
-                path: "/Wechat/Member/GetMemberDetail",
-                method: "get",
-                auth: true,
+                path: "/pointsUserDetail/total",
+                method: "post",
             });
             return true;
         } catch (e) {
             const em = String(e.message || e);
-            if (/delimited by dot|token|登录|授权|401|过期|失效/i.test(em)) return false;
+            if (/token|登录|授权|401|过期|失效|未登录/i.test(em)) return false;
             return true;
         }
     }
 
+    // 浇水签到
     async sign() {
         const data = await this.request({
-            path: "/MarketingWechat/Sign/MiniUserSign",
+            path: "/pointsUserDetail/signIn",
             method: "post",
-            auth: true,
-            body: null,
         });
         return data;
     }
@@ -171,34 +157,22 @@ class Task {
             // 缓存 token 可能已在服务端失效：先探测，失效则清缓存重新取 code 登录
             if (this.fromCache && !(await this.checkToken())) {
                 $.log(`⚠️ 缓存token已失效，重新登录`);
-                removeCachedToken('dawu', this.wxid);
+                removeCachedToken('youying', this.wxid);
                 await this.loginByCode();
-            }
-            if (this.needReg) {
-                $.log(`⚠️ 该账号未注册会员，无法签到`);
-                return;
-            }
-            const member = await this.getMemberDetail();
-            if (member) {
-                $.log(`🔑 登录成功 | 昵称: ${member.nickName || member.name || "未知"}`);
-            } else {
-                $.log(`🔑 登录成功`);
             }
 
             const result = await this.sign();
-            const integral = result?.integral ?? 0;
-            const rewardDay = result?.rewardDay ?? 0;
-            const couponCnt = (result?.couponList || []).length;
-            let msg = `✅ 签到成功 | 积分 +${integral}`;
-            if (rewardDay) msg += ` | 连签 ${rewardDay} 天`;
-            if (couponCnt) msg += ` | 优惠券 x${couponCnt}`;
+            const point = result?.point ?? 0;
+            const totalPoints = result?.totalPoints ?? 0;
+            let msg = `✅ 浇水签到成功 | 本次积分 +${point}`;
+            if (totalPoints) msg += ` | 总积分 ${totalPoints}`;
             $.log(msg);
         } catch (e) {
             const em = e.message || String(e);
-            if (/已签到|重复|already/i.test(em)) {
+            if (/已签到|重复|已达上限|already/i.test(em)) {
                 $.log(`⚠️ 今日已签到`);
             } else {
-                if (/token|登录|授权|401/i.test(em)) removeCachedToken('dawu', this.wxid);
+                if (/token|登录|授权|401/i.test(em)) removeCachedToken('youying', this.wxid);
                 $.log(`❌ 失败: ${em}`);
             }
         }
@@ -207,7 +181,7 @@ class Task {
 
 // ============ 主流程 ============
 !(async () => {
-    $.log(`## 大物是也签到开始 ${new Date().toLocaleString()}`);
+    $.log(`## 友盈浇水签到开始 ${new Date().toLocaleString()}`);
     await $.checkEnv("WX_ID");
     $.log(`📋 账号总数：${$.userList.length}`);
     let idx = 1;

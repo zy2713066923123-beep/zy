@@ -694,11 +694,10 @@ async function getSingleOAuthAuthorize(appId, identifier, redirectUri, scope = '
 // 说明：微信 wx.login 的 code 是一次性的，不能缓存；但登录后换取的
 // 业务 token 在有效期内可复用，从而大幅减少取 code 频率、规避限流。
 // 用法：
-//   const { readTokenCache, writeTokenCache } = require('./yyb.js');
-//   const cache = readTokenCache('myapp');            // 读整个缓存文件
-//   const t = cache[openid];                          // 取某账号的 token
-//   cache[openid] = { token, updatedAt: Date.now() };
-//   writeTokenCache('myapp', cache);                 // 写回
+//   const { getCachedToken, saveCachedToken, removeCachedToken } = require('./yyb.js');
+//   const t = getCachedToken('myapp', openid);        // 取缓存（自动判过期）
+//   saveCachedToken('myapp', openid, token);          // 存缓存（字符串或对象均可）
+//   removeCachedToken('myapp', openid);               // token 失效时清除
 // ============================================================
 const TOKEN_CACHE_DIR = path.join(__dirname, 'token_caches');
 
@@ -726,42 +725,81 @@ function writeTokenCache(name, cache) {
     }
 }
 
-// 通用 token 缓存辅助：读取某账号缓存的 token，并判断是否仍有效。
-// 支持两种有效期判断：
-//   1) JWT：token 含 exp 字段，直接按 exp 判断（可提前 expireLeadSec 秒失效）
+// 时间戳归一化：兼容 Date.now() 数字与 ISO 字符串
+function _cacheTimeMs(v) {
+    if (!v) return 0;
+    if (typeof v === 'number') return v;
+    const t = new Date(v).getTime();
+    return Number.isFinite(t) ? t : 0;
+}
+
+// 解析 JWT 的 exp（秒）。非 JWT 或解析失败返回 0。
+function _jwtExpSec(token) {
+    if (typeof token !== 'string' || !token) return 0;
+    const parts = token.split('.');
+    if (parts.length < 2) return 0;
+    try {
+        const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+        const payload = JSON.parse(Buffer.from(b64, 'base64').toString('utf8'));
+        return Number(payload.exp || 0) || 0;
+    } catch (e) {
+        return 0;
+    }
+}
+
+// 通用 token 缓存辅助：读取某账号缓存的登录态，并判断是否仍有效。
+// 支持两种存储形态（由 saveCachedToken 写入）：
+//   1) 字符串 token：saveCachedToken(name, key, 'xxx')      → 读回 cached.token
+//   2) 任意字段对象：saveCachedToken(name, key, { a, b })   → 读回 cached.a / cached.b
+// 有效期判断：
+//   1) JWT：token 含 exp 字段，按 exp 判断（可提前 expireLeadSec 秒失效）
 //   2) 非 JWT：按缓存时长 maxAgeMs 兜底（默认 6 小时）
-// 返回 { token, updatedAt } 或 null（无缓存/已过期）。
+// 返回展平后的对象（含 updatedAt）或 null（无缓存/已过期）。
 function getCachedToken(cacheName, openid, opts = {}) {
     const { expireLeadSec = 60, maxAgeMs = 6 * 3600 * 1000 } = opts;
     const cache = readTokenCache(cacheName);
     const item = cache[openid];
-    if (!item || !item.token) return null;
+    if (!item || typeof item !== 'object') return null;
+
+    // 兼容旧缓存：曾把整个对象嵌套存进 token 字段，此处展平
+    const data = (item.token && typeof item.token === 'object' && !Array.isArray(item.token))
+        ? { ...item.token, updatedAt: item.updatedAt }
+        : { ...item };
+
+    const hasPayload = Object.keys(data).some(
+        (k) => k !== 'updatedAt' && data[k] !== undefined && data[k] !== null && data[k] !== ''
+    );
+    if (!hasPayload) return null;
+
     const now = Date.now();
-    // JWT 判断
-    const parts = String(item.token).split('.');
-    if (parts.length >= 2) {
-        try {
-            const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
-            const exp = Number(payload.exp || 0);
-            if (exp && exp * 1000 - expireLeadSec * 1000 > now) {
-                return { token: item.token, updatedAt: item.updatedAt || now };
-            }
-            return null; // JWT 已过期
-        } catch (e) { /* 非标准 JWT，走时间兜底 */ }
-    }
+    // JWT 判断（仅当 token 为字符串且含 exp）
+    const exp = _jwtExpSec(data.token);
+    if (exp) return exp * 1000 - expireLeadSec * 1000 > now ? data : null;
+
     // 时间兜底
-    const updatedAt = Number(item.updatedAt || 0);
-    if (updatedAt && now - updatedAt < maxAgeMs) {
-        return { token: item.token, updatedAt };
-    }
+    const updatedAt = _cacheTimeMs(data.updatedAt);
+    if (updatedAt && now - updatedAt < maxAgeMs) return data;
     return null;
 }
 
-// 通用 token 缓存辅助：保存某账号的 token 到缓存
+// 通用 token 缓存辅助：保存某账号的登录态。
+// token 为字符串时存为 { token, updatedAt }；为对象时按字段平铺存储。
 function saveCachedToken(cacheName, openid, token) {
+    if (token === undefined || token === null || token === '') return;
+    const payload = (typeof token === 'object' && !Array.isArray(token)) ? { ...token } : { token };
+    payload.updatedAt = Date.now();
     const cache = readTokenCache(cacheName);
-    cache[openid] = { token, updatedAt: Date.now() };
+    cache[openid] = payload;
     writeTokenCache(cacheName, cache);
+}
+
+// 通用 token 缓存辅助：删除某账号缓存（token 失效时调用，下次运行重新登录）
+function removeCachedToken(cacheName, openid) {
+    const cache = readTokenCache(cacheName);
+    if (cache[openid]) {
+        delete cache[openid];
+        writeTokenCache(cacheName, cache);
+    }
 }
 
 // 挂载到全局 global
@@ -769,6 +807,7 @@ global.readTokenCache = readTokenCache;
 global.writeTokenCache = writeTokenCache;
 global.getCachedToken = getCachedToken;
 global.saveCachedToken = saveCachedToken;
+global.removeCachedToken = removeCachedToken;
 global.YYBClient = YYBClient;
 global.WeChatCodeGetter = WeChatCodeGetter;
 global.YYBAdapter = YYBAdapter;
@@ -820,6 +859,7 @@ module.exports = {
     writeTokenCache,
     getCachedToken,
     saveCachedToken,
+    removeCachedToken,
     LOGIN_TYPE_WX,
     LOGIN_TYPE_SYZS,
     LOGIN_TYPE_WMPF,

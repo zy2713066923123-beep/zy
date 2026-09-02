@@ -585,10 +585,9 @@ def get_single_oauth_authorize(app_id: str, identifier: str, redirect_uri: str, 
 # 缓存文件统一存放在 token_caches/ 目录，与 yyb.js 共享同一套缓存。
 # 用法：
 #   import yyb
-#   cache = yyb.read_token_cache('myapp')            # 读整个缓存文件
-#   t = cache.get(openid)                            # 取某账号的 token
-#   cache[openid] = {'token': token, 'updatedAt': int(time.time()*1000)}
-#   yyb.write_token_cache('myapp', cache)            # 写回
+#   t = yyb.get_cached_token('myapp', openid)        # 取缓存（自动判过期）
+#   yyb.save_cached_token('myapp', openid, token)    # 存缓存（str 或 dict 均可）
+#   yyb.remove_cached_token('myapp', openid)         # token 失效时清除
 # ============================================================
 
 TOKEN_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'token_caches')
@@ -622,46 +621,99 @@ def write_token_cache(name: str, cache: Dict[str, Any]) -> None:
         print(f"[yyb] 写入 token 缓存失败: {e}")
 
 
-def get_cached_token(cache_name: str, openid: str, opts: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
-    """读取某账号缓存的 token，并判断是否仍有效。
+def _cache_time_ms(v: Any) -> int:
+    """时间戳归一化：兼容毫秒数字与 ISO 字符串。"""
+    if not v:
+        return 0
+    if isinstance(v, bool):
+        return 0
+    if isinstance(v, (int, float)):
+        return int(v)
+    try:
+        from datetime import datetime
+        return int(datetime.fromisoformat(str(v).strip().replace('Z', '+00:00')).timestamp() * 1000)
+    except Exception:
+        return 0
 
-    支持两种有效期判断：
-      1) JWT：token 含 exp 字段，直接按 exp 判断（可提前 expire_lead_sec 秒失效）
+
+def _jwt_exp_sec(token: Any) -> int:
+    """解析 JWT 的 exp（秒）；非 JWT 或解析失败返回 0。"""
+    if not isinstance(token, str) or not token:
+        return 0
+    parts = token.split('.')
+    if len(parts) < 2:
+        return 0
+    try:
+        payload = json.loads(_b64url_decode(parts[1]))
+        return int(payload.get('exp') or 0)
+    except Exception:
+        return 0
+
+
+def get_cached_token(cache_name: str, openid: str, opts: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    """读取某账号缓存的登录态，并判断是否仍有效。
+
+    支持两种存储形态（由 save_cached_token 写入）：
+      1) 字符串 token：save_cached_token(name, key, 'xxx')    → 读回 cached['token']
+      2) 任意字段字典：save_cached_token(name, key, {...})     → 读回 cached['字段名']
+    有效期判断：
+      1) JWT：token 含 exp 字段，按 exp 判断（可提前 expire_lead_sec 秒失效）
       2) 非 JWT：按缓存时长 max_age_ms 兜底（默认 6 小时）
-    返回 {token, updatedAt} 或 None（无缓存/已过期）。
+    返回展平后的字典（含 updatedAt）或 None（无缓存/已过期）。
     """
     opts = opts or {}
     expire_lead_sec = int(opts.get('expire_lead_sec', 60))
     max_age_ms = int(opts.get('max_age_ms', 6 * 3600 * 1000))
     cache = read_token_cache(cache_name)
     item = cache.get(openid)
-    if not item or not item.get('token'):
+    if not isinstance(item, dict):
         return None
+
+    # 兼容旧缓存：曾把整个字典嵌套存进 token 字段，此处展平
+    inner = item.get('token')
+    if isinstance(inner, dict):
+        data = dict(inner)
+        data['updatedAt'] = item.get('updatedAt')
+    else:
+        data = dict(item)
+
+    has_payload = any(k != 'updatedAt' and v not in (None, '') for k, v in data.items())
+    if not has_payload:
+        return None
+
     now_ms = int(time.time() * 1000)
-    token = str(item['token'])
-    # JWT 判断
-    parts = token.split('.')
-    if len(parts) >= 2:
-        try:
-            payload = json.loads(_b64url_decode(parts[1]))
-            exp = int(payload.get('exp') or 0)
-            if exp and exp * 1000 - expire_lead_sec * 1000 > now_ms:
-                return {'token': token, 'updatedAt': item.get('updatedAt') or now_ms}
-            return None  # JWT 已过期
-        except Exception:
-            pass  # 非标准 JWT，走时间兜底
+    # JWT 判断（仅当 token 为字符串且含 exp）
+    exp = _jwt_exp_sec(data.get('token'))
+    if exp:
+        return data if exp * 1000 - expire_lead_sec * 1000 > now_ms else None
+
     # 时间兜底
-    updated_at = int(item.get('updatedAt') or 0)
+    updated_at = _cache_time_ms(data.get('updatedAt'))
     if updated_at and now_ms - updated_at < max_age_ms:
-        return {'token': token, 'updatedAt': updated_at}
+        return data
     return None
 
 
-def save_cached_token(cache_name: str, openid: str, token: str) -> None:
-    """保存某账号的 token 到缓存。"""
+def save_cached_token(cache_name: str, openid: str, token: Union[str, Dict[str, Any]]) -> None:
+    """保存某账号的登录态。
+
+    token 为字符串时存为 {'token': ..., 'updatedAt': ...}；为字典时按字段平铺存储。
+    """
+    if token is None or token == '':
+        return
+    payload = dict(token) if isinstance(token, dict) else {'token': token}
+    payload['updatedAt'] = int(time.time() * 1000)
     cache = read_token_cache(cache_name)
-    cache[openid] = {'token': token, 'updatedAt': int(time.time() * 1000)}
+    cache[openid] = payload
     write_token_cache(cache_name, cache)
+
+
+def remove_cached_token(cache_name: str, openid: str) -> None:
+    """删除某账号缓存（token 失效时调用，下次运行重新登录）。"""
+    cache = read_token_cache(cache_name)
+    if openid in cache:
+        del cache[openid]
+        write_token_cache(cache_name, cache)
 
 
 def _b64url_decode(s: str) -> str:
@@ -698,6 +750,7 @@ builtins.read_token_cache = read_token_cache
 builtins.write_token_cache = write_token_cache
 builtins.get_cached_token = get_cached_token
 builtins.save_cached_token = save_cached_token
+builtins.remove_cached_token = remove_cached_token
 
 __all__ = [
     "YYBClient",
@@ -726,6 +779,7 @@ __all__ = [
     "write_token_cache",
     "get_cached_token",
     "save_cached_token",
+    "remove_cached_token",
     "LOGIN_TYPE_WX",
     "LOGIN_TYPE_SYZS",
     "LOGIN_TYPE_WMPF",

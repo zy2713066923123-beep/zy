@@ -628,7 +628,7 @@ async function checkCodeServer(appid) {
         $.log(`❌刷新token失败: ${identifier}`);
         continue;
       }
-      saveCachedToken('fh', identifier, { token: newToken });
+      saveCachedToken('feihe', identifier, { token: newToken });
       tokens.push(newToken);
     } catch (e) {
       $.log(`❌获取code失败: ${identifier} => ${e.message || e}`);
