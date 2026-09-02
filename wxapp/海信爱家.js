@@ -1,27 +1,17 @@
 require('./yyb.js'); // 自动同步 yyb_go 存活账号
-﻿// name:海信爱家
+// name:海信爱家
 /**
  * 海信爱家任务中心 - 青龙自动化脚本
- * cron: 4 13,01 * * *  
- * 变量名：
- *   WX_ID (统一变量，兼容旧变量 hsaj)
+ * cron: 4 13,01 * * *
  *
- * 变量格式（仅 refreshToken）：
- *   多账号支持：换行 / & / @ 分隔
- *   单账号：refreshToken[#customerId#phone#remark#deviceId]
- *   最简只填 refreshToken 即可，其余字段可留空
- *
- * refreshToken 抓包说明：
- *   1) 先清理并重新登录海信爱家小程序
- *   2) 开启抓包后执行登录
- *   3) 在响应里定位链接：
- *      https://public-wxtv.hismarttv.com/weixintv/oauth/login4MiniAPPByPhone
- *   4) 从该响应 JSON 提取 refreshToken
+ * 账号来源：自动从 yyb_go 拉取存活账号并自动登录（参考红色火箭）
+ *   无需配置 refreshToken / 控制台，只要 yyb_go 有存活账号即可。
+ *   通过 yyb.js 的 getSingleCode + getSinglePhoneEncrypted 获取微信 code 与手机号授权数据，
+ *   再调海信 login4MiniAPPByPhone 完成登录。
  *
  * 说明：
  *   1) 签名算法已完整内嵌 sign.js（X-Sign-For + appKey）
- *   2) 每次优先尝试 refreshToken 续期，最大化 token 可用时间
- *   3) 自动流程：任务列表 -> 尝试完成未完成任务 -> 签到 -> 抽奖 -> 查询积分前后变化
+ *   2) 自动流程：任务列表 -> 尝试完成未完成任务 -> 签到 -> 抽奖 -> 查询积分前后变化
  */
 
 const fs = require('fs');
@@ -993,15 +983,6 @@ const CONSTS = {
 
 const CACHE_FILE = path.join(__dirname, 'hsaj_cache.json');
 
-const RAW_ACCOUNTS = String(process.env.WX_ID || process.env.hsaj || '').trim();
-
-// 应用宝纯协议控制台登录通道（优化完善：除 refreshToken 外新增 yyb 控制台登录）
-// 变量 hsaj_token 格式：每行一个 "ip:端口/应用宝备注#显示备注"
-// 例：192.168.1.10:8080/myyyb#小号1
-const HSAJ_URL = String(process.env.hsaj_url || 'http://192.168.100.252:8080').trim().replace(/\/+$/, '');
-const RAW_HSAJ_TOKEN = String(process.env.hsaj_token || '').trim();
-const YYB_AUTH_TOKEN = String(process.env.YYB_AUTH_TOKEN || '').trim();
-
 const ONLY_TASK_CODES = toSet(process.env.hsaj_only_task_codes || '');
 const SKIP_TASK_CODES = toSet(process.env.hsaj_skip_task_codes || '');
 const DISABLE_TASK_USER_PHONE = /^(1|true|yes)$/i.test(
@@ -1240,21 +1221,6 @@ function tokenTail(token, len = 8) {
   return s.length <= len ? s : s.slice(-len);
 }
 
-function isLikelyToken(v) {
-  const s = String(v || '').trim();
-  if (!s) return false;
-  if (/^(0a|1a)[A-Za-z0-9._-]{16,}/.test(s)) return true;
-  if (s.split('.').length === 3 && s.length > 40) return true;
-  return false;
-}
-
-function isLikelyRefreshToken(v) {
-  const s = String(v || '').trim();
-  if (!s) return false;
-  if (s.split('.').length === 3 && s.length > 40) return false;
-  return /^9[A-Za-z0-9._-]{16,}$/.test(s);
-}
-
 function buildAccessTokenByRefreshToken(refreshToken) {
   const rt = String(refreshToken || '').trim();
   if (!rt) return '';
@@ -1383,125 +1349,9 @@ function pickField(obj, keys) {
   return undefined;
 }
 
-// 解析 hsaj_token：每行 "ip:端口/应用宝备注#显示备注"
-function parseAccountsToken(raw) {
-  return raw
-    .split(/\r?\n/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const info = line.split('/');
-      const server = info[0].replace(/\/+$/, '');
-      const yybRemark = info[1] ? info[1].split('#')[0] : '';
-      const displayRemark = info[1] && info[1].split('#')[1] ? info[1].split('#')[1] : yybRemark;
-      return { server, yybRemark, displayRemark, line };
-    })
-    .filter((e) => e.server);
-}
-
-// 调用应用宝纯协议控制台 /api/yyb/... 接口
-async function yybRequest(YYB_SERVER, path, opts = {}) {
-  const url = `${YYB_SERVER}${path}`;
-  const headers = {
-    'Content-Type': 'application/json',
-    'User-Agent':
-      'Mozilla/5.0 (Linux; Android 13; M2102K1C Build/TKQ1.220829.002; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/116.0.0.0 Mobile Safari/537.36 MMWEBSDK/20231205',
-    ...(opts.headers || {}),
-  };
-  const body = opts.body ? JSON.stringify(opts.body) : undefined;
-  if (YYB_AUTH_TOKEN) headers['Authorization'] = `Bearer ${YYB_AUTH_TOKEN}`;
-  const r = await fetch(url, { method: opts.method || 'POST', headers, body, timeout: 20000 });
-  const text = await r.text();
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch (e) {
-    throw new Error(`[yyb] 响应解析失败 ${r.status} ${text.slice(0, 120)}`);
-  }
-  if (data.code !== 0 && data.ret !== 0) {
-    throw new Error(`[yyb] 接口异常 ${path} -> ${JSON.stringify(data).slice(0, 200)}`);
-  }
-  return data.data !== undefined ? data.data : data;
-}
-
-// 从控制台拉取该应用宝账号下的微信账号列表
-async function fetchYYBAccounts(server, yybRemark, displayRemark) {
-  const data = await yybRequest(server, '/api/yyb/getPhone', {
-    method: 'POST',
-    body: { remark: yybRemark },
-  });
-  return (data || []).map((it) => ({
-    server,
-    yybRemark,
-    displayRemark,
-    wxData: it,
-  }));
-}
-
-// 将 hsaj_token 配置展开为多个微信账号条目
-async function expandYYBEntries(entries) {
-  const out = [];
-  for (const e of entries) {
-    try {
-      const list = await fetchYYBAccounts(e.server, e.yybRemark, e.displayRemark);
-      out.push(...list);
-      console.log(`[yyb] ${e.displayRemark || e.yybRemark} 拉取账号 ${list.length} 个`);
-    } catch (err) {
-      console.log(`[yyb] 拉取失败 ${e.displayRemark || e.yybRemark}: ${err.message}`);
-    }
-  }
-  return out;
-}
-
-// 通过应用宝纯协议控制台获取微信 code 并登录海信（无需手动抓 refreshToken）
-async function loginByYYB(entry) {
-  const { server, wxData } = entry;
-  const jsLogin = await yybRequest(server, '/api/yyb/jsLogin', {
-    method: 'POST',
-    body: { remark: wxData.remark, phone: wxData.phone },
-  });
-  const code = jsLogin.code;
-  if (!code) throw new Error('[yyb] 未获取到微信 code');
-
-  const login4 = await request(
-    'https://api-app.wx.hisense.com/v1/customer/login4MiniAPPByPhone',
-    {
-      method: 'POST',
-      sign: false,
-      body: {
-        code,
-        encryptedData: wxData.encryptedData,
-        iv: wxData.iv,
-        appType: 'wxapp',
-        wxAppId: 'wxad5a4b605b0593aa',
-        occurTerminal: 'MINI_PROGRAM',
-      },
-    }
-  );
-  if (!login4.success) {
-    throw new Error(`login4MiniAPPByPhone 失败: ${JSON.stringify(login4)}`);
-  }
-  const data = login4.data || {};
-  const customerId = data.customerId || data.customer?.customerId || data.customer?.id;
-  const token = data.token || data.accessToken || data.access_token;
-  const refreshToken = data.refreshToken || data.refresh_token;
-  if (!token) {
-    throw new Error('loginByYYB 未返回 token');
-  }
-  return {
-    customerId,
-    token,
-    refreshToken,
-    remark: wxData.remark,
-    taskPhone: wxData.phone,
-    encryptTaskPhone: wxData.phone,
-    source: 'yyb',
-  };
-}
-
-// 通道三：自动从 yyb_go 拉取存活账号并自动登录海信（无需配置 hsaj_token / refreshToken）
+// 自动从 yyb_go 拉取存活账号并自动登录海信（无需配置 refreshToken / 控制台）
 // 复用 yyb.js 的 getSingleCode + getSinglePhoneEncrypted，再调 login4MiniAPPByPhone 完成登录
-const HSAJ_WX_APP_ID = 'wxad5a4b605b0593aa';
+const HSAJ_WX_APP_ID = 'wxf488d623a17cd7b5';
 
 async function loginByYYBAuto(acc) {
   const ref = String(acc.openid || acc.wxid || acc.id || acc._ref || '').trim();
@@ -1568,91 +1418,6 @@ async function autoLoginFromYYB() {
     }
   }
   return out;
-}
-
-function parseAccounts(raw) {
-  return raw
-    .split(/[\n@&\r]+/)
-    .map((s) => {
-      let x = s.trim();
-      if (x.includes('=')) {
-        x = x.split('=', 2)[1].trim();
-      }
-      return x;
-    })
-    .filter(Boolean)
-    .map((line, idx) => {
-      if (line.startsWith('{')) {
-        try {
-          const obj = JSON.parse(line);
-          const refreshToken = String(obj.refreshToken || obj.rt || '').trim();
-          if (!refreshToken) return null;
-          return {
-            token: buildAccessTokenByRefreshToken(refreshToken),
-            refreshToken,
-            customerId: obj.customerId || '',
-            phone: obj.phone || obj.mobilePhone || '',
-            phoneEncrypted: obj.phoneEncrypted || '',
-            remark: obj.remark || obj.name || `账号${idx + 1}`,
-            deviceId: obj.deviceId || '',
-            tokenCreateTime: Number(obj.tokenCreateTime || 0),
-            tokenExpiredTime: Number(obj.tokenExpiredTime || 0),
-            refreshTokenExpiredTime: Number(obj.refreshTokenExpiredTime || 0),
-          };
-        } catch {
-          return null;
-        }
-      }
-      const p = line.split('#');
-      const p1 = (p[1] || '').trim();
-      const p2 = (p[2] || '').trim();
-      const p3 = (p[3] || '').trim();
-      const p4 = (p[4] || '').trim();
-      const first = (p[0] || '').trim();
-
-      if (isLikelyRefreshToken(first) || (!isLikelyToken(first) && first.length >= 16)) {
-        const defaultRemark = `账号${idx + 1}`;
-        const customerId = /^\d{6,}$/.test(p1) ? p1 : '';
-        let phoneRaw = '';
-        let remarkRaw = '';
-        let deviceId = '';
-        if (customerId) {
-          phoneRaw = isCnPhone(p2) ? p2 : '';
-          remarkRaw = p3;
-          deviceId = p4 || '';
-        } else {
-          if (isCnPhone(p1)) {
-            phoneRaw = p1;
-            remarkRaw = p2;
-            deviceId = p3 || '';
-          } else {
-            remarkRaw = p1;
-            if (isCnPhone(p2)) {
-              phoneRaw = p2;
-              deviceId = p3 || '';
-            } else {
-              deviceId = p2 || '';
-            }
-          }
-        }
-        const phoneInfo = resolvePhoneFields(phoneRaw, '');
-        return {
-          token: buildAccessTokenByRefreshToken(first),
-          refreshToken: first,
-          customerId,
-          phone: phoneInfo.phone,
-          phoneEncrypted: phoneInfo.phoneEncrypted,
-          remark: (remarkRaw || defaultRemark).trim() || defaultRemark,
-          deviceId,
-          tokenCreateTime: 0,
-          tokenExpiredTime: 0,
-          refreshTokenExpiredTime: 0,
-        };
-      }
-
-      return null;
-    })
-    .filter((x) => x && x.refreshToken);
 }
 
 function findCachedAccount(cache, acc) {
@@ -2785,43 +2550,13 @@ async function main() {
   const cache = loadCache();
   const accounts = [];
 
-  // 通道一：refreshToken 列表（变量 WX_ID / hsaj）
-  if (RAW_ACCOUNTS) {
-    const parsed = parseAccounts(RAW_ACCOUNTS);
-    if (parsed.length) {
-      accounts.push(...parsed.map((line) => ({ refreshToken: line, source: 'refresh' })));
-      console.log(`[通道] refreshToken 账号 ${parsed.length} 个`);
-    }
-  }
-
-  // 通道二：应用宝纯协议控制台（变量 hsaj_token，自动拉取微信账号并登录）
-  if (RAW_HSAJ_TOKEN) {
-    const tokenEntries = parseAccountsToken(RAW_HSAJ_TOKEN);
-    if (tokenEntries.length) {
-      console.log(`[通道] 应用宝控制台配置 ${tokenEntries.length} 条，开始拉取微信账号...`);
-      const wxEntries = await expandYYBEntries(tokenEntries);
-      for (const e of wxEntries) {
-        try {
-          const acc = await loginByYYB(e);
-          accounts.push(acc);
-          console.log(`  - 控制台登录成功: ${acc.remark || acc.taskPhone}`);
-        } catch (err) {
-          console.log(`  - 控制台登录失败 ${e.wxData?.remark || e.wxData?.phone}: ${err.message}`);
-        }
-      }
-      console.log(`[通道] 应用宝控制台成功登录 ${accounts.filter((a) => a.source === 'yyb').length} 个`);
-    }
-  }
-
-  // 通道三：未配置 refreshToken / 控制台时，自动从 yyb_go 拉取存活账号并自动登录
-  if (!accounts.length) {
-    console.log('[通道] 未配置 refreshToken/控制台，尝试自动从 yyb_go 拉取存活账号...');
-    const auto = await autoLoginFromYYB();
-    accounts.push(...auto);
-  }
+  // 直接自动从 yyb_go 拉取存活账号并自动登录海信（参考红色火箭，无需配置 refreshToken / 控制台）
+  console.log('[通道] 自动从 yyb_go 拉取存活账号...');
+  const auto = await autoLoginFromYYB();
+  accounts.push(...auto);
 
   if (!accounts.length) {
-    throw new Error('未配置账号：请设置变量 WX_ID/hsaj（refreshToken）、hsaj_token（应用宝控制台）或确保 yyb_go 有存活账号');
+    throw new Error('未拉取到账号：请确保 yyb_go 有存活账号');
   }
 
   console.log(`${SCRIPT_NAME} 启动，账号数: ${accounts.length}`);
@@ -2830,7 +2565,6 @@ async function main() {
   let ok = 0;
   let fail = 0;
   const notifyLines = [];
-  let yybAutoTried = false;
 
   for (let i = 0; i < accounts.length; i++) {
     const fromEnv = accounts[i];
@@ -2861,17 +2595,6 @@ async function main() {
       });
       cache.accounts[getCacheKey(toSave)] = toSave;
       saveCache(cache);
-
-      // 若 refreshToken 账号失效（缺少 customerId / token 不可用），自动从 yyb_go 拉取存活账号补充
-      if (!yybAutoTried && /缺少 customerId|token不可用|缺少 accessToken|refreshToken/.test(err.message)) {
-        yybAutoTried = true;
-        console.log('[通道] refreshToken 账号失效，自动从 yyb_go 拉取存活账号补充...');
-        const auto = await autoLoginFromYYB();
-        if (auto.length) {
-          accounts.push(...auto);
-          console.log(`[通道] 补充 ${auto.length} 个 yyb 存活账号，继续执行`);
-        }
-      }
     }
   }
 
