@@ -150,6 +150,17 @@ def _get_code_yyb(wxid: str) -> Optional[str]:
         return None
 
 
+def _get_phone_yyb(wxid: str) -> Optional[Dict[str, Any]]:
+    """通过 YYB 协议获取手机号授权加密数据（encryptedData/iv），用于自动完成会员授权。"""
+    if not _yyb_client:
+        return None
+    try:
+        return _yyb_client.get_phone_number(wxid, WX_APP_ID)
+    except Exception as e:
+        log(f"YYB getPhoneNumber 异常: {e}")
+        return None
+
+
 class TokenCache:
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -288,6 +299,23 @@ class KukaClient:
             raise ScriptError("顾家授权登录未返回有效数据")
         return data
 
+    def authorize_register(self, tmp_token: str, encrypted_data: str, iv: str) -> Dict[str, Any]:
+        """手机号授权注册：当账号未完成会员授权(status!=4)时，用 YYB 获取的手机号加密数据完成自动授权。"""
+        self.tmp_token = tmp_token
+        payload = {
+            "encryptedData": encrypted_data,
+            "iv": iv,
+            "source": "顾家小程序",
+            "contentName": "",
+            "channelType": "",
+            "channelCode": "",
+        }
+        result = self.request("POST", "/club-server/api/user/authorize/register", payload)
+        data = response_data(result)
+        if not isinstance(data, dict):
+            raise ScriptError("顾家手机号授权未返回有效数据")
+        return data
+
     def calendar(self) -> Dict[str, Any]:
         result = self.request("GET", "/integral-server/user/sign/calendar")
         data = response_data(result)
@@ -333,10 +361,22 @@ def login(
     identified = client.identify(code)
     status = str(identified.get("status") or "")
     tmp_token = str(identified.get("token") or "")
-    if status != "4":
-        raise ScriptError(f"账号尚未完成顾家会员授权(status={status})，无法自动登录")
+    if status == "4":
+        # 已授权会员：直接授权登录
+        authorized = client.authorize_login(tmp_token)
+    else:
+        # 未完成会员授权：通过 YYB 获取手机号加密数据，自动完成手机号授权注册
+        log(f"账号尚未完成会员授权(status={status})，尝试自动手机号授权...")
+        phone = _get_phone_yyb(account)
+        if not phone or not phone.get("encryptedData") or not phone.get("iv"):
+            raise ScriptError("YYB 获取手机号授权数据失败，无法自动授权")
+        authorized = client.authorize_register(
+            tmp_token,
+            phone["encryptedData"],
+            phone["iv"],
+        )
+        log("手机号授权成功，已自动完成会员注册")
 
-    authorized = client.authorize_login(tmp_token)
     token = str(authorized.get("token") or "")
     member_id = str(authorized.get("memberId") or "")
     if not token or not member_id:
