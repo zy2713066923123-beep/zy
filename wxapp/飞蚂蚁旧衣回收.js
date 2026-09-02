@@ -255,8 +255,19 @@ async function sendPlusPlusNotification(title, content) {
 }
 
 // ===================== 业务逻辑函数 =====================
-// 登录获取token 【已添加完整调试日志】
-async function wxLogin(jsCode, UA, proxyAgent, accountAlias) {
+// 登录获取token 【支持手机号授权：phone_code + mini_scene】
+async function wxLogin(jsCode, UA, proxyAgent, accountAlias, phone_code = '', mini_scene = '1256') {
+    const loginData = {
+        code: jsCode,
+        platformKey: PLATFORM_KEY,
+        version: APP_VERSION,
+        vital: '',
+        partner_platform_key: '',
+        mini_scene: mini_scene
+    };
+    if (phone_code) {
+        loginData.phone_code = phone_code;
+    }
     const baseConfig = {
         method: 'post',
         url: 'https://openapp.fmy90.com/auth/wx/login',
@@ -276,13 +287,7 @@ async function wxLogin(jsCode, UA, proxyAgent, accountAlias) {
             'Accept-Encoding': 'gzip, deflate, br',
             'Accept-Language': 'zh-CN,zh;q=0.9'
         },
-        data: qs.stringify({
-            code: jsCode,
-            platformKey: PLATFORM_KEY,
-            version: APP_VERSION,
-            vital: '',
-            partner_platform_key: ''
-        }),
+        data: qs.stringify(loginData),
         timeout: 20000
     };
 
@@ -365,7 +370,151 @@ async function commonPost(url, body, token, UA, proxyAgent, accountAlias) {
     }
 }
 
-// 单个账号执行逻辑（参数改为纯wxid字符串，保留品赞代理和PushPlus逻辑）
+// 从登录响应中提取 token（兼容多种结构）
+function extractToken(login) {
+    if (!login) return null;
+    if (login.data?.userInfo?.token) return login.data.userInfo.token;
+    if (login.data?.token) return login.data.token;
+    if (login.token) return login.token;
+    if (login.data?.access_token) return login.data.access_token;
+    return null;
+}
+
+// 验证 token 有效性并获取余额（总获得 - 总使用）
+async function getAccountBalance(token, UA, proxyAgent, accountAlias) {
+    const headers = {
+        'Host': 'openapp.fmy90.com',
+        'Connection': 'keep-alive',
+        'device-version': 'Windows 10 x64',
+        'User-Agent': UA,
+        'xweb_xhr': '1',
+        'Content-Type': 'application/json',
+        'device-model': 'microsoft',
+        'Accept': '*/*',
+        'Sec-Fetch-Site': 'cross-site',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Dest': 'empty',
+        'Referer': `https://servicewechat.com/${APPID}/506/page-frame.html`,
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Accept-Language': 'zh-CN,zh;q=0.9',
+        'authorization': `Bearer ${token}`
+    };
+    const base = { method: 'get', headers, timeout: 20000 };
+    try {
+        const earn = await axios(addProxyToAxiosConfig({ ...base, url: 'https://openapp.fmy90.com/user/new/beans/info', params: { type: '1', version: APP_VERSION, platformKey: PLATFORM_KEY, mini_scene: '1027', partner_ext_infos: '' } }, proxyAgent));
+        const use = await axios(addProxyToAxiosConfig({ ...base, url: 'https://openapp.fmy90.com/user/new/beans/info', params: { type: '2', version: APP_VERSION, platformKey: PLATFORM_KEY, mini_scene: '1027', partner_ext_infos: '' } }, proxyAgent));
+        const ed = earn.data || {};
+        const ud = use.data || {};
+        if (ed.code != 200 && ed.code != 0) return { valid: false, balance: 0, msg: `总积分接口错误: ${ed.message || '未知'}` };
+        const totalEarned = parseInt(ed.data?.totalCount || 0);
+        const totalUsed = parseInt(ud.data?.totalCount || 0);
+        return { valid: true, balance: totalEarned - totalUsed, msg: `总得:${totalEarned}, 总用:${totalUsed}` };
+    } catch (e) {
+        return { valid: false, balance: 0, msg: `验证异常: ${e.message}` };
+    }
+}
+
+// 获取积分统计（总获得、总使用、当前余额、今日获得）
+async function getStatistics(token, UA, proxyAgent, accountAlias) {
+    const stats = { total_earned: 0, total_used: 0, current_balance: 0, income_today: 0 };
+    const headers = {
+        'Host': 'openapp.fmy90.com',
+        'Connection': 'keep-alive',
+        'device-version': 'Windows 10 x64',
+        'User-Agent': UA,
+        'xweb_xhr': '1',
+        'Content-Type': 'application/json',
+        'device-model': 'microsoft',
+        'Accept': '*/*',
+        'Sec-Fetch-Site': 'cross-site',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Dest': 'empty',
+        'Referer': `https://servicewechat.com/${APPID}/506/page-frame.html`,
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Accept-Language': 'zh-CN,zh;q=0.9',
+        'authorization': `Bearer ${token}`
+    };
+    const base = { method: 'get', headers, timeout: 20000 };
+    try {
+        const earn = await axios(addProxyToAxiosConfig({ ...base, url: 'https://openapp.fmy90.com/user/new/beans/info', params: { type: '1', version: APP_VERSION, platformKey: PLATFORM_KEY, mini_scene: '1027', partner_ext_infos: '' } }, proxyAgent));
+        if (earn?.data?.code == 200 || earn?.data?.code == 0) stats.total_earned = parseInt(earn.data.data?.totalCount || 0);
+        const use = await axios(addProxyToAxiosConfig({ ...base, url: 'https://openapp.fmy90.com/user/new/beans/info', params: { type: '2', version: APP_VERSION, platformKey: PLATFORM_KEY, mini_scene: '1027', partner_ext_infos: '' } }, proxyAgent));
+        if (use?.data?.code == 200 || use?.data?.code == 0) stats.total_used = parseInt(use.data.data?.totalCount || 0);
+        stats.current_balance = stats.total_earned - stats.total_used;
+        const now = new Date();
+        const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        const log = await axios(addProxyToAxiosConfig({ ...base, url: 'https://openapp.fmy90.com/user/beans/log', params: { pageSize: '20', type: '1', platformKey: PLATFORM_KEY } }, proxyAgent));
+        if (log?.data?.code == 200 || log?.data?.code == 0) {
+            const list = log.data.data?.data || [];
+            for (const item of list) {
+                if (String(item.addTime || '').includes(todayStr)) {
+                    stats.income_today += Math.abs(parseInt(item.beanNum || 0));
+                }
+            }
+        }
+    } catch (e) {
+        $.log(`[${accountAlias}] 统计异常: ${e.message}`);
+    }
+    return stats;
+}
+
+// 获取商品列表（按兑换积分升序）
+async function fetchProductList(token, UA, proxyAgent) {
+    const headers = {
+        'Host': 'openapp.fmy90.com',
+        'Connection': 'keep-alive',
+        'device-version': 'Windows 10 x64',
+        'User-Agent': UA,
+        'xweb_xhr': '1',
+        'Content-Type': 'application/json',
+        'device-model': 'microsoft',
+        'Accept': '*/*',
+        'Sec-Fetch-Site': 'cross-site',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Dest': 'empty',
+        'Referer': `https://servicewechat.com/${APPID}/506/page-frame.html`,
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Accept-Language': 'zh-CN,zh;q=0.9',
+        'authorization': `Bearer ${token}`
+    };
+    try {
+        const resp = await axios(addProxyToAxiosConfig({
+            method: 'get',
+            url: 'https://openapp.fmy90.com/shop/new/list',
+            headers,
+            params: { page: 1, pageSize: 12, goodsCategoryId: '', st: 0, ps: '0,99999', version: APP_VERSION, platformKey: PLATFORM_KEY, mini_scene: '1000', partner_ext_infos: '' },
+            timeout: 20000
+        }, proxyAgent));
+        const data = resp?.data || {};
+        if (data.code != 200 && data.code != 0) return null;
+        const goods = data.data?.goods_data?.data || [];
+        return goods.map(g => ({ integralValue: g.integralValue || 0, goodsInventory: g.goodsInventory || 0, goodsTitle: g.goodsTitle || '未知商品' }));
+    } catch (e) {
+        $.log(`获取商品列表异常: ${e.message}`);
+        return null;
+    }
+}
+
+// 打印商品列表（按兑换积分升序）
+function printProductList(products) {
+    if (!products || !products.length) {
+        $.log('\n⚠️ 无商品数据');
+        return;
+    }
+    const sorted = [...products].sort((a, b) => a.integralValue - b.integralValue);
+    $.log('\n' + '='.repeat(80));
+    $.log('📦 飞蚂蚁商城商品列表（按兑换积分升序）');
+    $.log('='.repeat(80));
+    $.log(`${'序号'.padEnd(6)} ${'兑换积分'.padEnd(10)} ${'库存'.padEnd(10)} 商品名称`);
+    $.log('-'.repeat(80));
+    sorted.forEach((p, idx) => {
+        const stock = p.goodsInventory > 0 ? String(p.goodsInventory) : '已售罄';
+        $.log(`${String(idx + 1).padEnd(6)} ${String(p.integralValue).padEnd(10)} ${stock.padEnd(10)} ${p.goodsTitle}`);
+    });
+    $.log('='.repeat(80));
+}
+
+// 单个账号执行：参数改为纯wxid字符串，保留品赞代理和PushPlus逻辑
 async function runAccount(wxid, globalProxyAgent) {
     // 从 wxid 中提取别名（支持 wxid#alias 格式）
     const alias = wxid.includes('#') ? wxid.split('#')[1]?.trim() || wxid : wxid;
@@ -375,7 +524,9 @@ async function runAccount(wxid, globalProxyAgent) {
         signMsg: "",
         exchangeMsgs: [],
         error: "",
-        proxyStatus: "未使用代理"
+        proxyStatus: "未使用代理",
+        token: null,
+        stats: null
     };
     $.log(`\n===== 飞蚂蚁旧衣回收 - ${alias} 账号 =====`);
     const UA = getUA();
@@ -390,13 +541,23 @@ async function runAccount(wxid, globalProxyAgent) {
         $.log(`[${alias}] 启动延迟 ${startDelay / 1000}s`);
         await sleep(startDelay);
 
-        // token 缓存：有效期内复用，避免每次运行都重新取 code（规避微信限流）
+        // ===== 本地存储 token，自动续期（过期/失效则重新登录）=====
         let token = null;
         const cached = getCachedToken('feimayi', wxid, { maxAgeMs: 6 * 3600 * 1000 });
         if (cached) {
             token = cached.token;
-            $.log(`[${alias}] 命中token缓存，跳过取code`);
-        } else {
+            $.log(`[${alias}] 命中token缓存，验证有效性...`);
+            // 用余额接口验证 token 是否仍有效（CK 过期则重新登录）
+            const check = await getAccountBalance(token, UA, proxyAgent, alias);
+            if (check.valid) {
+                $.log(`[${alias}] 缓存token有效（${check.msg}），跳过取code`);
+            } else {
+                $.log(`[${alias}] 缓存token已失效（${check.msg}），重新登录...`);
+                token = null;
+            }
+        }
+
+        if (!token) {
             // 1. 获取code（wxid 标准 yyb.js 模块）
             let code = await getWxCode(wxid, APPID);
             if (!code) {
@@ -418,21 +579,37 @@ async function runAccount(wxid, globalProxyAgent) {
                 return result;
             }
 
-            // 多路径提取token，兼容不同响应结构
-            if (login.data?.userInfo?.token) {
-                token = login.data.userInfo.token;
-            } else if (login.data?.token) {
-                token = login.data.token;
-            } else if (login.token) {
-                token = login.token;
-            } else if (login.data?.access_token) {
-                token = login.data.access_token;
-            }
+            token = extractToken(login);
 
+            // 3. 自动授权：登录未返回 token 或 token 无效时，走手机号授权流程
             if (!token) {
-                result.error = "无法从登录响应中提取token，请查看调试日志";
-                $.log(`[${alias}] ${result.error}`);
-                return result;
+                $.log(`[${alias}] 登录未返回token，尝试手机号授权...`);
+                const phoneCode = await getSinglePhoneNumber(APPID, String(wxid).split('#')[0].trim());
+                if (!phoneCode) {
+                    result.error = "获取手机号授权code失败";
+                    $.log(`[${alias}] ${result.error}`);
+                    return result;
+                }
+                // 授权后重新取 code 并登录（mini_scene=1008）
+                const newCode = await getWxCode(wxid, APPID);
+                if (!newCode) {
+                    result.error = "授权后重新取code失败";
+                    $.log(`[${alias}] ${result.error}`);
+                    return result;
+                }
+                $.log(`[${alias}] 已获取手机号授权，重新登录...`);
+                const login2 = await wxLogin(newCode, UA, proxyAgent, alias, phoneCode, '1008');
+                if (!login2 || login2.code != 200) {
+                    result.error = `授权后登录失败：${login2?.message || "无响应"}`;
+                    $.log(`[${alias}] ${result.error}`);
+                    return result;
+                }
+                token = extractToken(login2);
+                if (!token) {
+                    result.error = "授权后仍无法提取token";
+                    $.log(`[${alias}] ${result.error}`);
+                    return result;
+                }
             }
 
             $.log(`[${alias}] 登录成功，获取到有效token`);
@@ -463,9 +640,9 @@ async function runAccount(wxid, globalProxyAgent) {
 
         // 4. 步数兑换（循环3次）
         for (let i = 0; i < 3; i++) {
-            $.log(`[${alias}] 开始第${i+1}次步数兑换...`);
+            $.log(`[${alias}] 开始第${i+1}次步数兑换（50000步）...`);
             let exchange = await commonPost('/step/exchange', {
-                "steps": random(5000, 8000),
+                "steps": 50000,
                 "version": APP_VERSION,
                 "platformKey": PLATFORM_KEY,
                 "mini_scene": 1089,
@@ -490,6 +667,12 @@ async function runAccount(wxid, globalProxyAgent) {
                 await sleep(random(3000, 5000));
             }
         }
+
+        // 5. 积分统计（总获得、总使用、当前余额、今日获得）
+        const stats = await getStatistics(token, UA, proxyAgent, alias);
+        result.stats = stats;
+        result.token = token;
+        $.log(`[${alias}] 积分统计：总获得 ${stats.total_earned} | 总使用 ${stats.total_used} | 当前余额 ${stats.current_balance} | 今日获得 +${stats.income_today}`);
 
         result.success = true;
         $.log(`[${alias}] 账号执行完成`);
@@ -544,12 +727,43 @@ async function runAccount(wxid, globalProxyAgent) {
                 notifyContent += `  - ${msg}
 `;
             });
+            if (res.stats) {
+                notifyContent += `- 积分统计：总获得 ${res.stats.total_earned} | 总使用 ${res.stats.total_used} | 当前余额 ${res.stats.current_balance} | 今日获得 +${res.stats.income_today}
+`;
+            }
         } else {
             notifyContent += `- 失败原因：${res.error}
 `;
         }
     });
     await sendPlusPlusNotification("飞蚂蚁旧衣回收任务完成", notifyContent);
+
+    // 达标提醒：CK过期 或 余额 > 1200 时聚合推送
+    const targetAliases = [];
+    results.forEach(res => {
+        const isExpired = !res.success && /token|认证|无效|过期|登录失败/.test(res.error || "");
+        const isHighBalance = res.stats && res.stats.current_balance > 1200;
+        if (isExpired || isHighBalance) targetAliases.push(res.alias);
+    });
+    if (targetAliases.length) {
+        const pushTitle = "飞蚂蚁达标提醒";
+        const pushContent = `以下账号已达标（CK过期 或 余额>1200）：\n${targetAliases.join("、")}`;
+        $.log(`\n📢 检测到 ${targetAliases.length} 个达标账号: ${targetAliases.join(", ")}`);
+        await sendPlusPlusNotification(pushTitle, pushContent);
+    }
+
+    // 商品列表打印（使用第一个成功账号的 token）
+    const firstValid = results.find(r => r.success && r.token);
+    if (firstValid) {
+        $.log("\n📦 正在获取商品列表...");
+        const products = await fetchProductList(firstValid.token, getUA(), globalProxyAgent);
+        if (products) {
+            printProductList(products);
+        } else {
+            $.log("⚠️ 获取商品列表失败");
+        }
+    }
+
     $.log('\n===== 所有账号执行完成 =====');
 
     await $.done();
