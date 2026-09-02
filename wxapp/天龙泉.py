@@ -1580,7 +1580,12 @@ def main() -> None:
             results_for_notify.append(f"{display}\n无法判断协议，请加 wl: 或 yyb:")
             continue
 
-        server = os.getenv("WECHAT_SERVER", "").strip() if protocol == "wl" else os.getenv("YYB_SERVER", "").strip()
+        if protocol == "wl":
+            server = os.getenv("WECHAT_SERVER", "").strip()
+        else:
+            server = os.getenv("YYB_SERVER", "").strip()
+            if not server and yyb is not None:
+                server = yyb.get_global_server_url()
         if not server:
             log(f"[{idx}] {display} -> 协议 {protocol} 但未配置对应服务地址")
             results_for_notify.append(f"{display}\n未配置对应服务地址")
