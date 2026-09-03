@@ -966,15 +966,53 @@ function canComplete(task) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** 提取任务上的 missionXId（不同接口字段名不一致，逐个兜底） */
+/** 提取任务实例标识（不同接口/版本字段名不一致，逐个兜底） */
 function pickMissionXId(task) {
-  return task.missionXId != null ? task.missionXId
-    : (task.missionxid != null ? task.missionxid
-      : (task.missionXid != null ? task.missionXid : null));
+  const keys = ['missionXId', 'missionxid', 'missionInstanceId', 'missioninstanceid', 'instanceId', 'taskInstanceId'];
+  for (const k of keys) {
+    if (task[k] != null && task[k] !== '') return task[k];
+  }
+  return null;
+}
+
+/** 领奖请求的基础参数（随任务变化） */
+function prizeBase(task) {
+  const base = { missionId: task.missionDefId, count: 1 };
+  if (task.missionCollectionId != null && task.missionCollectionId !== '') base.missionCollectionId = task.missionCollectionId;
+  return base;
+}
+
+/**
+ * 领奖参数候选变体（delta 形式，不含 missionId/missionCollectionId）。
+ *
+ * 背景：任务已完成（stage.status=FINISH 且 rewardStatus=TODO）但 receiveprize 仍报
+ *   RECEIVE_MISSION_REWARD_RECEIVE_ALL_ERROR / RECEIVE_MISSION_REWARD_STAGE_NOT_EXIST_ERROR，
+ * 说明「服务端认可的可领参数形态」与默认形态不一致。真机参数由服务端下发的动态渲染
+ * 模板决定，离线包里只有接口名和 asac，拼不出完整 data，只能靠探测。
+ * 因此在首个待领任务上做一次有节制的探测（变体间隔 1.2s），命中后记为 prizePlan，
+ * 后续任务直接复用，不再重复探测。
+ */
+function prizeVariants(task, stage) {
+  const sc = stage.stageCount != null ? stage.stageCount : null;
+  const mx = pickMissionXId(task);
+  const list = [];
+  const push = (name, delta) => list.push({ name, delta: delta || {} });
+  // 与历史真机抓包一致的形态放最前面
+  push("默认(count=1)", {});
+  if (sc != null) push("+stageCount", { stageCount: sc });
+  if (mx != null) push("+missionXId", { missionXId: mx });
+  push("不带count", { _noCount: true });
+  if (sc != null) push("count=stageCount", { count: sc });
+  if (sc != null && mx != null) push("+stageCount+missionXId", { stageCount: sc, missionXId: mx });
+  push("POST", { _method: "POST" });
+  push("v1.1", { _version: "1.1" });
+  push("旧asac兜底", { _asac: DEFAULT_CONFIG.ASAC.PRIZE_LEGACY });
+  return list;
 }
 
 /** 处理单个账号，返回 { ok, done, received, skipped, stars } */
 async function runAccount(cookie, opts) {
-  const { dry, viewMs, onlyMission, log } = opts;
+  const { dry, viewMs, onlyMission, log, dump } = opts;
   const m = new EleMtop(cookie);
   const result = { ok: false, done: 0, received: 0, skipped: 0, stars: null, prizes: [] };
 
@@ -1105,6 +1143,8 @@ async function runAccount(cookie, opts) {
   // 才把下一阶段置为可领，所以这里循环多轮，直到没有新的可领阶段。
   log.info('--- [阶段B] 领取已完成任务奖励 ---');
   const receivedKeys = new Set();
+  let prizePlan = null;      // 探测到的可用领奖参数形态（delta）
+  const dumpList = [];       // --dump 时记录每次领奖尝试
   for (let round = 1; round <= 5; round++) {
     const pending = [];
     for (const t of tasks) {
@@ -1131,25 +1171,52 @@ async function runAccount(cookie, opts) {
       receivedKeys.add(stageKey(task, stage));
       if (dry) { result.skipped++; continue; }
 
-      const rpOpts = { missionId: task.missionDefId, count: 1 };
-      if (task.missionCollectionId) rpOpts.missionCollectionId = task.missionCollectionId;
-      const rp = await m.receiveprize(rpOpts);
-      const code = retCode(rp.json);
-      const prize = prizeTitle(rp.json);
-      if (code.startsWith('SUCCESS')) {
-        log.info(`   receiveprize: ${code} (领取成功${prize ? ' → ' + prize : ''})`);
-        result.received++;
-        got++;
-        if (prize) result.prizes.push(prize);
-      } else {
-        log.info(`   receiveprize: ${code}`);
+      // 首个待领任务做参数形态探测，命中后记为 prizePlan，后续任务直接复用
+      const variants = prizePlan ? [{ name: '已验证方案', delta: prizePlan }] : prizeVariants(task, stage);
+      let ok = false;
+      for (let vi = 0; vi < variants.length; vi++) {
+        const v = variants[vi];
+        let rp;
+        try {
+          rp = await m.receiveprize(Object.assign(prizeBase(task), v.delta));
+        } catch (e) {
+          log.info(`   receiveprize[${v.name}]: 异常 ${e.message}`);
+          continue;
+        }
+        const code = retCode(rp.json);
+        const prize = prizeTitle(rp.json);
+        if (code.startsWith('SUCCESS')) {
+          log.info(`   receiveprize[${v.name}]: ${code} (领取成功${prize ? " → " + prize : ""})`);
+          result.received++;
+          got++;
+          if (prize) result.prizes.push(prize);
+          if (!prizePlan) {
+            prizePlan = v.delta;
+            log.info(`   [锁定领奖参数形态] ${v.name} → ${JSON.stringify(v.delta)}`);
+          }
+          ok = true;
+          break;
+        }
+        log.info(`   receiveprize[${v.name}]: ${code}`);
+        if (dump) dumpList.push({ missionDefId: task.missionDefId, stage: sc, variant: v.name, req: Object.assign(prizeBase(task), v.delta), res: rp.json });
+        if (vi < variants.length - 1) await sleep(1200);
       }
+      if (!ok) result.failed = (result.failed || 0) + 1;
       await sleep(900);
     }
     if (dry || !got) break;
     // 领到过奖励说明状态有变化，刷新看是否解锁了下一阶段
     await sleep(1800);
     tasks = await refresh();
+  }
+
+  // --dump：把任务快照与领奖尝试全部落盘，便于和真机抓包逐字段比对
+  if (dump) {
+    try {
+      const dumpFile = path.join(__dirname, 'luckystar_dump_' + String(Date.now()) + '.json');
+      fs.writeFileSync(dumpFile, JSON.stringify({ mlist: tasks, receiveAttempts: dumpList }, null, 2));
+      log.info(`[dump] 已写入 ${dumpFile}`);
+    } catch (e) { log.info(`[dump] 写入失败: ${e.message}`); }
   }
 
   // 最终余额
@@ -1205,6 +1272,7 @@ async function main() {
   const noNotify = process.argv.includes('--no-notify');
   const viewMs = parseInt(getArg('--view-ms') || '30000', 10);
   const onlyMission = getArg('--only');
+  const dump = process.argv.includes('--dump');
 
   const accounts = await getAllAccounts();
   if (accounts.length === 0) {
@@ -1231,10 +1299,10 @@ async function main() {
       error: (s) => console.error('  ' + s)
     };
     try {
-      const r = await runAccount(cookie, { dry, viewMs, onlyMission, log });
+      const r = await runAccount(cookie, { dry, viewMs, onlyMission, log, dump });
       const status = r.ok ? '成功' : '失败';
       const prize = r.prizes && r.prizes.length ? ` | 奖励 ${r.prizes.join('、')}` : '';
-      const line = `${name}: ${status} | 完成 ${r.done} | 领取 ${r.received}${prize} | 余额 ${r.stars}`;
+      const line = `${name}: ${status} | 完成 ${r.done} | 领取 ${r.received}${r.failed ? ` | 领奖失败 ${r.failed}` : ""}${prize} | 余额 ${r.stars}`;
       console.log(`  [账号结果] ${line}`);
       lines.push(line);
       summaries.push({ name, ...r });
