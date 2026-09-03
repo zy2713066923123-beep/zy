@@ -5,7 +5,7 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
  *
  *
  * 功能（全部纯 Node 接口调用，无需浏览器 / 真实浏览 / App WebView）：
- *   1. 每日签到（signinandreceive）
+ *   1. 每日签到（SIGNIN_AND_RECEIVE 用 signinandreceive；RECEIVE_AND_SIGNIN 用 receiveprize）
  *   2. 自动完成所有 PAGEVIEW 任务（pageview 上报 → RUNNING→FINISH）
  *   3. 自动领取全部已完成任务的奖励（receiveprize）
  *   4. 支持多账号逐个处理
@@ -278,25 +278,11 @@ class EleMtop {
     return this.call('mtop.ele.biz.growth.task.event.trigger', data, '1.1', headers, 'POST');
   }
   /**
+
    * 领取任务奖励。
+
    *
-   * 参数形态取自真机抓包（4 条不同任务的成功样本 mtl29pwsc2m8JpxO / mtl13jftSteYxuuh /
-   * mtl162tykZuKh4UA / mtkvrv0qFO85B4H5，参数完全同构）：
-   *   accountPlan / bizScene / longitude / latitude / locationInfos
-   *   + missionCollectionId / missionId / count
-   * 注意：
-   *   - 【2026-09-03 实测修正】count 就是服务端认的「阶段参数」：去掉 count 会直接报
-   *     CLIENT_PARAM_STAGE_ERROR::参数错误缺少阶段参数；而商业化-互动(44914003)阶段3 在
-   *     count=1 时返回 STAGE_NOT_EXIST_ERROR，count=3 时变成 RECEIVE_ALL_ERROR——说明
-   *     count 决定服务端去查哪个阶段。因此多阶段任务必须传 count = stageCount，
-   *     旧注释「count 是份数、传 stageCount 会被判无效」是错的，已更正；
-   *   - v1.1 实测返回 FAIL_SYS_API_NOT_FOUNDED，接口版本锁定 1.0；   *   - 成功样本一律不带 instanceId；抓包里带 instanceId 的两条返回的都是「已全部领奖」类
-   *     错误，没有任何成功证据，因此默认不发，避免多余字段引入不确定性；
-   *   - asac 只放在请求头，App 端 data 里并不带它，塞进 data 反而与真机不一致。
-   */
-  /**
-   * 领取任务奖励。
-   *
+
    * 【2026-09-03 实测修正】count 是服务端用来定位「阶段」的字段：去掉 count 会直接返回
    *   CLIENT_PARAM_STAGE_ERROR::参数错误缺少阶段参数；
    * 而商业化-互动(44914003)阶段3 在 count=1 时返回 STAGE_NOT_EXIST_ERROR，
@@ -347,16 +333,15 @@ class EleMtop {
     return this.call('mtop.alsc.interact.playapp.signin.component.signinandreceive', data, '1.0', { asac: this.cfg.ASAC.SIGNIN });
   }
   /**
-   * 纯签到（不领奖）。
+   * 签到奖励领取。
    *
-   * 用于处理 FAIL_BIZ_REWARD_MODE_NOT_SIGNIN_AND_RECEIVE::当前签到模式不支持独立领奖：
-   * 该活动的 rewardMode 不是「签到即领奖」，必须签到与领奖分两步。
+   * 【2026-09-03 实测】签到组件按 signInRewardStrategy 分两种策略：
+   *   - SIGNIN_AND_RECEIVE（签到即发奖）：用 signinandreceive 一步完成（多数账号走这个）；
+   *   - RECEIVE_AND_SIGNIN（领取即签到）：signinandreceive 会报
+   *     FAIL_BIZ_REWARD_MODE_NOT_SIGNIN_AND_RECEIVE::当前签到模式不支持独立领奖，
+   *     改用本接口（component.receiveprize）直接领取，服务端会把签到一并完成。
+   * 之前猜的 component.signin 纯签到接口实测不存在（FAIL_SYS_API_NOT_FOUNDED）。
    */
-  async signin(copyId, actId) {
-    const data = this.commonParams({ copyId, actId: actId || '' });
-    return this.call('mtop.alsc.interact.playapp.signin.component.signin', data, '1.0', { asac: this.cfg.ASAC.SIGNIN });
-  }
-  /** 签到奖励单独领取（配合 signin 使用） */
   async signinReceivePrize(copyId, actId) {
     const data = this.commonParams({ copyId, actId: actId || '' });
     return this.call('mtop.alsc.interact.playapp.signin.component.receiveprize', data, '1.0', { asac: this.cfg.ASAC.SIGNIN_PRIZE });
@@ -1045,29 +1030,40 @@ async function runAccount(cookie, opts) {
     signInfo = {
       status: s && s.status,
       copyId: s && s.extInfo && s.extInfo.copyId,
-      actId: s && s.actId
+      actId: s && s.actId,
+      strategy: s && s.signInRewardStrategy
     };
   } catch (e) {}
-  log.info(`签到状态: ${signInfo && signInfo.status}`);
+  log.info(`签到状态: ${signInfo && signInfo.status}${signInfo && signInfo.strategy ? ` (策略 ${signInfo.strategy})` : ''}`);
 
   if (!dry && signInfo && signInfo.status !== 'HAS_SIGNIN' && signInfo.copyId) {
-    const sr = await m.signinandreceive(signInfo.copyId, signInfo.actId || '');
-    let code = retCode(sr.json);
-    log.info(`每日签到: ${code}`);
-    // 当前活动的 rewardMode 不支持「签到即领奖」，拆成 签到 -> 领奖 两步
+    // 实测两种策略：
+    //   SIGNIN_AND_RECEIVE（多数账号）：signinandreceive 一步完成签到+发奖；
+    //   RECEIVE_AND_SIGNIN（账号3等）：signinandreceive 报「不支持独立领奖」，
+    //   需要直接调 receiveprize（服务端把签到与发奖一起完成）。
+    const preferReceive = signInfo.strategy === 'RECEIVE_AND_SIGNIN';
+    const trySign = async () => {
+      const r = preferReceive
+        ? await m.signinReceivePrize(signInfo.copyId, signInfo.actId || '')
+        : await m.signinandreceive(signInfo.copyId, signInfo.actId || '');
+      return retCode(r.json);
+    };
+    let code = await trySign();
+    log.info(`每日签到(${preferReceive ? 'RECEIVE_AND_SIGNIN->receiveprize' : 'signinandreceive'}): ${code}`);
+    // 策略与端点不匹配（mode 报错）→ 换另一端点再试一次
     if (code.indexOf('NOT_SIGNIN_AND_RECEIVE') !== -1) {
       try {
         log.info(`   [诊断] 签到组件数据: ${JSON.stringify(hd.signIn && hd.signIn.data)}`);
       } catch (e) {}
       await sleep(600);
-      const s1 = await m.signin(signInfo.copyId, signInfo.actId || '');
-      code = retCode(s1.json);
-      log.info(`  改用独立签到: ${code}`);
-      if (code.startsWith('SUCCESS')) {
-        await sleep(600);
-        const s2 = await m.signinReceivePrize(signInfo.copyId, signInfo.actId || '');
-        log.info(`  签到领奖: ${retCode(s2.json)}`);
-      }
+      const r2 = preferReceive
+        ? await m.signinandreceive(signInfo.copyId, signInfo.actId || '')
+        : await m.signinReceivePrize(signInfo.copyId, signInfo.actId || '');
+      code = retCode(r2.json);
+      log.info(`  换另一端点重试: ${code}`);
+    }
+    if (code.indexOf('NOT_SIGNIN_AND_RECEIVE') !== -1) {
+      log.info('   [提示] 两种端点都报模式错误，今日签到可能需要 App 内手动完成');
     }
   } else {
     log.info((signInfo && signInfo.status === 'HAS_SIGNIN') ? '今日已签到，跳过' : (dry ? '干跑模式，跳过签到' : '无签到组件'));
@@ -1188,8 +1184,10 @@ async function runAccount(cookie, opts) {
       if (dry) { result.skipped++; continue; }
 
       if (!diagDone) {
-        log.info(`   [诊断] 任务字段: ${Object.keys(task).join(",")}`);
-        log.info(`   [诊断] 阶段字段: ${Object.keys(stage).join(",")}`);
+        const jt = JSON.stringify(task);
+        const js = JSON.stringify(stage);
+        log.info(`   [诊断] 任务JSON: ${jt && jt.length > 1500 ? jt.slice(0, 1500) + '…(截断)' : jt}`);
+        log.info(`   [诊断] 阶段JSON: ${js && js.length > 1200 ? js.slice(0, 1200) + '…(截断)' : js}`);
         diagDone = true;
       }
       // 首个待领任务做参数形态探测，命中后记为 prizePlan，后续任务直接复用
@@ -1205,10 +1203,13 @@ async function runAccount(cookie, opts) {
           try {
             const rt = await m.receivetask({ missionId: task.missionDefId, missionCollectionId: task.missionCollectionId });
             log.info(`   receivetask: ${retCode(rt.json)}`);
+            if (dump) dumpList.push({ missionDefId: task.missionDefId, stage: sc, op: 'receivetask', req: { missionId: task.missionDefId, missionCollectionId: task.missionCollectionId }, res: rt.json });
             const rd = rt.json && rt.json.data;
             if (rd) {
               const iid = rd.instanceId != null ? rd.instanceId : (rd.missionXId != null ? rd.missionXId : null);
               if (iid != null) { extra.instanceId = iid; log.info(`   receivetask 返回 instanceId=${iid}`); }
+              const jd = JSON.stringify(rd);
+              if (jd) log.info(`   receivetask data: ${jd.length > 600 ? jd.slice(0, 600) + '…(截断)' : jd}`);
             }
           } catch (e) { log.info(`   receivetask: 异常 ${e.message}`); }
           await sleep(800);
