@@ -254,38 +254,40 @@ class UserInfo {
         try {
             const hasSignedToday = await this.signstate();
             if (hasSignedToday) {
-                await this.points();
-                return;
-            }
-
-            const body = {
-                "signType": 0
-            };
-
-            let options = {
-                url: `https://galaxy-app.geely.com/app/v1/sign/add`,
-                headers: this.getPostHeader(204453306, `/app/v1/sign/add`, JSON.stringify(body)),
-                body: JSON.stringify(body)
-            };
-
-            let result = await httpRequest(options);
-            result = result && typeof result === 'object' ? result : {};
-
-            if (result.code == 0) {
-                $.DoubleLog(`✅签到成功！`);
-                await this.points();
-                Notify = 1;
+                $.DoubleLog(`✅今日已签到，跳过正常签到`);
             } else {
-                $.DoubleLog(`❌签到失败！`);
-                console.log("⚠️失败原因:", result);
-                Notify = 1;
+                const body = {
+                    "signType": 0
+                };
+
+                let options = {
+                    url: `https://galaxy-app.geely.com/app/v1/sign/add`,
+                    headers: this.getPostHeader(204453306, `/app/v1/sign/add`, JSON.stringify(body)),
+                    body: JSON.stringify(body)
+                };
+
+                let result = await httpRequest(options);
+                result = result && typeof result === 'object' ? result : {};
+
+                if (result.code == 0) {
+                    $.DoubleLog(`✅签到成功！`);
+                    Notify = 1;
+                } else {
+                    $.DoubleLog(`❌签到失败！`);
+                    console.log("⚠️失败原因:", result);
+                    Notify = 1;
+                }
             }
+
+            // 执行补签
+            await this.makeup();
+            await this.points();
         } catch (e) {
             console.log(e);
         }
     }
 
-    //查询积分函数
+    //查询积分
     async points() {
         try {
             let options = {
@@ -305,13 +307,155 @@ class UserInfo {
             console.log(e);
         }
     }
+
+    //查询签到基础数据(补签卡数量)
+    async getBaseData() {
+        try {
+            let options = {
+                url: `https://galaxy-app.geely.com/app/v1/sign/getBaseData?isLoading=false`,
+                headers: this.getGetHeader(204453306, `/app/v1/sign/getBaseData?isLoading=false`),
+            },
+                result = await httpRequest(options);
+            result = result && typeof result === 'object' ? result : {};
+            if (result.code == 0 && result.data) {
+                return result.data;
+            } else {
+                console.log("⚠️获取签到基础数据失败:", result);
+                return null;
+            }
+        } catch (e) {
+            console.log(e);
+            return null;
+        }
+    }
+
+    //查询签到日历(找出可补签的日期)
+    async getSignCalendar() {
+        try {
+            let options = {
+                url: `https://galaxy-app.geely.com/app/v1/sign/getSignCalendar`,
+                headers: this.getGetHeader(204453306, `/app/v1/sign/getSignCalendar`),
+            },
+                result = await httpRequest(options);
+            result = result && typeof result === 'object' ? result : {};
+            if (result.code == 0 && Array.isArray(result.data)) {
+                return result.data;
+            } else {
+                $.DoubleLog(`❌获取签到日历失败`);
+                console.log(result);
+                return [];
+            }
+        } catch (e) {
+            console.log(e);
+            return [];
+        }
+    }
+
+    //预测补签(返回补签后的连续天数)
+    async predictSign(signDate) {
+        try {
+            let options = {
+                url: `https://galaxy-app.geely.com/app/v1/sign/predictSign?signDate=${signDate}`,
+                headers: this.getGetHeader(204453306, `/app/v1/sign/predictSign?signDate=${signDate}`),
+            },
+                result = await httpRequest(options);
+            result = result && typeof result === 'object' ? result : {};
+            if (result.code == 0 && result.data) {
+                return result.data;
+            }
+            return null;
+        } catch (e) {
+            console.log(e);
+            return null;
+        }
+    }
+
+    //补签函数
+    async makeupSign(signDate, userPrivilegeId) {
+        try {
+            const body = {
+                "signType": 1,
+                "signDate": signDate,
+                "userPrivilegeId": userPrivilegeId || "",
+                "headers": {
+                    "methodType": "6",
+                    "appVersion": "1.27.0",
+                    "use_security": "true"
+                }
+            };
+
+            let options = {
+                url: `https://galaxy-app.geely.com/app/v1/sign/add`,
+                headers: this.getPostHeader(204453306, `/app/v1/sign/add`, JSON.stringify(body)),
+                body: JSON.stringify(body)
+            };
+
+            let result = await httpRequest(options);
+            result = result && typeof result === 'object' ? result : {};
+            if (result.code == 0) {
+                $.DoubleLog(`✅补签成功: ${signDate}`);
+                return true;
+            } else {
+                $.DoubleLog(`❌补签失败: ${signDate}`);
+                console.log("⚠️失败原因:", result);
+                return false;
+            }
+        } catch (e) {
+            console.log(e);
+            return false;
+        }
+    }
+
+    //补签主流程
+    async makeup() {
+        try {
+            const baseData = await this.getBaseData();
+            if (!baseData) return;
+
+            const signCardCount = Number(baseData.signCardCount || 0);
+            if (signCardCount < 1) {
+                $.DoubleLog(`❌没有补签卡，无法补签`);
+                return;
+            }
+            $.DoubleLog(`✅拥有补签卡: ${signCardCount} 张`);
+
+            const calendar = await this.getSignCalendar();
+            if (!calendar.length) return;
+
+            // 找出可补签的日期(dateType == 3)
+            const makeupDates = calendar
+                .filter(item => item.dateType == '3')
+                .map(item => item.date);
+
+            if (!makeupDates.length) {
+                $.DoubleLog(`✅没有需要补签的日期`);
+                return;
+            }
+            $.DoubleLog(`📅发现 ${makeupDates.length} 天可补签: ${makeupDates.join(', ')}`);
+
+            // 逐个补签
+            let successCount = 0;
+            for (const date of makeupDates) {
+                const predict = await this.predictSign(date);
+                if (predict) {
+                    $.DoubleLog(`📊补签 ${date} 后连续天数: ${predict.continueSignDays}`);
+                }
+                const ok = await this.makeupSign(date, baseData.userPrivilegeId);
+                if (ok) successCount++;
+                await $.wait(1000);
+            }
+            $.DoubleLog(`✅补签完成: 成功 ${successCount}/${makeupDates.length}`);
+        } catch (e) {
+            console.log(e);
+        }
+    }
 }
 
 // 变量检查与处理
 !(async () => {
-    // 随机延迟 5~120 秒，模拟人工操作
-    const delay = Math.floor(Math.random() * 115 + 5) * 1000;
-    console.log(`⏳ 随机延迟 ${Math.round(delay / 1000)} 秒后开始...`);
+    // 随机延迟 5~120 秒，模拟人工操作（可用环境变量 jlyh_delay 覆盖，设为 0 可跳过延迟）
+    const delay = Number(process.env.jlyh_delay) >= 0 ? Number(process.env.jlyh_delay) * 1000 : Math.floor(Math.random() * 115 + 5) * 1000;
+    if (delay > 0) console.log(`⏳ 随机延迟 ${Math.round(delay / 1000)} 秒后开始...`);
     await $.wait(delay);
 
     const userCookie = ($.isNode() ? process.env[ckName] : $.getdata(ckName)) || "";

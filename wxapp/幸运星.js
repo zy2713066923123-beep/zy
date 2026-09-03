@@ -60,15 +60,25 @@ const DEFAULT_CONFIG = {
   referer: 'https://tb.ele.me/app/TBTakeout/engage-hub/home',
   bizScene: 'interact_center',
   accountPlan: 'HAVANA_COMMON',
-  longitude: 119.842406,
-  latitude: 31.276809,
+  // 经纬度真机是「字符串」形态，locationInfos 内部的 lng/lat 同样是字符串。
+  // 这里保持字符串，确保 commonParams 生成的 data 与真机抓包完全同构。
+  longitude: '119.842406',
+  latitude: '31.276809',
   missionCollectionId: 3112,
+  // 任务事件上报的风控场景值。来源：App 反编译
+  // me/ele/shopdetailv2/header/widget/navigator/i.java#p() -> riskScene = "duobao_external"
+  riskScene: 'duobao_external',
+  client: 'eleme',
   ASAC: {
     PAGEVIEW: 'alscFS8BNTO6jivYS7XOAM',
     PRIZE: 'alscadOjfleDPawx9zVoT0',
     SIGNIN: 'alsc3Lhy681SA5TT4iHgL3',
-    EXCHANGE: 'alsc5KvbdX5mHl3sdv4guV'
-  }
+    EXCHANGE: 'alsc5KvbdX5mHl3sdv4guV',
+    // event.trigger 的 asac 埋点头，硬编码于 i.java#p()
+    TRIGGER: '2A21607NIIT1ND5C4YXJ6C'
+  },
+  // c.java#e() 中 event.trigger 使用的是 alscec 头（另一套风控埋点）
+  ALSCEC_TRIGGER: 'alsclarBlqjTJnvbrII23s'
 };
 
 class EleMtop {
@@ -98,15 +108,21 @@ class EleMtop {
   setCookie(str) { this.cookieJar = str; }
 
   _md5(s) { return crypto.createHash('md5').update(s, 'utf8').digest('hex'); }
-  _request(url, headers) {
+  _request(url, headers, method = 'GET', body = null) {
     return new Promise((resolve, reject) => {
       const u = new URL(url);
-      const req = https.request(u, { method: 'GET', headers }, (res) => {
+      const h = { ...headers };
+      if (body != null) {
+        h['Content-Type'] = 'application/x-www-form-urlencoded';
+        h['Content-Length'] = Buffer.byteLength(body);
+      }
+      const req = https.request(u, { method, headers: h }, (res) => {
         const chunks = [];
         res.on('data', (c) => chunks.push(c));
         res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks).toString('utf8') }));
       });
       req.on('error', reject);
+      if (body != null) req.write(body);
       req.end();
     });
   }
@@ -134,7 +150,7 @@ class EleMtop {
     return token;
   }
 
-  async call(apiName, data = {}, v = '1.0', headers = {}) {
+  async call(apiName, data = {}, v = '1.0', headers = {}, method = 'GET') {
     const token = await this.ensureToken();
     const t = String(Date.now());
     const dataStr = JSON.stringify(data);
@@ -153,8 +169,15 @@ class EleMtop {
     url.searchParams.set('timeout', '10000');
     url.searchParams.set('t', t);
     url.searchParams.set('sign', sign);
-    url.searchParams.set('data', dataStr);
-    const res = await this._request(url.toString(), this._baseHeaders(headers));
+    let res;
+    if (String(method).toUpperCase() === 'POST') {
+      // mtop h5 网关 POST：data 放 body，签名算法不变
+      const body = 'data=' + encodeURIComponent(dataStr);
+      res = await this._request(url.toString(), this._baseHeaders(headers), 'POST', body);
+    } else {
+      url.searchParams.set('data', dataStr);
+      res = await this._request(url.toString(), this._baseHeaders(headers));
+    }
     this._absorbSetCookie(res.headers['set-cookie']);
     let json;
     try { json = JSON.parse(res.body); } catch (e) { json = { raw: res.body }; }
@@ -176,30 +199,96 @@ class EleMtop {
     return this.call('mtop.alsc.interact.et.interact.center.homepage', this.commonParams());
   }
   async querytask() {
-    return this.call('mtop.ele.biz.growth.task.core.querytask', this.commonParams({ missionCollectionId: this.cfg.missionCollectionId }));
+    // 真机该接口的 missionCollectionId 是字符串，且额外带 launchChannels:"[]"
+    return this.call('mtop.ele.biz.growth.task.core.querytask', this.commonParams({
+      missionCollectionId: String(this.cfg.missionCollectionId),
+      launchChannels: '[]'
+    }));
   }
+  /**
+   * 浏览类任务上报。
+   *
+   * 真机样本（mtl12vdlyB0fXGB9 等 5 条，参数完全同构）：
+   *   POST /gw/mtop.ele.biz.growth.task.event.pageview/1.1/
+   *   data = accountPlan / actionCode:"PAGEVIEW" / bizScene / collectionId(数字) /
+   *          latitude / longitude / locationInfos / missionId(数字) / pageFrom / sync:true
+   * 与旧实现的差异（已修正）：
+   *   - 真机是 POST，旧实现走 GET；
+   *   - asac 只在请求头，data 里不带；
+   *   - 真机没有 viewTime 字段。
+   */
   async pageview(opt) {
     const data = this.commonParams({
       sync: true,
       collectionId: opt.collectionId || this.cfg.missionCollectionId,
       missionId: opt.missionId,
       pageFrom: opt.pageFrom || 'a2ogi.bx1500380',
-      asac: this.cfg.ASAC.PAGEVIEW,
-      actionCode: opt.actionCode || 'PAGEVIEW',
-      viewTime: opt.viewTime || 30000
+      actionCode: opt.actionCode || 'PAGEVIEW'
     });
-    return this.call('mtop.ele.biz.growth.task.event.pageview', data, '1.1');
+    return this.call('mtop.ele.biz.growth.task.event.pageview', data, '1.1', { asac: this.cfg.ASAC.PAGEVIEW }, 'POST');
   }
+
+  /**
+   * 任务事件上报（THIRD 类任务的真实完成通道）
+   *
+   * 参数集合完整取自 App 反编译源码：
+   *   jadx/out/sources/me/ele/shopdetailv2/header/widget/navigator/i.java#p()
+   *   jadx/out/sources/me/ele/homepage/repository/c.java#e()
+   *
+   * 之前 `缺少业务参数eventId` 的根因：
+   *   1) 未传 eventId（源码里被混淆成 com.heytap.mcssdk.constant.b.k = "eventId"）
+   *   2) bizScene 传了 interact_center，而源码里 me.ele.address.a.c = "bizScene"
+   *      对 THIRD 任务传的是 missionId / 业务场景标识，不是互动中心场景
+   *   3) 该接口是 POST + version 1.1，不是 GET
+   */
+  async eventTrigger(opt) {
+    const now = Date.now();
+    const missionId = String(opt.missionId);
+    const eventId = opt.eventId != null ? opt.eventId : now;
+    const data = {
+      latitude: this.cfg.latitude,
+      longitude: this.cfg.longitude,
+      riskScene: opt.riskScene || this.cfg.riskScene,
+      // i.java: hashMap.put(me.ele.address.a.c /* bizScene */, parseObject.getString("missionid"))
+      bizScene: opt.bizScene || missionId,
+      eventType: opt.eventType || 'THIRD',
+      eventSubType: opt.eventSubType || 'EVENT_FINISH',
+      eventId,
+      eventIdemPotent: opt.eventIdemPotent != null ? opt.eventIdemPotent : now,
+      eventTime: now,
+      triggerType: opt.triggerType || 'SYNC',
+      collectionId: String(opt.collectionId || this.cfg.missionCollectionId),
+      missionId,
+      client: this.cfg.client
+    };
+    if (opt.missionXId != null) data.missionXId = String(opt.missionXId);
+    // i.java: headers -> asac: 2A21607NIIT1ND5C4YXJ6C
+    const headers = { asac: this.cfg.ASAC.TRIGGER, alscec: this.cfg.ALSCEC_TRIGGER };
+    return this.call('mtop.ele.biz.growth.task.event.trigger', data, '1.1', headers, 'POST');
+  }
+  /**
+   * 领取任务奖励。
+   *
+   * 参数形态取自真机抓包（4 条不同任务的成功样本 mtl29pwsc2m8JpxO / mtl13jftSteYxuuh /
+   * mtl162tykZuKh4UA / mtkvrv0qFO85B4H5，参数完全同构）：
+   *   accountPlan / bizScene / longitude / latitude / locationInfos
+   *   + missionCollectionId / missionId / count
+   * 注意：
+   *   - count 恒为 1，它是「本次领取的份数」，不是阶段号。多阶段任务（如 stageCount=3 的
+   *     「点击3个店铺」）真机同样只发 count:1，传 stageCount 会被服务端判为无效领取；
+   *   - 成功样本一律不带 instanceId；抓包里带 instanceId 的两条返回的都是「已全部领奖」类
+   *     错误，没有任何成功证据，因此默认不发，避免多余字段引入不确定性；
+   *   - asac 只放在请求头，App 端 data 里并不带它，塞进 data 反而与真机不一致。
+   */
   async receiveprize(opt) {
     const o = {
       missionCollectionId: opt.missionCollectionId || this.cfg.missionCollectionId,
       missionId: opt.missionId,
-      asac: this.cfg.ASAC.PRIZE
+      count: opt.count != null ? opt.count : 1
     };
     if (opt.instanceId) o.instanceId = opt.instanceId;
-    if (opt.count != null) o.count = opt.count;
     if (opt.sum != null) o.sum = opt.sum;
-    return this.call('mtop.ele.biz.growth.task.core.receiveprize', this.commonParams(o));
+    return this.call('mtop.ele.biz.growth.task.core.receiveprize', this.commonParams(o), '1.0', { asac: this.cfg.ASAC.PRIZE });
   }
   async receivetask(opt) {
     const o = {
@@ -211,6 +300,21 @@ class EleMtop {
   async signinandreceive(copyId, actId) {
     const data = this.commonParams({ copyId, actId: actId || '' });
     return this.call('mtop.alsc.interact.playapp.signin.component.signinandreceive', data, '1.0', { asac: this.cfg.ASAC.SIGNIN });
+  }
+  /**
+   * 纯签到（不领奖）。
+   *
+   * 用于处理 FAIL_BIZ_REWARD_MODE_NOT_SIGNIN_AND_RECEIVE::当前签到模式不支持独立领奖：
+   * 该活动的 rewardMode 不是「签到即领奖」，必须签到与领奖分两步。
+   */
+  async signin(copyId, actId) {
+    const data = this.commonParams({ copyId, actId: actId || '' });
+    return this.call('mtop.alsc.interact.playapp.signin.component.signin', data, '1.0', { asac: this.cfg.ASAC.SIGNIN });
+  }
+  /** 签到奖励单独领取（配合 signin 使用） */
+  async signinReceivePrize(copyId, actId) {
+    const data = this.commonParams({ copyId, actId: actId || '' });
+    return this.call('mtop.alsc.interact.playapp.signin.component.receiveprize', data, '1.0', { asac: this.cfg.ASAC.PRIZE });
   }
 }
 
@@ -739,21 +843,76 @@ async function getAllAccounts() {
 function retCode(json) {
   return (json && json.ret && json.ret[0]) || '';
 }
+/**
+ * 取出「已完成但奖励未领」的阶段。
+ *
+ * 不能只看任务顶层 status/receiveStatus（这是之前一直没自动领奖的根因）：
+ *   - 多阶段任务（邀请助力、逛店铺等）顶层长期是 RUNNING，
+ *     但已达标的那个 stage 已经是 status=FINISH / rewardStatus=TODO，此时就能领；
+ *   - 顶层 receiveStatus=HAVERECEIVED 只表示领过某一阶段，后续阶段仍可领；
+ *   - 已发放成功的阶段 rewardStatus=SUCCESS，只认 TODO 即可天然排除重复领取。
+ */
+function receivableStages(task) {
+  const list = task.missionStageDTOS || [];
+  const out = [];
+  for (const st of list) {
+    if (st.status === 'FINISH' && st.rewardStatus === 'TODO') out.push(st);
+  }
+  // 兜底：接口没下发阶段明细，但整任务已完成待领
+  if (!out.length && !list.length && task.status === 'FINISH' && task.receiveStatus === 'TORECEIVE') {
+    out.push({ stageCount: task.nextStageCount != null ? task.nextStageCount : 1, rewards: [] });
+  }
+  return out;
+}
 function canReceive(task) {
-  return task.status === 'FINISH' && task.receiveStatus === 'TORECEIVE';
+  return receivableStages(task).length > 0;
+}
+/** 阶段唯一键，用于跨轮次去重，避免重复领取同一阶段 */
+function stageKey(task, stage) {
+  return task.missionDefId + ':' + (stage.stageCount != null ? stage.stageCount : 1);
+}
+/** 从 receiveprize 响应里提取实际到账奖励（60幸运星 / …） */
+function prizeTitle(json) {
+  try {
+    return (json.data.rlist || [])
+      .map((r) => ((r.uppPrizeResult || {}).materialInfo || {}).title || (r.value != null ? String(r.value) : ''))
+      .filter(Boolean)
+      .join('、');
+  } catch (e) { return ''; }
+}
+/**
+ * 判断任务能否由脚本完成，并返回应走的上报通道。
+ *
+ * 依据反编译源码，App 侧只有 mtop.ele.biz.growth.task.event.trigger 一个事件上报接口
+ * （见 i.java#p() / c.java#e()），event.pageview 是 H5 专用接口且风控更严（会返回 405 行为受限）。
+ * 因此：PAGEVIEW 任务优先走 pageview，失败后回落 trigger；THIRD 任务只能走 trigger。
+ */
+function completeChannel(task) {
+  if (task.status !== 'RUNNING') return null;
+  const ac = task.actionConfig || {};
+  const at = ac.actionType;
+  const op = ac.actionValue && ac.actionValue.executeOpportunity;
+  if (at === 'PAGEVIEW' && op) return 'PAGEVIEW';
+  if (at === 'THIRD') return 'THIRD';
+  return null;
 }
 function canComplete(task) {
-  const at = task.actionConfig && task.actionConfig.actionType;
-  const op = task.actionConfig && task.actionConfig.actionValue && task.actionConfig.actionValue.executeOpportunity;
-  return task.status === 'RUNNING' && at === 'PAGEVIEW' && op;
+  return completeChannel(task) !== null;
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** 提取任务上的 missionXId（不同接口字段名不一致，逐个兜底） */
+function pickMissionXId(task) {
+  return task.missionXId != null ? task.missionXId
+    : (task.missionxid != null ? task.missionxid
+      : (task.missionXid != null ? task.missionXid : null));
+}
 
 /** 处理单个账号，返回 { ok, done, received, skipped, stars } */
 async function runAccount(cookie, opts) {
   const { dry, viewMs, onlyMission, log } = opts;
   const m = new EleMtop(cookie);
-  const result = { ok: false, done: 0, received: 0, skipped: 0, stars: null };
+  const result = { ok: false, done: 0, received: 0, skipped: 0, stars: null, prizes: [] };
 
   // 0. 首页：拿任务/签到/余额
   const hp = await m.homepage();
@@ -779,7 +938,20 @@ async function runAccount(cookie, opts) {
 
   if (!dry && signInfo && signInfo.status !== 'HAS_SIGNIN' && signInfo.copyId) {
     const sr = await m.signinandreceive(signInfo.copyId, signInfo.actId || '');
-    log.info(`每日签到: ${retCode(sr.json)}`);
+    let code = retCode(sr.json);
+    log.info(`每日签到: ${code}`);
+    // 当前活动的 rewardMode 不支持「签到即领奖」，拆成 签到 -> 领奖 两步
+    if (code.indexOf('NOT_SIGNIN_AND_RECEIVE') !== -1) {
+      await sleep(600);
+      const s1 = await m.signin(signInfo.copyId, signInfo.actId || '');
+      code = retCode(s1.json);
+      log.info(`  改用独立签到: ${code}`);
+      if (code.startsWith('SUCCESS')) {
+        await sleep(600);
+        const s2 = await m.signinReceivePrize(signInfo.copyId, signInfo.actId || '');
+        log.info(`  签到领奖: ${retCode(s2.json)}`);
+      }
+    }
   } else {
     log.info((signInfo && signInfo.status === 'HAS_SIGNIN') ? '今日已签到，跳过' : (dry ? '干跑模式，跳过签到' : '无签到组件'));
   }
@@ -816,49 +988,104 @@ async function runAccount(cookie, opts) {
     return fresh;
   };
 
-  // 阶段A：完成 PAGEVIEW 任务
-  log.info('--- [阶段A] 完成 PAGEVIEW 任务 ---');
+  // 阶段A：完成任务（PAGEVIEW 走 event.pageview，THIRD 走 event.trigger）
+  log.info('--- [阶段A] 完成任务 ---');
   const completes = tasks.filter(canComplete);
-  log.info(`  可完成(PAGEVIEW): ${completes.length}`);
+  const nPv = completes.filter((t) => completeChannel(t) === 'PAGEVIEW').length;
+  log.info(`  可完成: ${completes.length} (PAGEVIEW ${nPv} / THIRD ${completes.length - nPv})`);
   for (const task of completes) {
     if (onlyMission && String(task.missionDefId) !== String(onlyMission)) continue;
     const name = task.name || task.showTitle || ('任务' + task.missionDefId);
-    log.info(`▶ 完成 [${name}] (${task.missionDefId})`);
+    const channel = completeChannel(task);
+    log.info(`▶ 完成 [${name}] (${task.missionDefId}) [${channel}]`);
     if (dry) { result.skipped++; continue; }
-    const pv = await m.pageview({ missionId: task.missionDefId, viewTime: viewMs });
-    const code = retCode(pv.json);
-    log.info(`   pageview: ${code}${code.startsWith('SUCCESS') ? ' (成功)' : ''}`);
+
+    const trigger = async () => {
+      const tr = await m.eventTrigger({
+        missionId: task.missionDefId,
+        collectionId: task.missionCollectionId || undefined,
+        missionXId: pickMissionXId(task)
+      });
+      const c = retCode(tr.json);
+      log.info(`   trigger: ${c}${c.startsWith('SUCCESS') ? ' (成功)' : ''}`);
+      return c;
+    };
+
+    let code;
+    if (channel === 'PAGEVIEW') {
+      // 真机 pageview 不带 viewTime 字段（5 条样本均无），停留时长体现在「打开页面到上报」
+      // 的真实间隔上，所以这里改成上报前等待，最多 3s，避免整轮任务被 --view-ms 拖慢。
+      await sleep(Math.min(viewMs, 3000));
+      const pv = await m.pageview({ missionId: task.missionDefId });
+      code = retCode(pv.json);
+      log.info(`   pageview: ${code}${code.startsWith('SUCCESS') ? ' (成功)' : ''}`);
+      // 405::行为受限 是 H5 pageview 通道的风控拦截，回落到 App 通道 event.trigger
+      if (!code.startsWith('SUCCESS')) {
+        await sleep(600);
+        code = await trigger();
+      }
+    } else {
+      code = await trigger();
+    }
     if (code.startsWith('SUCCESS')) result.done++;
     await sleep(800);
   }
 
-  // 完成后刷新任务状态
-  if (result.done > 0) {
-    log.info('等待服务端更新任务状态...');
-    await sleep(2500);
-    tasks = await refresh();
-  }
+  // 完成后刷新任务状态（无论成功与否都刷新一次，服务端可能异步结算）
+  log.info('等待服务端更新任务状态...');
+  await sleep(2500);
+  tasks = await refresh();
 
-  // 阶段B：领取已完成任务
+  // 阶段B：领取已完成任务奖励
+  // 多阶段任务（邀请助力、逛店铺等）一次调用只能领一个阶段，且服务端要在本阶段领完后
+  // 才把下一阶段置为可领，所以这里循环多轮，直到没有新的可领阶段。
   log.info('--- [阶段B] 领取已完成任务奖励 ---');
-  const receives = tasks.filter(canReceive);
-  log.info(`  可领取(FINISH): ${receives.length}`);
-  for (const task of receives) {
-    if (onlyMission && String(task.missionDefId) !== String(onlyMission)) continue;
-    const name = task.name || task.showTitle || ('任务' + task.missionDefId);
-    const stage = task.missionStageDTOS && task.missionStageDTOS[0];
-    const stageCount = stage ? stage.stageCount : null;
-    const reward = stage && stage.rewards && stage.rewards[0];
-    const desc = reward ? `${reward.name}+${reward.value}` : '';
-    log.info(`★ 领取 [${name}] (${task.missionDefId})  奖励:${desc}`);
-    if (dry) { result.skipped++; continue; }
-    const rpOpts = { missionId: task.missionDefId, count: stageCount != null ? stageCount : undefined };
-    if (task.id) rpOpts.instanceId = task.id;
-    const rp = await m.receiveprize(rpOpts);
-    const code = retCode(rp.json);
-    log.info(`   receiveprize: ${code}${code.startsWith('SUCCESS') ? ' (领取成功)' : ''}`);
-    if (code.startsWith('SUCCESS')) result.received++;
-    await sleep(800);
+  const receivedKeys = new Set();
+  for (let round = 1; round <= 5; round++) {
+    const pending = [];
+    for (const t of tasks) {
+      if (onlyMission && String(t.missionDefId) !== String(onlyMission)) continue;
+      for (const st of receivableStages(t)) {
+        const k = stageKey(t, st);
+        if (receivedKeys.has(k)) continue;
+        pending.push({ task: t, stage: st });
+      }
+    }
+    if (!pending.length) {
+      if (round === 1) log.info('  无待领取奖励');
+      break;
+    }
+    log.info(`  第 ${round} 轮可领取: ${pending.length}`);
+
+    let got = 0;
+    for (const { task, stage } of pending) {
+      const name = task.name || task.showTitle || ('任务' + task.missionDefId);
+      const sc = stage.stageCount != null ? stage.stageCount : 1;
+      const reward = (stage.rewards || [])[0];
+      const desc = reward ? `${reward.name || ''}+${reward.value}` : '';
+      log.info(`★ 领取 [${name}] (${task.missionDefId}) 阶段${sc}${desc ? ' 奖励:' + desc : ''}`);
+      receivedKeys.add(stageKey(task, stage));
+      if (dry) { result.skipped++; continue; }
+
+      const rpOpts = { missionId: task.missionDefId, count: 1 };
+      if (task.missionCollectionId) rpOpts.missionCollectionId = task.missionCollectionId;
+      const rp = await m.receiveprize(rpOpts);
+      const code = retCode(rp.json);
+      const prize = prizeTitle(rp.json);
+      if (code.startsWith('SUCCESS')) {
+        log.info(`   receiveprize: ${code} (领取成功${prize ? ' → ' + prize : ''})`);
+        result.received++;
+        got++;
+        if (prize) result.prizes.push(prize);
+      } else {
+        log.info(`   receiveprize: ${code}`);
+      }
+      await sleep(900);
+    }
+    if (dry || !got) break;
+    // 领到过奖励说明状态有变化，刷新看是否解锁了下一阶段
+    await sleep(1800);
+    tasks = await refresh();
   }
 
   // 最终余额
@@ -942,7 +1169,8 @@ async function main() {
     try {
       const r = await runAccount(cookie, { dry, viewMs, onlyMission, log });
       const status = r.ok ? '成功' : '失败';
-      const line = `${name}: ${status} | 完成 ${r.done} | 领取 ${r.received} | 余额 ${r.stars}`;
+      const prize = r.prizes && r.prizes.length ? ` | 奖励 ${r.prizes.join('、')}` : '';
+      const line = `${name}: ${status} | 完成 ${r.done} | 领取 ${r.received}${prize} | 余额 ${r.stars}`;
       console.log(`  [账号结果] ${line}`);
       lines.push(line);
       summaries.push({ name, ...r });
