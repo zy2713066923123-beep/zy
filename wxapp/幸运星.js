@@ -71,8 +71,18 @@ const DEFAULT_CONFIG = {
   client: 'eleme',
   ASAC: {
     PAGEVIEW: 'alscFS8BNTO6jivYS7XOAM',
-    PRIZE: 'alscadOjfleDPawx9zVoT0',
+    // 任务领奖 mtop.ele.biz.growth.task.core.receiveprize 的风控场景值。
+    // 来源（静态逆向）：淘宝闪购 12.8.88 (me.ele) 内置离线包
+    //   assets/zcache-preset_sgyx-next.zip → sgyx-next~weex21/1311552/res/*home
+    //   其中明文写着 "mtop.ele.biz.growth.task.core.receiveprize,alscPlhUdkIEoklk01xaLW"
+    // 旧值 alscadOjfleDPawx9zVoT0 是签到组件的场景值，拿来做任务领奖属于场景串号，会被风控判失败
+    // （表现就是 RECEIVE_MISSION_REWARD_RECEIVE_ALL_ERROR）。
+    PRIZE: 'alscPlhUdkIEoklk01xaLW',
+    // 旧的任务领奖 asac，探测全部失败时作为最后兜底轮换
+    PRIZE_LEGACY: 'alscadOjfleDPawx9zVoT0',
     SIGNIN: 'alsc3Lhy681SA5TT4iHgL3',
+    // 签到领奖组件 mtop.alsc.interact.playapp.signin.component.receiveprize 的场景值
+    SIGNIN_PRIZE: 'alscadOjfleDPawx9zVoT0',
     EXCHANGE: 'alsc5KvbdX5mHl3sdv4guV',
     // event.trigger 的 asac 埋点头，硬编码于 i.java#p()
     TRIGGER: '2A21607NIIT1ND5C4YXJ6C'
@@ -280,6 +290,28 @@ class EleMtop {
    *     错误，没有任何成功证据，因此默认不发，避免多余字段引入不确定性；
    *   - asac 只放在请求头，App 端 data 里并不带它，塞进 data 反而与真机不一致。
    */
+  /**
+   * 领取任务奖励。
+   *
+   * 参数形态取自真机抓包（4 条不同任务的成功样本 mtl29pwsc2m8JpxO / mtl13jftSteYxuuh /
+   * mtl162tykZuKh4UA / mtkvrv0qFO85B4H5，参数完全同构）：
+   *   accountPlan / bizScene / longitude / latitude / locationInfos
+   *   + missionCollectionId / missionId / count
+   * 注意：
+   *   - count 恒为 1，它是「本次领取的份数」，不是阶段号。多阶段任务（如 stageCount=3 的
+   *     「点击3个店铺」）真机同样只发 count:1，传 stageCount 会被服务端判为无效领取；
+   *   - 成功样本一律不带 instanceId；抓包里带 instanceId 的两条返回的都是「已全部领奖」类
+   *     错误，没有任何成功证据，因此默认不发，避免多余字段引入不确定性；
+   *   - asac 只放在请求头，App 端 data 里并不带它，塞进 data 反而与真机不一致。
+   *
+   * 以上默认行为保留；额外支持以下「探测开关」（均以 _ 开头，不会进 data），
+   * 供 prizeVariants() 在领奖报错时自动枚举真机真实参数形态：
+   *   _noCount   删除 count 字段
+   *   _asac      覆盖 asac（旧值兜底轮换）
+   *   _method    覆盖 GET/POST
+   *   _version   覆盖接口版本 1.0 / 1.1
+   *   stageCount / missionXId / instanceId / sum 按需要写入 data
+   */
   async receiveprize(opt) {
     const o = {
       missionCollectionId: opt.missionCollectionId || this.cfg.missionCollectionId,
@@ -287,8 +319,18 @@ class EleMtop {
       count: opt.count != null ? opt.count : 1
     };
     if (opt.instanceId) o.instanceId = opt.instanceId;
+    if (opt.missionXId != null) o.missionXId = String(opt.missionXId);
+    if (opt.stageCount != null) o.stageCount = opt.stageCount;
     if (opt.sum != null) o.sum = opt.sum;
-    return this.call('mtop.ele.biz.growth.task.core.receiveprize', this.commonParams(o), '1.0', { asac: this.cfg.ASAC.PRIZE });
+    if (opt._noCount) delete o.count;
+    const asac = opt._asac || this.cfg.ASAC.PRIZE;
+    return this.call(
+      'mtop.ele.biz.growth.task.core.receiveprize',
+      this.commonParams(o),
+      opt._version || '1.0',
+      { asac },
+      opt._method || 'GET'
+    );
   }
   async receivetask(opt) {
     const o = {
@@ -314,7 +356,7 @@ class EleMtop {
   /** 签到奖励单独领取（配合 signin 使用） */
   async signinReceivePrize(copyId, actId) {
     const data = this.commonParams({ copyId, actId: actId || '' });
-    return this.call('mtop.alsc.interact.playapp.signin.component.receiveprize', data, '1.0', { asac: this.cfg.ASAC.PRIZE });
+    return this.call('mtop.alsc.interact.playapp.signin.component.receiveprize', data, '1.0', { asac: this.cfg.ASAC.SIGNIN_PRIZE });
   }
 }
 
