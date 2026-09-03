@@ -285,32 +285,34 @@ class EleMtop {
    *   accountPlan / bizScene / longitude / latitude / locationInfos
    *   + missionCollectionId / missionId / count
    * 注意：
-   *   - count 恒为 1，它是「本次领取的份数」，不是阶段号。多阶段任务（如 stageCount=3 的
-   *     「点击3个店铺」）真机同样只发 count:1，传 stageCount 会被服务端判为无效领取；
-   *   - 成功样本一律不带 instanceId；抓包里带 instanceId 的两条返回的都是「已全部领奖」类
+   *   - 【2026-09-03 实测修正】count 就是服务端认的「阶段参数」：去掉 count 会直接报
+   *     CLIENT_PARAM_STAGE_ERROR::参数错误缺少阶段参数；而商业化-互动(44914003)阶段3 在
+   *     count=1 时返回 STAGE_NOT_EXIST_ERROR，count=3 时变成 RECEIVE_ALL_ERROR——说明
+   *     count 决定服务端去查哪个阶段。因此多阶段任务必须传 count = stageCount，
+   *     旧注释「count 是份数、传 stageCount 会被判无效」是错的，已更正；
+   *   - v1.1 实测返回 FAIL_SYS_API_NOT_FOUNDED，接口版本锁定 1.0；   *   - 成功样本一律不带 instanceId；抓包里带 instanceId 的两条返回的都是「已全部领奖」类
    *     错误，没有任何成功证据，因此默认不发，避免多余字段引入不确定性；
    *   - asac 只放在请求头，App 端 data 里并不带它，塞进 data 反而与真机不一致。
    */
   /**
    * 领取任务奖励。
    *
-   * 参数形态取自真机抓包（4 条不同任务的成功样本 mtl29pwsc2m8JpxO / mtl13jftSteYxuuh /
-   * mtl162tykZuKh4UA / mtkvrv0qFO85B4H5，参数完全同构）：
-   *   accountPlan / bizScene / longitude / latitude / locationInfos
-   *   + missionCollectionId / missionId / count
-   * 注意：
-   *   - count 恒为 1，它是「本次领取的份数」，不是阶段号。多阶段任务（如 stageCount=3 的
-   *     「点击3个店铺」）真机同样只发 count:1，传 stageCount 会被服务端判为无效领取；
-   *   - 成功样本一律不带 instanceId；抓包里带 instanceId 的两条返回的都是「已全部领奖」类
-   *     错误，没有任何成功证据，因此默认不发，避免多余字段引入不确定性；
-   *   - asac 只放在请求头，App 端 data 里并不带它，塞进 data 反而与真机不一致。
+   * 【2026-09-03 实测修正】count 是服务端用来定位「阶段」的字段：去掉 count 会直接返回
+   *   CLIENT_PARAM_STAGE_ERROR::参数错误缺少阶段参数；
+   * 而商业化-互动(44914003)阶段3 在 count=1 时返回 STAGE_NOT_EXIST_ERROR，
+   * count=3（=stageCount）时错误变为 RECEIVE_ALL_ERROR——阶段找对了，只是发奖仍被拒。
+   * 因此多阶段任务必须传 count = stageCount。接口版本锁定 1.0（1.1 实测 404）。
    *
-   * 以上默认行为保留；额外支持以下「探测开关」（均以 _ 开头，不会进 data），
-   * 供 prizeVariants() 在领奖报错时自动枚举真机真实参数形态：
-   *   _noCount   删除 count 字段
-   *   _asac      覆盖 asac（旧值兜底轮换）
-   *   _method    覆盖 GET/POST
-   *   _version   覆盖接口版本 1.0 / 1.1
+   * 历史真机抓包结论（4 条成功样本 mtl29pwsc2m8JpxO 等，参数同构）：
+   *   accountPlan/bizScene/longitude/latitude/locationInfos + missionCollectionId/missionId/count；
+   * 成功样本一律不带 instanceId，默认仍不带；仅当探测形态「先receivetask」从报名响应
+   * 中拿到 instanceId 时才写入。asac 只放在请求头。
+   *
+   * 探测开关（均以 _ 开头，不会进 data），供 prizeVariants() 自动枚举：
+   *   _pre      先调 receivetask 报名并尝试取 instanceId
+   *   _noCount  删除 count 字段
+   *   _asac     覆盖 asac（旧值兜底轮换）
+   *   _method   覆盖 GET/POST
    *   stageCount / missionXId / instanceId / sum 按需要写入 data
    */
   async receiveprize(opt) {
@@ -977,8 +979,10 @@ function pickMissionXId(task) {
 }
 
 /** 领奖请求的基础参数（随任务变化） */
-function prizeBase(task) {
-  const base = { missionId: task.missionDefId, count: 1 };
+function prizeBase(task, stage) {
+  // count 实测是服务端用来定位阶段的字段，多阶段任务必须传 stageCount
+  const sc = stage && stage.stageCount != null ? stage.stageCount : null;
+  const base = { missionId: task.missionDefId, count: sc != null ? sc : 1 };
   if (task.missionCollectionId != null && task.missionCollectionId !== '') base.missionCollectionId = task.missionCollectionId;
   return base;
 }
@@ -993,23 +997,24 @@ function prizeBase(task) {
  * 因此在首个待领任务上做一次有节制的探测（变体间隔 1.2s），命中后记为 prizePlan，
  * 后续任务直接复用，不再重复探测。
  */
-function prizeDeltaTable(sc, mx) {
+function prizeDeltaTable(sc, mx, ix) {
   const t = [];
   const push = (name, delta) => t.push({ name, delta });
-  // 与历史真机抓包一致的形态放最前面
-  push("默认(count=1)", {});
-  if (sc != null) push("+stageCount", { stageCount: sc });
-  if (mx != null) push("+missionXId", { missionXId: mx });
-  push("不带count", { _noCount: true });
-  if (sc != null) push("count=stageCount", { count: sc });
-  if (sc != null && mx != null) push("+stageCount+missionXId", { stageCount: sc, missionXId: mx });
-  push("POST", { _method: "POST" });
-  push("v1.1", { _version: "1.1" });
-  push("旧asac兜底", { _asac: DEFAULT_CONFIG.ASAC.PRIZE_LEGACY });
+  // 实测：count 决定阶段，阶段号对了才有资格谈发奖
+  push("count=阶段号", {});
+  push('count=阶段号+先receivetask', { _pre: 'receivetask' });
+  if (mx != null) push("count=阶段号+missionXId", { missionXId: mx });
+  if (ix != null) push("count=阶段号+instanceId", { instanceId: ix });
+  if (sc != null) push("count=阶段号+stageCount字段", { stageCount: sc });
+  push("count=阶段号+POST", { _method: "POST" });
+  push("count=阶段号+旧asac兜底", { _asac: DEFAULT_CONFIG.ASAC.PRIZE_LEGACY });
+  // 历史真机抓包形态（单阶段任务与上面等价）
+  if (sc == null || sc === 1) push("count=1(历史形态)", { count: 1 });
   return t;
 }
 function prizeVariants(task, stage) {
-  return prizeDeltaTable(stage.stageCount != null ? stage.stageCount : null, pickMissionXId(task));
+  const ix = ['instanceId', 'instanceid', 'taskInstanceId', 'missionInstId'].map((k) => task[k]).find((v) => v != null && v !== '');
+  return prizeDeltaTable(stage.stageCount != null ? stage.stageCount : null, pickMissionXId(task), ix != null ? ix : null);
 }
 /** 按方案名重建 delta，保证锁定的方案能正确套用到其它任务/阶段上 */
 function prizeDeltaByName(name, task, stage) {
@@ -1051,6 +1056,9 @@ async function runAccount(cookie, opts) {
     log.info(`每日签到: ${code}`);
     // 当前活动的 rewardMode 不支持「签到即领奖」，拆成 签到 -> 领奖 两步
     if (code.indexOf('NOT_SIGNIN_AND_RECEIVE') !== -1) {
+      try {
+        log.info(`   [诊断] 签到组件数据: ${JSON.stringify(hd.signIn && hd.signIn.data)}`);
+      } catch (e) {}
       await sleep(600);
       const s1 = await m.signin(signInfo.copyId, signInfo.actId || '');
       code = retCode(s1.json);
@@ -1152,6 +1160,7 @@ async function runAccount(cookie, opts) {
   const receivedKeys = new Set();
   let prizePlan = null;      // 探测到的可用领奖参数形态（方案名）
   const dumpList = [];       // --dump 时记录每次领奖尝试
+  let diagDone = false;      // 只打印一次任务/阶段字段诊断
   for (let round = 1; round <= 5; round++) {
     const pending = [];
     for (const t of tasks) {
@@ -1178,14 +1187,35 @@ async function runAccount(cookie, opts) {
       receivedKeys.add(stageKey(task, stage));
       if (dry) { result.skipped++; continue; }
 
+      if (!diagDone) {
+        log.info(`   [诊断] 任务字段: ${Object.keys(task).join(",")}`);
+        log.info(`   [诊断] 阶段字段: ${Object.keys(stage).join(",")}`);
+        diagDone = true;
+      }
       // 首个待领任务做参数形态探测，命中后记为 prizePlan，后续任务直接复用
       const variants = prizePlan ? [{ name: prizePlan, delta: prizeDeltaByName(prizePlan, task, stage) }] : prizeVariants(task, stage);
       let ok = false;
       for (let vi = 0; vi < variants.length; vi++) {
         const v = variants[vi];
+        const extra = Object.assign(prizeBase(task, stage), v.delta);
+        // growth 任务平台的标准流程是 receivetask(报名) → 做任务 → receiveprize(领奖)，
+        // 脚本此前从未调过 receivetask，这里补上并尝试从响应里取 instanceId
+        if (v.delta && v.delta._pre === 'receivetask') {
+          delete extra._pre;
+          try {
+            const rt = await m.receivetask({ missionId: task.missionDefId, missionCollectionId: task.missionCollectionId });
+            log.info(`   receivetask: ${retCode(rt.json)}`);
+            const rd = rt.json && rt.json.data;
+            if (rd) {
+              const iid = rd.instanceId != null ? rd.instanceId : (rd.missionXId != null ? rd.missionXId : null);
+              if (iid != null) { extra.instanceId = iid; log.info(`   receivetask 返回 instanceId=${iid}`); }
+            }
+          } catch (e) { log.info(`   receivetask: 异常 ${e.message}`); }
+          await sleep(800);
+        }
         let rp;
         try {
-          rp = await m.receiveprize(Object.assign(prizeBase(task), v.delta));
+          rp = await m.receiveprize(extra);
         } catch (e) {
           log.info(`   receiveprize[${v.name}]: 异常 ${e.message}`);
           continue;
@@ -1205,7 +1235,7 @@ async function runAccount(cookie, opts) {
           break;
         }
         log.info(`   receiveprize[${v.name}]: ${code}`);
-        if (dump) dumpList.push({ missionDefId: task.missionDefId, stage: sc, variant: v.name, req: Object.assign(prizeBase(task), v.delta), res: rp.json });
+        if (dump) dumpList.push({ missionDefId: task.missionDefId, stage: sc, variant: v.name, req: Object.assign(prizeBase(task, stage), v.delta), res: rp.json });
         if (vi < variants.length - 1) await sleep(1200);
       }
       if (!ok) result.failed = (result.failed || 0) + 1;
