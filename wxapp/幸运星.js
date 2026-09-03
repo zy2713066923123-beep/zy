@@ -1034,13 +1034,27 @@ async function runAccount(cookie, opts) {
   log.info(`幸运星余额: ${result.stars}`);
 
   // 签到
+  // 真机 homepage 响应字段（抓包 mtl9s4z4i4Z6ltjA）：
+  //   signIn.data.extInfo.copyId          ← 签到副本ID
+  //   signIn.data.signInQueryPrizeDTOS[]  ← 每日签到奖励列表
+  //     [today=true].extInfo.stageAward[0].actCode  ← 真正的 actId
+  //   signIn.data.signInRewardStrategy    ← SIGNIN_AND_RECEIVE / RECEIVE_AND_SIGNIN
+  //   signIn.data.status                  ← HAS_SIGNIN / NOT_SIGNIN
   let signInfo = null;
   try {
     const s = hd.signIn && hd.signIn.data;
+    // 从签到日历里找今日 (today=true) 的 actCode 作为 actId
+    let todayActCode = '';
+    const dtos = s && s.signInQueryPrizeDTOS;
+    if (Array.isArray(dtos)) {
+      const todayDto = dtos.find((d) => d.today) || dtos[0];
+      const award = todayDto && todayDto.extInfo && todayDto.extInfo.stageAward;
+      if (Array.isArray(award) && award[0]) todayActCode = award[0].actCode || '';
+    }
     signInfo = {
       status: s && s.status,
       copyId: s && s.extInfo && s.extInfo.copyId,
-      actId: s && s.actId,
+      actId: todayActCode || (s && s.actId) || '',
       strategy: s && s.signInRewardStrategy
     };
   } catch (e) {}
