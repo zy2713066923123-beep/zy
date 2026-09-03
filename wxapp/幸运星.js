@@ -44,6 +44,7 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
  *   --view-ms <ms> 每次浏览模拟时长（默认 30000）
  *   --only <id>    仅处理指定 missionDefId
  *   --no-notify    禁用通知
+ *   --dump         把任务快照与每次领奖尝试落盘到 wxapp/luckystar_dump_<ts>.json（排错用）
  */
 'use strict';
 
@@ -992,11 +993,9 @@ function prizeBase(task) {
  * 因此在首个待领任务上做一次有节制的探测（变体间隔 1.2s），命中后记为 prizePlan，
  * 后续任务直接复用，不再重复探测。
  */
-function prizeVariants(task, stage) {
-  const sc = stage.stageCount != null ? stage.stageCount : null;
-  const mx = pickMissionXId(task);
-  const list = [];
-  const push = (name, delta) => list.push({ name, delta: delta || {} });
+function prizeDeltaTable(sc, mx) {
+  const t = [];
+  const push = (name, delta) => t.push({ name, delta });
   // 与历史真机抓包一致的形态放最前面
   push("默认(count=1)", {});
   if (sc != null) push("+stageCount", { stageCount: sc });
@@ -1007,7 +1006,15 @@ function prizeVariants(task, stage) {
   push("POST", { _method: "POST" });
   push("v1.1", { _version: "1.1" });
   push("旧asac兜底", { _asac: DEFAULT_CONFIG.ASAC.PRIZE_LEGACY });
-  return list;
+  return t;
+}
+function prizeVariants(task, stage) {
+  return prizeDeltaTable(stage.stageCount != null ? stage.stageCount : null, pickMissionXId(task));
+}
+/** 按方案名重建 delta，保证锁定的方案能正确套用到其它任务/阶段上 */
+function prizeDeltaByName(name, task, stage) {
+  const hit = prizeVariants(task, stage).filter((v) => v.name === name);
+  return hit.length ? hit[0].delta : {};
 }
 
 /** 处理单个账号，返回 { ok, done, received, skipped, stars } */
@@ -1143,7 +1150,7 @@ async function runAccount(cookie, opts) {
   // 才把下一阶段置为可领，所以这里循环多轮，直到没有新的可领阶段。
   log.info('--- [阶段B] 领取已完成任务奖励 ---');
   const receivedKeys = new Set();
-  let prizePlan = null;      // 探测到的可用领奖参数形态（delta）
+  let prizePlan = null;      // 探测到的可用领奖参数形态（方案名）
   const dumpList = [];       // --dump 时记录每次领奖尝试
   for (let round = 1; round <= 5; round++) {
     const pending = [];
@@ -1172,7 +1179,7 @@ async function runAccount(cookie, opts) {
       if (dry) { result.skipped++; continue; }
 
       // 首个待领任务做参数形态探测，命中后记为 prizePlan，后续任务直接复用
-      const variants = prizePlan ? [{ name: '已验证方案', delta: prizePlan }] : prizeVariants(task, stage);
+      const variants = prizePlan ? [{ name: prizePlan, delta: prizeDeltaByName(prizePlan, task, stage) }] : prizeVariants(task, stage);
       let ok = false;
       for (let vi = 0; vi < variants.length; vi++) {
         const v = variants[vi];
@@ -1191,7 +1198,7 @@ async function runAccount(cookie, opts) {
           got++;
           if (prize) result.prizes.push(prize);
           if (!prizePlan) {
-            prizePlan = v.delta;
+            prizePlan = v.name;
             log.info(`   [锁定领奖参数形态] ${v.name} → ${JSON.stringify(v.delta)}`);
           }
           ok = true;
