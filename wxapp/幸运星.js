@@ -207,7 +207,17 @@ class EleMtop {
   }
 
   async homepage() {
-    return this.call('mtop.alsc.interact.et.interact.center.homepage', this.commonParams());
+    // 真机参数（抓包 mtl9s4z4i4Z6ltjA）：带 modules/version/channel，不带 accountPlan/locationInfos。
+    // modules 决定服务端返回哪些模块（signIn/cardMission/property 等），缺了可能拿不到签到数据。
+    const data = {
+      bizScene: this.cfg.bizScene,
+      longitude: this.cfg.longitude,
+      latitude: this.cfg.latitude,
+      channel: 'ES0015924020',
+      modules: JSON.stringify(['cardMission', 'contentMission', 'signIn', 'property', 'exchange', 'pinnedMission', 'orderMission', 'mdCard', 'exchangeV2']),
+      version: '1.3.11'
+    };
+    return this.call('mtop.alsc.interact.et.interact.center.homepage', data);
   }
   async querytask() {
     // 真机该接口的 missionCollectionId 是字符串，且额外带 launchChannels:"[]"
