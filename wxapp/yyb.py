@@ -321,8 +321,22 @@ class YYBClient:
             raw = inner["raw"]
         elif isinstance(res, dict) and isinstance(res.get("raw"), dict):
             raw = res["raw"]
+        # code 字段命名不统一：顶层/raw 里可能是 code、phone_code、phoneCode，
+        # 且 raw.data 可能是 JSON 字符串，逐一兼容后仍取不到再递归兜底
+        code_val = ""
+        for holder in (inner, raw):
+            if not isinstance(holder, dict):
+                continue
+            for key in ("code", "phone_code", "phoneCode", "phonecode"):
+                if holder.get(key):
+                    code_val = holder[key]
+                    break
+            if code_val:
+                break
+        if not code_val:
+            code_val = _deep_find_code(res) or ""
         return {
-            "code": str(inner.get("code")) if inner.get("code") else None,
+            "code": str(code_val) if code_val else None,
             "mobile": inner.get("mobile"),
             "masked_phone": inner.get("masked_phone"),
             "encryptedData": inner.get("encryptedData") or inner.get("encrypted_data") or raw.get("encryptedData") or raw.get("encrypted_data"),
@@ -524,6 +538,80 @@ def get_single_phone_encrypted(app_id: str, identifier: str) -> Optional[Dict[st
     except Exception as e:
         print(f"[yyb] 获取手机号加密数据失败 ({identifier}): {e}")
         return None
+
+
+def _deep_find_code(node: Any, min_len: int = 20) -> Optional[str]:
+    """从协议返回的嵌套结构中递归提取 code。
+
+    operateWxData 的返回层级不固定（可能包 data/raw/respJson，且 respJson 是字符串），
+    这里统一递归提取：优先取 code/phoneCode 字段，且长度 >= min_len（手机号 code 较长）。
+    """
+    if isinstance(node, dict):
+        for key in ("code", "phoneCode", "phone_code", "phonecode"):
+            value = node.get(key)
+            if isinstance(value, str) and len(value) >= min_len:
+                return value
+        for value in node.values():
+            found = _deep_find_code(value, min_len)
+            if found:
+                return found
+    elif isinstance(node, list):
+        for item in node:
+            found = _deep_find_code(item, min_len)
+            if found:
+                return found
+    elif isinstance(node, str):
+        text = node.strip()
+        if not text or not text[0] in "{[":
+            return None
+        try:
+            return _deep_find_code(json.loads(text), min_len)
+        except Exception:
+            return None
+    return None
+
+
+def get_single_phone_code(app_id: str, identifier: str, login_type: Optional[str] = None) -> Optional[str]:
+    """智能获取手机号 code（推荐各脚本使用）。
+
+    微信小程序（WMPF）登录的账号通常不支持 getPhoneNumber 端点，需走
+    operateWxData(api_name=webapi_getuserwxphone) 才能拿到手机号 code。
+    这里按登录类型优先选路，并在一条失败时自动回退另一条：
+      1) 非 WMPF：先 /getPhoneNumber，失败再 operateWxData
+      2) WMPF  ：先 operateWxData，失败再 /getPhoneNumber
+    """
+    if not identifier:
+        return None
+
+    lt = normalize_login_type(login_type) if login_type else None
+    is_wmpf = lt == LOGIN_TYPE_WMPF
+
+    def _by_phone_number() -> Optional[str]:
+        return get_single_phone_number(app_id, identifier)
+
+    def _by_operate() -> Optional[str]:
+        try:
+            res = get_single_operate_wx_data(
+                app_id, identifier,
+                {"api_name": "webapi_getuserwxphone", "with_credentials": True},
+            )
+        except Exception as e:
+            print(f"[yyb] operateWxData 获取手机号失败 ({identifier}): {e}")
+            return None
+        code = _deep_find_code(res)
+        if not code:
+            print(f"[yyb] operateWxData 未返回手机号 code ({identifier})")
+        return code
+
+    first, second = (_by_operate, _by_phone_number) if is_wmpf else (_by_phone_number, _by_operate)
+    code = first()
+    if code:
+        return code
+    if is_wmpf:
+        print(f"[yyb] 小程序账号 operateWxData 取手机号失败，回退 getPhoneNumber ({identifier})")
+    else:
+        print(f"[yyb] getPhoneNumber 取手机号失败，回退 operateWxData ({identifier})")
+    return second()
 
 def get_single_operate_wx_data(app_id: str, identifier: str, payload: Optional[Dict[str, Any]] = None) -> Optional[Any]:
     if not identifier:
@@ -731,6 +819,7 @@ builtins.WechatAdapter = WechatAdapter
 builtins.get_single_code = get_single_code
 builtins.get_single_phone_number = get_single_phone_number
 builtins.get_single_phone_encrypted = get_single_phone_encrypted
+builtins.get_single_phone_code = get_single_phone_code
 builtins.get_single_operate_wx_data = get_single_operate_wx_data
 builtins.get_single_user_encrypt_key = get_single_user_encrypt_key
 builtins.get_single_user_info = get_single_user_info
@@ -769,6 +858,7 @@ __all__ = [
     "get_single_code",
     "get_single_phone_number",
     "get_single_phone_encrypted",
+    "get_single_phone_code",
     "get_single_operate_wx_data",
     "get_single_user_encrypt_key",
     "get_single_user_info",

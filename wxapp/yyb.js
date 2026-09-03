@@ -332,8 +332,19 @@ class YYBClient {
         const inner = res?.data || res || {};
         // 部分服务端把 encryptedData/iv 放在 raw 字段里，需兼容提取
         const raw = (inner && typeof inner.raw === 'object' && inner.raw) || (res && typeof res.raw === 'object' && res.raw) || {};
+        // code 字段命名不统一：顶层/raw 里可能是 code、phone_code、phoneCode，
+        // 且 raw.data 可能是 JSON 字符串，逐一兼容后仍取不到再递归兜底
+        let codeVal = '';
+        for (const holder of [inner, raw]) {
+            if (!holder || typeof holder !== 'object') continue;
+            for (const key of ['code', 'phone_code', 'phoneCode', 'phonecode']) {
+                if (holder[key]) { codeVal = holder[key]; break; }
+            }
+            if (codeVal) break;
+        }
+        if (!codeVal) codeVal = _deepFindCode(res) || '';
         return {
-            code: inner.code ? String(inner.code) : null,
+            code: codeVal ? String(codeVal) : null,
             mobile: inner.mobile || null,
             masked_phone: inner.masked_phone || null,
             encryptedData: inner.encryptedData || inner.encrypted_data || raw.encryptedData || raw.encrypted_data || null,
@@ -630,6 +641,64 @@ async function getSinglePhoneEncrypted(appId, identifier) {
     }
 }
 
+// 从协议返回的嵌套结构中递归提取 code。
+// operateWxData 返回层级不固定（可能包 data/raw/respJson，且 respJson 是字符串），
+// 统一递归提取：优先取 code/phoneCode 字段，且长度 >= minLen（手机号 code 较长）。
+function _deepFindCode(node, minLen = 20) {
+    const isStr = typeof node === 'string';
+    if (node && typeof node === 'object') {
+        if (!Array.isArray(node)) {
+            for (const key of ['code', 'phoneCode', 'phone_code', 'phonecode']) {
+                const v = node[key];
+                if (typeof v === 'string' && v.length >= minLen) return v;
+            }
+        }
+        for (const v of Object.values(node)) {
+            const found = _deepFindCode(v, minLen);
+            if (found) return found;
+        }
+        return null;
+    }
+    if (isStr) {
+        const text = node.trim();
+        if (!text || (text[0] !== '{' && text[0] !== '[')) return null;
+        try { return _deepFindCode(JSON.parse(text), minLen); } catch (e) { return null; }
+    }
+    return null;
+}
+
+// 智能获取手机号 code（推荐各脚本使用）。
+// 微信小程序（WMPF）登录的账号通常不支持 getPhoneNumber 端点，需走
+// operateWxData(api_name=webapi_getuserwxphone) 才能拿到手机号 code。
+// 按登录类型优先选路，一条失败自动回退另一条。
+async function getSinglePhoneCode(appId, identifier, loginType = null) {
+    if (!identifier) return null;
+    const lt = loginType ? normalizeLoginType(loginType) : null;
+    const isWmpf = lt === LOGIN_TYPE_WMPF;
+
+    const byPhoneNumber = () => getSinglePhoneNumber(appId, identifier);
+    const byOperate = async () => {
+        try {
+            const res = await getSingleOperateWxData(appId, identifier, { api_name: 'webapi_getuserwxphone', with_credentials: true });
+            const code = _deepFindCode(res);
+            if (!code) console.log(`[yyb] operateWxData 未返回手机号 code (${identifier})`);
+            return code;
+        } catch (e) {
+            console.log(`[yyb] operateWxData 获取手机号失败 (${identifier}): ${e.message || e}`);
+            return null;
+        }
+    };
+
+    const first = isWmpf ? byOperate : byPhoneNumber;
+    const second = isWmpf ? byPhoneNumber : byOperate;
+    const code = await first();
+    if (code) return code;
+    console.log(isWmpf
+        ? `[yyb] 小程序账号 operateWxData 取手机号失败，回退 getPhoneNumber (${identifier})`
+        : `[yyb] getPhoneNumber 取手机号失败，回退 operateWxData (${identifier})`);
+    return await second();
+}
+
 async function getSingleOperateWxData(appId, identifier, payload = null) {
     if (!identifier) return null;
     const client = new YYBClient();
@@ -815,6 +884,7 @@ global.WechatAdapter = WechatAdapter;
 global.getSingleCode = getSingleCode;
 global.getSinglePhoneNumber = getSinglePhoneNumber;
 global.getSinglePhoneEncrypted = getSinglePhoneEncrypted;
+global.getSinglePhoneCode = getSinglePhoneCode;
 global.getSingleOperateWxData = getSingleOperateWxData;
 global.getSingleUserEncryptKey = getSingleUserEncryptKey;
 global.getSingleUserInfo = getSingleUserInfo;
@@ -849,6 +919,7 @@ module.exports = {
     getSingleCode,
     getSinglePhoneNumber,
     getSinglePhoneEncrypted,
+    getSinglePhoneCode,
     getSingleOperateWxData,
     getSingleUserEncryptKey,
     getSingleUserInfo,
