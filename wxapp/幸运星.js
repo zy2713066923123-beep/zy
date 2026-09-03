@@ -791,16 +791,38 @@ function loginResultToCookie(obj) {
 }
 
 /**
+ * 校验登录态是否仍有效（调用首页接口，未登录会返回 FAIL_BIZ_NOT_LOGIN）。
+ * 返回 true 表示有效；false 表示已失效需重新登录。
+ */
+async function isCookieValid(cookie) {
+  try {
+    const m = new EleMtop(cookie);
+    const hp = await m.homepage();
+    const code = retCode(hp.json);
+    return code.startsWith('SUCCESS');
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
  * 取单个 getcode 账号的登录 Cookie。
- * 优先读缓存；缓存失效或取码失败则通过 getCode + wxCodeToElemeCookie 登录。
+ * 优先读缓存；缓存失效（登录态过期）或取码失败则通过 getCode + wxCodeToElemeCookie 重新登录。
  */
 async function getCookieForWxid(wxid) {
   // 1. 读缓存
   const cache = readTokenCache();
   const cached = cache[wxid];
   if (cached && cached.cookie) {
-    console.log(`  [${wxid}] 使用缓存的饿了么登录态`);
-    return cached.cookie;
+    // 1.1 校验缓存登录态是否仍有效，避免一直用失效 Cookie 导致 FAIL_BIZ_NOT_LOGIN
+    const valid = await isCookieValid(cached.cookie);
+    if (valid) {
+      console.log(`  [${wxid}] 使用缓存的饿了么登录态`);
+      return cached.cookie;
+    }
+    console.log(`  [${wxid}] 缓存的登录态已失效，重新登录...`);
+    delete cache[wxid];
+    writeTokenCache(cache);
   }
   // 2. 取码
   if (!getSingleCode) {
