@@ -63,8 +63,10 @@ const DEFAULT_CONFIG = {
   accountPlan: 'HAVANA_COMMON',
   // 经纬度真机是「字符串」形态，locationInfos 内部的 lng/lat 同样是字符串。
   // 这里保持字符串，确保 commonParams 生成的 data 与真机抓包完全同构。
-  longitude: '119.842406',
-  latitude: '31.276809',
+  // 默认取真机领奖成功的坐标（武汉 30.641318,114.272098，抓包 mtlad252tqSIgWso）。
+  // 可用环境变量 ELE_LNG / ELE_LAT 覆盖为各账号常用地址的经纬度。
+  longitude: (process.env.ELE_LNG || '').trim() || '114.272098',
+  latitude: (process.env.ELE_LAT || '').trim() || '30.641318',
   missionCollectionId: 3112,
   // 任务事件上报的风控场景值。来源：App 反编译
   // me/ele/shopdetailv2/header/widget/navigator/i.java#p() -> riskScene = "duobao_external"
@@ -430,6 +432,24 @@ function splitAccounts(raw) {
 function accountName(cookie) {
   const m = new RegExp('USERID=([^;]+)').exec(cookie);
   return m ? ('用户' + m[1]) : ('账号' + crypto.createHash('md5').update(cookie).digest('hex').slice(0, 6));
+}
+
+/** 从环境变量 ELE_GEO_JSON 按账号 USERID 查「常用地址经纬度」，返回 {longitude, latitude} 或 {}。
+ *  ELE_GEO_JSON 格式：{"USERID":{"lng":"114.272098","lat":"30.641318"}, ...}
+ *  这样每个账号可用各自常用地址的经纬度，避免固定坐标触发领奖风控。 */
+function resolveAccountGeo(cookie) {
+  const raw = (process.env.ELE_GEO_JSON || '').trim();
+  if (!raw) return {};
+  try {
+    const map = JSON.parse(raw);
+    const m = new RegExp('USERID=([^;]+)').exec(cookie || '');
+    const uid = m ? m[1] : '';
+    const geo = map[uid];
+    if (geo && geo.lng != null && geo.lat != null) {
+      return { longitude: String(geo.lng), latitude: String(geo.lat) };
+    }
+  } catch (e) {}
+  return {};
 }
 
 /** 读取 WX_ID（微信账号），多账号换行或 & 分隔，支持 wxid#备注 */
@@ -1034,7 +1054,10 @@ function prizeDeltaByName(name, task, stage) {
 /** 处理单个账号，返回 { ok, done, received, skipped, stars } */
 async function runAccount(cookie, opts) {
   const { dry, viewMs, onlyMission, log, dump } = opts;
-  const m = new EleMtop(cookie);
+  // 按账号常用地址覆盖经纬度（环境变量 ELE_GEO_JSON，key=USERID）；未配置则用默认坐标
+  const geoOverride = resolveAccountGeo(cookie);
+  const m = new EleMtop(cookie, geoOverride);
+  if (geoOverride.longitude) log.info(`使用常用地址经纬度: ${geoOverride.longitude}, ${geoOverride.latitude}`);
   const result = { ok: false, done: 0, received: 0, skipped: 0, stars: null, prizes: [] };
 
   // 0. 首页：拿任务/签到/余额
@@ -1222,10 +1245,28 @@ async function runAccount(cookie, opts) {
       if (dry) { result.skipped++; continue; }
 
       if (!diagDone) {
+        // 专门提取所有可能是 instanceId 的字段（含深层），对齐真机领奖请求的 instanceId:61706625
+        const idFields = {};
+        for (const k of Object.keys(task)) {
+          if (/^(id|instanceId|instanceid|taskInstanceId|missionInstId|missionInstanceId|missionXId|missionId|recordId|userTaskId|userMissionId)$/i.test(k)) {
+            idFields[k] = task[k];
+          }
+        }
+        // 深层搜索：stage.sourceAction.id / stage.sourceActionId 等
+        const deepIds = {};
+        try {
+          if (stage.sourceAction && stage.sourceAction.id != null) deepIds['stage.sourceAction.id'] = stage.sourceAction.id;
+          if (stage.sourceActionId != null) deepIds['stage.sourceActionId'] = stage.sourceActionId;
+          if (stage.id != null) deepIds['stage.id'] = stage.id;
+          if (task.actionConfig && task.actionConfig.missionInstanceTriggerType != null) deepIds['task.actionConfig.missionInstanceTriggerType'] = task.actionConfig.missionInstanceTriggerType;
+        } catch (e) {}
+        log.info(`   [诊断-instanceId排查] 任务顶层ID字段: ${JSON.stringify(idFields)}`);
+        log.info(`   [诊断-instanceId排查] 阶段深层ID字段: ${JSON.stringify(deepIds)}`);
+        log.info(`   [诊断-instanceId排查] prizeVariants将生成的ix: ${(() => { const ix = ['instanceId','instanceid','taskInstanceId','missionInstId','id'].map(k=>task[k]).find(v=>v!=null&&v!==''); return ix != null ? ix : 'null(无instanceId变体!)'; })()}`);
         const jt = JSON.stringify(task);
         const js = JSON.stringify(stage);
-        log.info(`   [诊断] 任务JSON: ${jt && jt.length > 1500 ? jt.slice(0, 1500) + '…(截断)' : jt}`);
-        log.info(`   [诊断] 阶段JSON: ${js && js.length > 1200 ? js.slice(0, 1200) + '…(截断)' : js}`);
+        log.info(`   [诊断] 任务JSON: ${jt && jt.length > 3000 ? jt.slice(0, 3000) + '…(截断)' : jt}`);
+        log.info(`   [诊断] 阶段JSON: ${js && js.length > 2000 ? js.slice(0, 2000) + '…(截断)' : js}`);
         diagDone = true;
       }
       // 首个待领任务做参数形态探测，命中后记为 prizePlan，后续任务直接复用
