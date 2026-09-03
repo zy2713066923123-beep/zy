@@ -299,10 +299,18 @@ class EleMtop {
    * count=3（=stageCount）时错误变为 RECEIVE_ALL_ERROR——阶段找对了，只是发奖仍被拒。
    * 因此多阶段任务必须传 count = stageCount。接口版本锁定 1.0（1.1 实测 404）。
    *
-   * 历史真机抓包结论（4 条成功样本 mtl29pwsc2m8JpxO 等，参数同构）：
-   *   accountPlan/bizScene/longitude/latitude/locationInfos + missionCollectionId/missionId/count；
-   * 成功样本一律不带 instanceId，默认仍不带；仅当探测形态「先receivetask」从报名响应
-   * 中拿到 instanceId 时才写入。asac 只放在请求头。
+   * 【2026-09-03 真机领奖抓包 mtlad252tqSIgWso（16:51:33，领到60幸运星）】
+   *   POST /gw/mtop.ele.biz.growth.task.core.receiveprize/1.0/
+   *   Content-Type: application/x-www-form-urlencoded
+   *   data = accountPlan/bizScene/count:1/instanceId:61706625(=任务id字段,数字)/
+   *          latitude/longitude/locationInfos/missionCollectionId:3112/missionId:45226015
+   *   → ret: ["SUCCESS::接口调用成功"]
+   *
+   * 关键结论：真机领奖请求**明确带 instanceId**（数字，来自 querytask 响应里任务的 id 字段），
+   * 且为 POST。之前"成功样本一律不带 instanceId"的结论已被推翻——那批样本可能是不同任务类型。
+   * 现在 prizeVariants 已加入 id 字段提取，prizeDeltaTable 把 instanceId+POST 变体放最前面。
+   *
+   * asac 只放在请求头。
    *
    * 探测开关（均以 _ 开头，不会进 data），供 prizeVariants() 自动枚举：
    *   _pre      先调 receivetask 报名并尝试取 instanceId
@@ -995,11 +1003,15 @@ function prizeBase(task, stage) {
 function prizeDeltaTable(sc, mx, ix) {
   const t = [];
   const push = (name, delta) => t.push({ name, delta });
+  // 【2026-09-03 真机抓包 mtlad252tqSIgWso】领奖请求（mtop.ele.biz.growth.task.core.receiveprize）
+  // 明确带 instanceId（数字，= querytask 响应里任务的 id 字段），且为 POST。
+  // 把最接近真机形态的变体放最前面优先尝试，命中后后续任务直接复用。
+  if (ix != null) push("count=阶段号+instanceId+POST", { instanceId: ix, _method: 'POST' });
+  if (ix != null) push("count=阶段号+instanceId", { instanceId: ix });
   // 实测：count 决定阶段，阶段号对了才有资格谈发奖
   push("count=阶段号", {});
   push('count=阶段号+先receivetask', { _pre: 'receivetask' });
   if (mx != null) push("count=阶段号+missionXId", { missionXId: mx });
-  if (ix != null) push("count=阶段号+instanceId", { instanceId: ix });
   if (sc != null) push("count=阶段号+stageCount字段", { stageCount: sc });
   push("count=阶段号+POST", { _method: "POST" });
   push("count=阶段号+旧asac兜底", { _asac: DEFAULT_CONFIG.ASAC.PRIZE_LEGACY });
@@ -1008,7 +1020,9 @@ function prizeDeltaTable(sc, mx, ix) {
   return t;
 }
 function prizeVariants(task, stage) {
-  const ix = ['instanceId', 'instanceid', 'taskInstanceId', 'missionInstId'].map((k) => task[k]).find((v) => v != null && v !== '');
+  // querytask 响应里任务的实例ID字段名是 id（数字），不是 instanceId。
+  // 之前漏了 id 字段，导致带 instanceId 的变体永远不会被生成——这是领奖失败的根因。
+  const ix = ['instanceId', 'instanceid', 'taskInstanceId', 'missionInstId', 'id'].map((k) => task[k]).find((v) => v != null && v !== '');
   return prizeDeltaTable(stage.stageCount != null ? stage.stageCount : null, pickMissionXId(task), ix != null ? ix : null);
 }
 /** 按方案名重建 delta，保证锁定的方案能正确套用到其它任务/阶段上 */
