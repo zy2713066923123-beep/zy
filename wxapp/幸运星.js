@@ -73,8 +73,10 @@ const DEFAULT_CONFIG = {
   longitude: (process.env.ELE_LNG || '').trim() || '114.272098',
   latitude: (process.env.ELE_LAT || '').trim() || '30.641318',
   missionCollectionId: 3112,
-  // 任务事件上报的风控场景值。来源：App 反编译
-  // me/ele/shopdetailv2/header/widget/navigator/i.java#p() -> riskScene = "duobao_external"
+  // 任务事件上报的 riskScene 回落值。正常路径由 pickRiskScene(task) 取任务自身的
+  // actionConfig.actionValue.scenceCode；这里的 duobao_external 来自 App 反编译
+  // me/ele/shopdetailv2/header/widget/navigator/i.java#p()，属于店铺多宝场景，
+  // 仅在任务配置里读不到 scenceCode 时兜底使用。
   riskScene: 'duobao_external',
   client: 'eleme',
   ASAC: {
@@ -320,8 +322,14 @@ class EleMtop {
    *   - triggerType 真机为 ASYNC；
    *   - 真机不带 latitude/longitude/collectionId/missionId。
    * 仍保留 missionId/collectionId/经纬度：真机那笔是「二楼下拉」场景，bizScene 是业务场景标识
-   * 而不是任务号，互动中心任务的 bizScene/riskScene 映射抓包里没有样本，去掉 missionId 会
-   * 让服务端完全无法定位任务，所以这里按「真机形态 + 任务定位字段」的并集发送。
+   * 而不是任务号，去掉 missionId 会让服务端完全无法定位任务，所以这里按「真机形态 + 任务定位
+   * 字段」的并集发送。
+   *
+   * 【2026-09-04 riskScene 定论】riskScene 是场景专属值（i.java=duobao_external，
+   * c.java=ElemeInteractiveSecondFloorHandlPullEnter），互动中心任务不能复用这两个。
+   * 现由调用方经 pickRiskScene(task) 传入任务自身的 actionConfig.actionValue.scenceCode
+   * （inter_change / commercial_click 等），cfg.riskScene 仅作取不到时的回落。
+   *
    * 注意：真机这一笔带 wua 安全参数，H5 通道无法生成，因此 SUCCESS 也可能只是空跑
    * （data 为空对象，服务端不回执任何任务状态）。
    */
@@ -1129,6 +1137,28 @@ function pickMissionXId(task) {
   return null;
 }
 
+/**
+ * 取任务自身的风控场景值（event.trigger 的 riskScene）。
+ *
+ * 【2026-09-04 源码+抓包交叉定论】
+ * riskScene 是「场景专属」值，不是全局常量：
+ *   i.java#p()  riskScene = "duobao_external"                       ← 店铺详情多宝场景
+ *   c.java#e()  riskScene = "ElemeInteractiveSecondFloorHandlPullEnter" ← 首页二楼下拉场景
+ * 两处都写死自己场景的值，所以互动中心任务不可能复用 duobao_external。
+ *
+ * 真机 querytask 响应里，每个 THIRD 任务的 actionConfig.actionValue 都带 scenceCode
+ * （阿里侧拼写就是 scenceCode，不是 sceneCode），且与任务语义严格对应：
+ *   missionDefId 44914003「商业化-互动/去点击3个店铺」→ commercial_click
+ *   missionDefId 45226007「二方换量-淘宝视频tab2」    → inter_change
+ *   missionDefId 45226015「二方换量-闲鱼」            → inter_change
+ * 这是任务平台为该任务登记的事件场景编码，也是目前唯一有据可依的 riskScene 来源，
+ * 因此优先按任务取，取不到再回落到全局默认值。
+ */
+function pickRiskScene(task) {
+  const av = (task.actionConfig && task.actionConfig.actionValue) || {};
+  return av.scenceCode || av.sceneCode || null;
+}
+
 /** 领奖请求的基础参数（随任务变化） */
 function prizeBase(task, stage) {
   // count 实测是服务端用来定位阶段的字段，多阶段任务必须传 stageCount
@@ -1398,14 +1428,31 @@ async function runAccount(cookie, opts) {
     log.info(`▶ 完成 [${name}] (${task.missionDefId}) [${channel}]`);
     if (dry) { result.skipped++; continue; }
 
-    const trigger = async () => {
+    // event.trigger 有两套官方范式，差别只在 triggerType 与是否带任务标识：
+    //   i.java#p()（店铺多宝，带 missionId/collectionId/missionXId）→ triggerType = "SYNC"
+    //   c.java#e()（首页二楼，仅靠 riskScene+bizScene 反查任务）    → triggerType = "ASYNC"
+    // 幸运星任务是「带 missionId 的具体任务完成」，性质对应 i.java，故先按 SYNC 上报；
+    // SYNC 会让服务端同步结算（真机 ASYNC 那笔响应 data 为空 {}，拿不到任何结算回执），
+    // 不成功再退回 ASYNC 兜底，两种范式都试过才算这个任务上报失败。
+    const trigger = async (triggerType) => {
       const tr = await m.eventTrigger({
         missionId: task.missionDefId,
         collectionId: task.missionCollectionId || undefined,
-        missionXId: pickMissionXId(task)
+        missionXId: pickMissionXId(task),
+        riskScene: pickRiskScene(task),
+        triggerType
       });
       const c = retCode(tr.json);
-      log.info(`   trigger: ${c}${c.startsWith('SUCCESS') ? ' (成功)' : ''}`);
+      log.info(`   trigger[${triggerType}]: ${c}${c.startsWith('SUCCESS') ? ' (成功)' : ''}`);
+      return c;
+    };
+
+    const triggerBoth = async () => {
+      let c = await trigger('SYNC');
+      if (!c.startsWith('SUCCESS')) {
+        await sleep(600);
+        c = await trigger('ASYNC');
+      }
       return c;
     };
 
@@ -1424,11 +1471,11 @@ async function runAccount(cookie, opts) {
           log.info('   [熔断] pageview 被风控拦截(405)，本账号后续 PAGEVIEW 任务改走 trigger，不再重试 pageview');
         }
         await sleep(600);
-        code = await trigger();
+        code = await triggerBoth();
       }
     } else {
       if (channel === 'PAGEVIEW') log.info('   [跳过 pageview] 已熔断，直接走 trigger');
-      code = await trigger();
+      code = await triggerBoth();
     }
     if (code.startsWith('SUCCESS')) result.done++;
     await sleep(800);
