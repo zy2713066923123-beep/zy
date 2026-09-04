@@ -61,15 +61,16 @@ require('events').defaultMaxListeners = 50;
 
 const yyb = require('./yyb.js');
 const getSingleCode = yyb.getSingleCode;
+const getSingleUserEncryptKey = yyb.getSingleUserEncryptKey;
 
 const ENV_NAME = 'REELIX_AUTH';
 const APPID = 'wx82b9bc71fff22c52';
 const BASE_URL = 'https://live.mkjsy.com/reelix/api/v1/app';
 const WECHAT_SERVER = String(process.env.WX_SERVER || process.env.YYB_SERVER || process.env.WECHAT_SERVER || process.env.YINGYONGBAO_SERVER || '').replace(/\/$/, '');
 const REELIX_INVITE_CODE = String(process.env.REELIX_INVITE_CODE || 'JEL3OH').trim();
-const DEFAULT_BUILD = '2026-09-04 09:00:00';
+const DEFAULT_BUILD = '2026-08-27 16:03:30';
 const DEFAULT_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.75(0x18004b47) NetType/4G Language/zh_CN';
-const REFERER = 'https://servicewechat.com/wx82b9bc71fff22c52/16/page-frame.html';
+const REFERER = 'https://servicewechat.com/wx82b9bc71fff22c52/43/page-frame.html';
 const CACHE_DIR = path.join(process.cwd(), '.cache');
 const PROTOCOL_CACHE_FILE = path.join(CACHE_DIR, 'reelix_protocol_cache.json');
 const DO_SIGNIN = envFlag('REELIX_DO_SIGNIN', true);
@@ -444,28 +445,17 @@ async function fetchWxLoginCode(account) {
 }
 
 async function fetchWxUserKey(account) {
-  if (account.protocolType === 'yyb') {
-    log(`[${account.remark}] YYB 协议不支持自动获取加密 key，请配置 REELIX_USER_KEY`);
-    return null;
-  }
-  const resp = await wechatApi('/api/v1/wx/app/operate/wxdata', {
-    Wxid: account.protocolId,
-    Appid: APPID,
-    Opt: 1,
-    Data: JSON.stringify({
-      api_name: 'webapi_getuserencryptkey',
-      data: {},
-      with_credentials: true,
-    }),
-  });
+  const resp = await getSingleUserEncryptKey(APPID, account.identifier);
   const decoded = decodeMaybeJsonBase64(resp);
   const encryptKey = findField(decoded, ['encryptkey', 'encrypt_key']);
-  const iv = findField(decoded, ['iv']);
+  let iv = findField(decoded, ['iv']);
   const version = findField(decoded, ['version', 'key_version']) || 1;
-  if (!encryptKey || !iv) {
-    log(`[${account.remark}] 未从协议服务提取到 encryptKey/iv，加密任务会跳过`);
+  if (!encryptKey) {
+    log(`[${account.remark}] 未从协议服务提取到 encryptKey，加密任务会跳过`);
     return null;
   }
+  // AES-CBC 常见 iv=key 的兼容（与习酒.py 一致）
+  if (!iv) iv = encryptKey;
   return { encryptKey: String(encryptKey), iv: String(iv), version: Number(version || 1) };
 }
 

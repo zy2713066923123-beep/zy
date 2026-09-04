@@ -268,12 +268,19 @@ class EleMtop {
   async homepageResource() {
     return this.homepage({ cpnOnly: true });
   }
-  async querytask() {
+  async querytask(opt) {
     // 真机该接口的 missionCollectionId 是字符串，且额外带 launchChannels:"[]"
-    return this.call('mtop.ele.biz.growth.task.core.querytask', this.commonParams({
+    const o = opt || {};
+    const data = {
       missionCollectionId: String(this.cfg.missionCollectionId),
       launchChannels: '[]'
-    }));
+    };
+    // 真机点「领取奖励」前会先单查该任务拿最新实例，抓包 mtmbo7qxRQI6uOpn 的形态是
+    // "missionIds":"[47854001]"（字符串化的数组），响应里的 id 就是领奖用的 instanceId
+    if (o.missionIds && o.missionIds.length) {
+      data.missionIds = JSON.stringify(o.missionIds.map((x) => Number(x)));
+    }
+    return this.call('mtop.ele.biz.growth.task.core.querytask', this.commonParams(data));
   }
   /**
    * 浏览类任务上报。
@@ -1096,56 +1103,83 @@ function taskProgress(task) {
   };
 }
 
+/** 阶段奖励已到账的 rewardStatus 取值 */
+const STAGE_RECEIVED_RS = ['SUCCESS', 'SUCCEED', 'RECEIVED', 'HAVERECEIVED'];
+function stageRewardStatus(st) {
+  return String(st && st.rewardStatus != null ? st.rewardStatus : '').toUpperCase();
+}
+/** 该档奖励是否已经到账 */
+function isStageReceived(st) {
+  return STAGE_RECEIVED_RS.indexOf(stageRewardStatus(st)) !== -1;
+}
+
 /**
  * 取出「已完成但奖励未领」的阶段。
  *
- * 【2026-09-04 抓包定论：这里是「从来不自动领奖」的真正根因】
- * 旧实现把 missionStageDTOS 当成了「用户进度明细」，它其实是**阶段配置定义**——
- * 每档只有 stageCount + sourceAction（发奖动作定义，generateType=MANUAL）：
- *   未完成态下 missionStageDTOS[].status 恒为 "RUNNING"（= 该档配置生效中），
- *   rewardStatus 恒为 "TODO"；邀请助力任务 10 个档位全部是这两个值。
- * 所以 `st.status === 'FINISH'` 永远不成立；而旧兜底又要求 `!list.length`
- * （阶段明细为空），可 missionStageDTOS 从来不为空 —— 两条路都是死路，
- * 于是无论真机上摆着几个「领取奖励」按钮，脚本一律打印「无待领取奖励」。
+ * 【2026-09-04 抓包定论：这里就是「一个奖励都没自动领到」的根因】
+ * 对同一任务（missionId 47854001 快手，单档）在 App 内手动领奖前后各抓一次单任务
+ * querytask（mtmbo7qxRQI6uOpn），逐字段比对结果是：领奖成功后
+ *   status:"FINISH" / receiveStatus:"HAVERECEIVED" / stage.count:1 /
+ *   preStage.count:1 / nextStageCount:1
+ * 这些字段**全都不变**，唯一变化的是 missionStageDTOS[0].rewardStatus："TODO" → "SUCCESS"。
  *
- * 改为按真机语义判定：真机成功领奖那笔（missionId 45226015 闲鱼，单档）
- * count:1 正是 nextStageCount，故主判定 = stage.count >= nextStageCount。
+ * 所以旧实现的主判定 `stage.count >= nextStageCount` 对单档任务在领完之后**永远成立**：
+ * 每轮都把十几个早就领过的任务重新列为「可领 1(progress)」，receiveprize 必然回
+ * RECEIVE_MISSION_REWARD_TARGET_HAD_RECEIVE_ERROR::领取奖励奖励已全部领奖
+ * （抓包 mtmbo7v0QQpfqjC1 / mtmbo7vf5FM5XJ39 两笔重复点击就是这个码），
+ * 表现即用户看到的「还是没有自动领取」。
+ * 另外 receiveStatus 的语义是「任务是否已报名」（TORECEIVE 待报名 / HAVERECEIVED 已报名），
+ * 与奖励是否到账无关，旧判定4 拿它当已领标记同样是错的。
+ *
+ * 正确判据只有 missionStageDTOS[].rewardStatus：
+ *   SUCCESS      已到账 → 必须跳过
+ *   TODO / INIT  待领（未达门槛时也是 TODO，故须配合 stage.count >= stageCount）
+ *   FAIL         上一次发奖失败留下的痕迹，**重领就能成功**，是最不该漏掉的一档
+ *
+ * 【2026-09-04 第二批抓包补充证据（proxypin_waimai-guideeleme，02:24:14~02:24:40）】
+ * 全量 querytask 里 44920003(飞猪) 明明是 [1:FAIL]，App 紧接着就对它发 receiveprize，
+ * 返回 SUCCESS::接口调用成功 + 60 幸运星，再单查该任务已变 [1:SUCCESS]。
+ * 同一份快照里这类 FAIL 档共 8 个（45226007/45226015/47854001/44920003/47908001/
+ * 47846001/47774001/47780001），全是能领到手的奖励，绝不能当「发奖失败无救」跳过。
+ * 同时再次确证 receiveStatus 与奖励无关：45474001 在 FINISH/TORECEIVE（未报名）
+ * 状态下照样领奖成功。
  */
 function receivableStages(task) {
   const list = Array.isArray(task.missionStageDTOS) ? task.missionStageDTOS : [];
-  const byCount = new Map();
-  for (const st of list) {
-    const sc = st.stageCount != null ? Number(st.stageCount) : 1;
-    if (!byCount.has(sc)) byCount.set(sc, st);
-  }
+  const p = taskProgress(task);
   const out = [];
   const seen = new Set();
   const add = (sc, st, why) => {
     const key = sc != null ? Number(sc) : 1;
     if (!isFinite(key) || seen.has(key)) return;
     seen.add(key);
-    const base = st || byCount.get(key) || { stageCount: key, rewards: [] };
+    const base = st || { stageCount: key, rewards: [] };
     out.push(Object.assign({}, base, { stageCount: key, _why: why }));
   };
 
-  const p = taskProgress(task);
-  // 判定1（主）：累计进度已达下一档门槛。领完一档后服务端会把 nextStageCount 往后推，
-  // 全部领完则 nextStageCount > cur 或不再下发，天然不会重复领。
-  if (p.cur != null && p.next != null && p.cur >= p.next) add(p.next, byCount.get(p.next), 'progress');
-  // 判定2：阶段明细被服务端显式改写成完成态（部分任务类型会下发）
-  for (const st of list) {
-    const rs = String(st.rewardStatus == null ? 'TODO' : st.rewardStatus).toUpperCase();
-    if (isDoneState(st.status) && (rs === 'TODO' || rs === 'INIT')) {
-      add(st.stageCount != null ? Number(st.stageCount) : 1, st, 'stage-state');
+  if (list.length) {
+    // 主判定：逐档比对「门槛是否已达」×「该档奖励是否已到账」
+    for (const st of list) {
+      const sc = st.stageCount != null ? Number(st.stageCount) : 1;
+      if (!isFinite(sc)) continue;
+      if (isStageReceived(st)) continue;             // ← 旧实现漏掉的一步
+      // 门槛已达：进度到位；或该档被服务端显式置为完成态；或进度字段缺失但任务顶层已完成
+      const reached = (p.cur != null && p.cur >= sc) || isDoneState(st.status) ||
+        (p.cur == null && isDoneState(task.status));
+      if (!reached) continue;
+      const rs = stageRewardStatus(st);
+      // FAIL 不是「无救」，而是上次发奖失败、重领即可成功（见函数头第二批抓包证据）
+      add(sc, st, rs === 'FAIL' ? 'fail可重领' : (rs ? rs.toLowerCase() : 'todo'));
     }
+    return out.sort((a, b) => Number(a.stageCount) - Number(b.stageCount));
   }
-  // 判定3：任务顶层已完成且未领
+
+  // 兜底：cardMission 等精简结构不下发 missionStageDTOS，只能看顶层进度。
+  // 这种结构分不清已领/未领，因此只在任务明确处于「已完成且未报名领取」时才试，避免空刷。
   if (isDoneState(task.status) && task.receiveStatus === 'TORECEIVE') {
     add(p.next != null ? p.next : (p.final != null ? p.final : 1), null, 'task-state');
-  }
-  // 判定4：已刷满终档但 nextStageCount 没下发
-  if (!out.length && p.cur != null && p.final != null && p.cur >= p.final && task.receiveStatus !== 'HAVERECEIVED') {
-    add(p.final, byCount.get(p.final), 'final');
+  } else if (p.cur != null && p.next != null && p.cur >= p.next && task.receiveStatus === 'TORECEIVE') {
+    add(p.next, null, 'progress');
   }
   return out;
 }
@@ -1156,6 +1190,9 @@ function taskBrief(task) {
   const ac = task.actionConfig || {};
   const av = ac.actionValue || {};
   const recv = receivableStages(task);
+  // 各档奖励状态是判断「已领 / 待领」的唯一依据，必须进快照
+  const rsList = (Array.isArray(task.missionStageDTOS) ? task.missionStageDTOS : [])
+    .map((st) => (st.stageCount != null ? st.stageCount : 1) + ':' + (stageRewardStatus(st) || '-'));
   return [
     String(task.missionDefId),
     (task.name || task.showTitle || '-').slice(0, 16),
@@ -1164,6 +1201,8 @@ function taskBrief(task) {
     'status=' + (task.status || '-'),
     'recv=' + (task.receiveStatus || '-') + '/' + (task.receiveType || '-'),
     'progress=' + (p.cur != null ? p.cur : '-') + '→' + (p.next != null ? p.next : '-') + '/' + (p.final != null ? p.final : '-'),
+    'rs=' + (rsList.length ? rsList.slice(0, 4).join(',') + (rsList.length > 4 ? '…' : '') : '-'),
+    'iid=' + (task.id != null ? task.id : '-'),
     recv.length ? '【可领 ' + recv.map((s) => s.stageCount + '(' + s._why + ')').join(',') + '】' : ''
   ].filter(Boolean).join(' ');
 }
@@ -1260,10 +1299,13 @@ function pickRiskScene(task) {
 
 /** 领奖请求的基础参数（随任务变化） */
 function prizeBase(task, stage) {
+  // 真机那笔成功的领奖里 missionId / count / missionCollectionId 全是数字（不是字符串），
+  // 这里统一转数字与之对齐；转不出数字才保留原值。
+  const num = (v) => { const n = Number(v); return isFinite(n) ? n : v; };
   // count 实测是服务端用来定位阶段的字段，多阶段任务必须传 stageCount
   const sc = stage && stage.stageCount != null ? stage.stageCount : null;
-  const base = { missionId: task.missionDefId, count: sc != null ? sc : 1 };
-  if (task.missionCollectionId != null && task.missionCollectionId !== '') base.missionCollectionId = task.missionCollectionId;
+  const base = { missionId: num(task.missionDefId), count: sc != null ? num(sc) : 1 };
+  if (task.missionCollectionId != null && task.missionCollectionId !== '') base.missionCollectionId = num(task.missionCollectionId);
   return base;
 }
 
@@ -1275,14 +1317,27 @@ function prizeBase(task, stage) {
  *   {"accountPlan":"HAVANA_COMMON","bizScene":"interact_center","count":1,
  *    "instanceId":61706625,"latitude":"30.641318","locationInfos":"[…]",
  *    "longitude":"114.272098","missionCollectionId":3112,"missionId":45226015}
+ *
+ * 【2026-09-04 第二批抓包：instanceId 是可选的，不是必填】
+ * 同一轮里两笔 receiveprize 都成功，但参数形态不同：
+ *   02:24:14  missionId:44920003  count:1  instanceId:61529892   → SUCCESS + 60幸运星
+ *   02:24:37  missionId:45474001  count:1  **完全不带 instanceId** → SUCCESS + 60幸运星
+ * 差别来自 querytask：44920003 早先发奖失败过，任务对象上留着 id=61529892；
+ * 45474001 刚完成、id 还是 null，客户端没东西可传就不传，服务端照样能定位发奖，
+ * 领奖成功后它的 id 才变成 61533458。可见 id 是「发奖实例ID」，领奖成功后才生成。
+ * 所以变体表必须同时保留「带 instanceId」和「不带 instanceId」两种真机形态，
+ * 且 task.id 为 null 时直接用后者（下方 push 顺序已按此安排）。
+ * 另外两笔都是单档任务、count 都是 1，多档任务的 count 语义仍无样本，靠变体兜底。
  *   → SUCCESS，到账 60 幸运星
  * 其中 missionId = querytask 的 missionDefId，count = 阶段的 stageCount，
- * 其余字段 commonParams() 已覆盖。唯一拿不到的是 instanceId：
- * 已逐字节通读真机 querytask 响应（mtm7vju4HnIQ9TwV，15703B）与 homepage 响应
- * （mtm7vju80fs5bisx，8197B），**两者都不含任何 instanceId 字段**，说明 instanceId 是
- * 任务实例被创建后才存在的服务端 ID，H5 通道没有下发入口。
+ * 其余字段 commonParams() 已覆盖。
  *
- * 因此变体按「维度」分三类，配合调用侧按错误码早停，避免无意义地连发 8 次被拒请求：
+ * 【instanceId 已定案】不是「H5 拿不到的服务端隐藏 ID」，就是 querytask 里任务对象的裸
+ * `id` 字段：单任务查询（mtmbo7qxRQI6uOpn，"missionIds":"[47854001]"）响应 id:61727655，
+ * 与随后那两笔领奖请求的 instanceId:61727655 完全一致。所以 task.id 是首选候选，
+ * 深搜结果只作兜底。
+ *
+ * 变体按「维度」分三类，配合调用侧按错误码早停，避免无意义地连发 8 次被拒请求：
  *   shape —— 真机形态本身（带/不带 instanceId）
  *   risk  —— 只改 asac 风控场景值。RECEIVE_ALL_ERROR 表示服务端已定位到阶段、
  *            是发奖(UPP)环节失败，此时改业务参数没有意义，只有风控维度值得换。
@@ -1302,17 +1357,18 @@ function prizeDeltaTable(sc, mx, ix) {
   if (mx != null) push('带missionXId', { missionXId: mx });
   if (sc != null) push('带stageCount字段', { stageCount: sc });
   push('GET兜底', { _method: 'GET' });
-  if (sc == null || sc === 1) push('count=1(历史形态)', { count: 1 });
+  // 真机两笔成功领奖（都是单档任务）传的都是 count:1，不带 stageCount；多档任务没抓到样本，
+  // 所以基础参数里 count=stageCount 只是推断，必须保留 count=1 兜底。sc===1 时二者等价，跳过。
+  if (sc !== 1) push('count=1(真机单档实测形态)', { count: 1 });
   return t;
 }
 const ID_KEY_RE = /^(instance|missionInstance|missionInst|taskInstance|userMission|userTask|record|missionRecord)Id$/i;
 /**
- * 有界递归搜集「可能是任务实例 ID」的字段。
+ * 有界递归搜集「可能是任务实例 ID」的字段，作为 task.id 的兜底。
  *
- * 真机领奖必带 instanceId:61706625，而**未完成态**的 querytask 响应里不存在该字段。
- * 合理推断：实例是任务完成后服务端才创建的，完成态下才会随任务下发，且可能嵌在
- * stage / extInfo / ext / missionInstance 等任意层级。这里递归捡出来，谁对用谁。
- * 只认纯数字（≥5 位）值，避免把 UUID/spm 之类误当 ID。
+ * 领奖真正要的 instanceId 已确证等于任务对象的裸 `id`（见 prizeDeltaTable 注释），
+ * 这里不把裸 `id` 纳入正则 —— 否则 rewards[].id / sourceAction.id 等配置 ID 会被
+ * 大量误捞成候选。只认精确的实例类字段名 + 纯数字（≥5 位）值。
  */
 function deepPickIds(root, maxDepth) {
   const limit = maxDepth == null ? 6 : maxDepth;
@@ -1337,7 +1393,7 @@ function deepPickIds(root, maxDepth) {
   walk(root, 0, '');
   return out;
 }
-/** instanceId 候选值（按可信度排序，顶层精确字段名优先） */
+/** instanceId 候选值（按可信度排序：task.id 已抓包确证，排第一） */
 function prizeInstanceIds(task, stage) {
   const out = [];
   const push = (v) => {
@@ -1346,7 +1402,7 @@ function prizeInstanceIds(task, stage) {
     if (!isFinite(n) || out.indexOf(n) !== -1) return;
     out.push(n);
   };
-  for (const k of ['instanceId', 'instanceid', 'missionInstanceId', 'missionInstId', 'taskInstanceId', 'id']) push(task[k]);
+  for (const k of ['id', 'instanceId', 'instanceid', 'missionInstanceId', 'missionInstId', 'taskInstanceId']) push(task[k]);
   for (const hit of deepPickIds(task)) push(hit.value);
   if (stage) for (const hit of deepPickIds(stage)) push(hit.value);
   return out;
@@ -1554,6 +1610,18 @@ async function runAccount(cookie, opts) {
     return fresh;
   };
 
+  // 单任务刷新：领奖前拿该任务最新的 id(=instanceId) 与各档 rewardStatus。
+  // 真机点「领取奖励」前就是先发这一笔（抓包 mtmbo7qxRQI6uOpn）再发 receiveprize。
+  const fetchTask = async (missionDefId) => {
+    try {
+      const r = await m.querytask({ missionIds: [missionDefId] });
+      if (!retCode(r.json).startsWith('SUCCESS')) return null;
+      const list = (r.json.data && r.json.data.mlist) || [];
+      for (const t of list) if (String(t.missionDefId) === String(missionDefId)) return t;
+    } catch (e) {}
+    return null;
+  };
+
   // 领奖流程的共享状态（harvest 内部读写，必须在首次调用前初始化）
   const receivedKeys = new Set();  // 已真正领到的阶段，永久去重
   let prizePlan = null;            // 探测到的可用领奖参数形态（方案名）
@@ -1586,13 +1654,20 @@ async function runAccount(cookie, opts) {
     for (const t of skips) log.info(`   ○ [${t.name || t.showTitle || t.missionDefId}] ${skipReason(t)}`);
   }
   // ── PAGEVIEW 熔断 ───────────────────────────────────────────────────────────
-  // 【2026-09-04 抓包定论】真机全量抓包里**不存在** event.pageview 这个接口调用：
-  // PAGEVIEW 类任务是靠 UT 埋点（h-adashx.ut.ele.me/upload，spm a2ogi.bx1500380）
-  // 被动结算的，App 从来不主动调 pageview。脚本走 /h5/ 主动调它，缺 x-sign/x-mini-wua/wua
-  // 设备签名，必然被风控判为「405::行为受限」——上一轮 25 个任务 25 次 405 就是这个原因。
-  // 连续对同一账号刷 25 次被拦请求既无意义、又会抬高账号风险分，因此第一次命中 405 就熔断，
-  // 之后该账号所有 PAGEVIEW 任务直接走 event.trigger，不再重复触发风控。
-  // 可用 ELE_PAGEVIEW=0 彻底关闭 pageview 尝试（推荐长期挂机时设成 0）。
+  // 【2026-09-04 第二批抓包更正】此前这里写的「真机全量抓包里不存在 event.pageview，
+  // App 从来不主动调它」是错的：本批 waimai-guide 抓包 02:24:16 那一笔就是
+  //   POST /gw/mtop.ele.biz.growth.task.event.pageview/1.1/
+  //   {actionCode:"PAGEVIEW", missionId:45474001, collectionId:3112, sync:true, pageFrom:"a2ogi.bx1500380"}
+  // 返回 SUCCESS::接口调用成功，紧接着 45474001 就从 RUNNING/cur=0 变成 FINISH/cur=1，
+  // 21 秒后领奖成功拿到 60 幸运星。也就是说 pageview 是真机在用的正规完成通道。
+  //
+  // 脚本侧仍会遇到 405::行为受限，原因不在接口本身而在通道：真机走 App 的
+  // /gw/ + MTOPSDK 设备签名（x-sign / x-mini-wua / x-sgext / x-umt / x-devid，本批已逐个核对），
+  // 脚本只有 /h5/ + token 签名，凑不出这些头，风控就把同一个 API 判成行为受限。
+  // 因此保留熔断：第一次命中 405 就停掉本账号后续 pageview，改走 event.trigger，
+  // 避免对同一账号连刷几十次被拦请求、白抬风险分。
+  // pageview 本身值得每轮试一次（成功即省掉 trigger 的猜参数），故默认开启；
+  // 只有在确认本账号长期必被 405 时才需要 ELE_PAGEVIEW=0 关掉。
   const pageviewEnabled = (process.env.ELE_PAGEVIEW || '').trim() !== '0';
   let pageviewBlocked = !pageviewEnabled;
   if (!pageviewEnabled && nPv) log.info('  已按 ELE_PAGEVIEW=0 跳过 pageview，PAGEVIEW 任务直接走 trigger');
@@ -1684,7 +1759,9 @@ async function runAccount(cookie, opts) {
       log.info(`  第 ${round} 轮可领取: ${pending.length}`);
 
       let got = 0;
-      for (const { task, stage } of pending) {
+      for (const item of pending) {
+        let task = item.task;
+        let stage = item.stage;
         const name = task.name || task.showTitle || ('任务' + task.missionDefId);
         const sc = stage.stageCount != null ? stage.stageCount : 1;
         const reward = (stage.rewards || [])[0];
@@ -1693,11 +1770,30 @@ async function runAccount(cookie, opts) {
         tried.add(stageKey(task, stage));
         if (dry) { result.skipped++; continue; }
 
+        // 领奖前单查一次：全量快照会过期（本轮上报、上一档领取都会改状态），
+        // 这里同时拿到最新的 id(=instanceId) 和该档 rewardStatus，已到账就直接跳过，
+        // 不再白发一笔必定回 …HAD_RECEIVE_ERROR 的请求。
+        const fresh = await fetchTask(task.missionDefId);
+        if (fresh) {
+          const flist = Array.isArray(fresh.missionStageDTOS) ? fresh.missionStageDTOS : [];
+          const cur = flist.filter((s) => Number(s.stageCount != null ? s.stageCount : 1) === Number(sc));
+          if (cur.length && isStageReceived(cur[0])) {
+            log.info(`   [跳过] 单查确认该档奖励已到账 rewardStatus=${stageRewardStatus(cur[0])}`);
+            receivedKeys.add(stageKey(task, stage));
+            await sleep(600);
+            continue;
+          }
+          const hit = receivableStages(fresh).filter((s) => Number(s.stageCount) === Number(sc));
+          task = fresh;
+          if (hit.length) stage = hit[0];
+          if (task.id != null) log.info(`   [单查] instanceId=${task.id} rewardStatus=${cur.length ? (stageRewardStatus(cur[0]) || '-') : '-'}`);
+        }
+
         if (!diagDone) {
-          // 对齐真机领奖请求的 instanceId:61706625 —— 递归把所有像「任务实例ID」的字段捞出来
+          // 对齐真机领奖请求的 instanceId —— 递归把所有像「任务实例ID」的字段捞出来
           const hits = deepPickIds(task).concat(deepPickIds(stage).map((h) => ({ path: 'stage.' + h.path, value: h.value })));
           const cands = prizeInstanceIds(task, stage);
-          log.info(`   [诊断-instanceId] 深搜命中: ${hits.length ? JSON.stringify(hits) : '无'}`);
+          log.info(`   [诊断-instanceId] 深搜命中: ${hits.length ? JSON.stringify(hits) : '无（instanceId 取自 task.id，无需深搜）'}`);
           log.info(`   [诊断-instanceId] 候选值(按可信度): ${cands.length ? cands.join(', ') : 'null（响应里没有任何实例ID，领奖将不带该字段）'}`);
           log.info(`   [诊断-进度] ${taskBrief(task)}`);
           const jt = JSON.stringify(task);
@@ -1709,8 +1805,11 @@ async function runAccount(cookie, opts) {
         // 首个待领任务做参数形态探测，命中后记为 prizePlan，后续任务直接复用
         const variants = prizePlan ? [{ name: prizePlan, delta: prizeDeltaByName(prizePlan, task, stage), kind: 'shape' }] : prizeVariants(task, stage);
         let ok = false;
-        // 服务端已进入发奖环节但发奖全失败 → 只剩风控维度值得试，参数维度全部跳过
+        // 「服务端已认下参数、失败在发奖环节」的标记，只在收到 RECEIVE_ALL_ERROR 后置位。
+        // 不能因为该档 rewardStatus=FAIL 就预置为 true —— 抓包实测 FAIL 档直接重领即成功，
+        // 预置会把真机形态之外的参数变体全部跳过，反而错过本可领到的奖励。
         let rewardSideFailed = false;
+        if (stage._why === 'fail可重领') log.info('   [提示] 该档上次发奖失败(rewardStatus=FAIL)，重领通常可成功');
         for (let vi = 0; vi < variants.length; vi++) {
           const v = variants[vi];
           if (rewardSideFailed && v.kind === 'param') continue;
@@ -1757,6 +1856,15 @@ async function runAccount(cookie, opts) {
           }
           log.info(`   receiveprize[${v.name}]: ${code}`);
           if (dump) dumpList.push({ missionDefId: task.missionDefId, stage: sc, variant: v.name, req: Object.assign(prizeBase(task, stage), v.delta), res: rp.json });
+          // 「领取奖励奖励已全部领奖」不是失败，而是该档确已到账（上一轮脚本或真机上已领）。
+          // 抓包里重复点击同一任务（mtmbo7v0QQpfqjC1 / mtmbo7vf5FM5XJ39）返回的正是这个码。
+          // 必须立刻收工：既不算 failed，也不再枚举其余 8 个变体去刷风控分。
+          if (code.indexOf('HAD_RECEIVE') !== -1 || code.indexOf('ALREADY_RECEIVE') !== -1) {
+            log.info('   [早停] 服务端判定该档奖励已到账，视为已领，跳过其余变体');
+            receivedKeys.add(stageKey(task, stage));
+            ok = true;
+            break;
+          }
           // RECEIVE_ALL_ERROR：服务端已认下参数、定位到阶段，失败发生在权益发放(UPP)环节。
           // 此时继续枚举业务参数只会白发请求、抬高风控分，直接跳过所有 param 类变体。
           if (code.indexOf('RECEIVE_ALL_ERROR') !== -1 && !rewardSideFailed) {
@@ -1769,9 +1877,9 @@ async function runAccount(cookie, opts) {
           result.failed = (result.failed || 0) + 1;
           if (rewardSideFailed && !prizeFailHintShown) {
             prizeFailHintShown = true;
-            log.info('   [结论] 领奖参数无误、阶段已被服务端定位，失败发生在权益发放(UPP)环节。');
-            log.info('          真机成功那笔带 instanceId（任务实例ID），未完成态的 querytask 不下发该字段；');
-            log.info('          若本次任务确实已完成而这里仍失败，请在 App 内手动领取，并把领奖那笔抓包发来定案。');
+            log.info('   [结论] 参数已被服务端接受、阶段也定位到了，失败发生在权益发放(UPP)环节。');
+            log.info('          这类失败会在 querytask 里留下 rewardStatus=FAIL，下次运行重领通常就能成功，');
+            log.info('          不必改参数；若连续多天同一档都是 FAIL，再在 App 内手动领一次看看。');
           }
         }
         await sleep(900);
