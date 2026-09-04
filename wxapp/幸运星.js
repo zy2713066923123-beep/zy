@@ -1532,8 +1532,10 @@ async function runAccount(cookie, opts) {
         const rewards = d && (d.rewards || d.prizeList || d.rightList || d.stageRewards);
         if (rewards) log.info(`   奖励: ${JSON.stringify(rewards)}`);
       } catch (e) {}
-      // 成功 / 已达上限都说明这个组件是对的，不用再试下一个
-      if (last.startsWith('SUCCESS') || last.indexOf('OVER_LIMIT') !== -1) break;
+      // 成功 / 已达上限 / 日机会用尽都说明这个组件是对的，不用再试下一个
+      // （FAIL_BIZ_CHANCE_DAY_NO_ENOUGH_REMAIN::日剩余机会不足 属于「今天已抽过」，
+      //   换 componentId 只会重复报同一个码。）
+      if (last.startsWith('SUCCESS') || last.indexOf('OVER_LIMIT') !== -1 || last.indexOf('NO_ENOUGH_REMAIN') !== -1) break;
       if (i < targets.length - 1) await sleep(800);
     }
     return last;
@@ -1566,9 +1568,12 @@ async function runAccount(cookie, opts) {
     }
     if (code.startsWith('SUCCESS')) {
       log.info('  签到成功');
-    } else if (code.indexOf('OVER_LIMIT') !== -1) {
+    } else if (code.indexOf('OVER_LIMIT') !== -1 || code.indexOf('NO_ENOUGH_REMAIN') !== -1) {
       // 抓包实测原文：FAIL_BIZ_OVER_LIMIT::频次校验不通过，超过领取次数
-      log.info('  今日已领过（服务端频次限制），视为已签到');
+      // 另一种同义反馈：FAIL_BIZ_CHANCE_DAY_NO_ENOUGH_REMAIN::日剩余机会不足
+      //   —— 签到即抽奖玩法下每天只有一次机会，这个码表示当日那一次已用掉，
+      //      等同于「今日已签到」，不是故障，不该继续换 componentId 重试。
+      log.info('  今日机会已用完（服务端频次限制），视为已签到');
     } else if (code === 'NO_LOTTERY_TARGET') {
       log.info('  签到未执行：缺少抽奖组件配置');
     } else {
@@ -1624,10 +1629,19 @@ async function runAccount(cookie, opts) {
 
   // 领奖流程的共享状态（harvest 内部读写，必须在首次调用前初始化）
   const receivedKeys = new Set();  // 已真正领到的阶段，永久去重
+  const blockedKeys = new Set();   // 发奖环节(UPP)拒绝过的阶段，跨 harvest 轮次不再重试
   let prizePlan = null;            // 探测到的可用领奖参数形态（方案名）
   const dumpList = [];             // --dump 时记录每次领奖尝试
   let diagDone = false;            // 只打印一次任务/阶段字段诊断
   let prizeFailHintShown = false;  // 发奖侧失败的结论只提示一次
+  let prizeRejectStreak = 0;       // 连续被发奖侧拒绝的档位数
+  let prizeChannelBlocked = false; // 账号级熔断：本账号发奖通道已被风控拒绝
+  // 连续多少个档位被发奖侧拒绝就熔断本账号。RECEIVE_ALL_ERROR 是通道级风控的确定性
+  // 结果（详见下方 [结论] 文案），不是概率性失败，两档确认即可判定，无需把整批打完。
+  const PRIZE_REJECT_LIMIT = 2;
+  // ELE_PRIZE=0 关闭领奖尝试：H5 通道确认领不到时，只跑任务上报（任务照样完成，
+  // 奖励留到 App 内一键领），避免每天几十笔必失败请求持续抬高风控分。
+  const prizeEnabled = !/^(0|false|off|no)$/i.test(String(process.env.ELE_PRIZE || '').trim());
 
   // 任务快照 —— 与真机弹窗的按钮文案一一对应，看日志即可判断「哪个任务没做、哪个没领」
   log.info(`--- 任务快照 (${tasks.length}) ---`);
@@ -1740,15 +1754,26 @@ async function runAccount(cookie, opts) {
   // 多阶段任务（邀请助力、逛店铺等）一次调用只能领一个阶段，且服务端要在本阶段领完后
   // 才把下一阶段置为可领，所以这里循环多轮，直到没有新的可领阶段。
   async function harvest(label) {
+    if (!prizeEnabled) {
+      log.info(`--- [${label}] 已通过 ELE_PRIZE=0 关闭领奖尝试，跳过 ---`);
+      return;
+    }
+    if (prizeChannelBlocked) {
+      log.info(`--- [${label}] 跳过：本账号发奖通道已被风控拒绝（见上文 [结论]）---`);
+      return;
+    }
     log.info(`--- [${label}] 领取已完成任务奖励 ---`);
     const tried = new Set();   // 本次调用内已试过的阶段；失败的阶段在下次调用时仍会重试
     for (let round = 1; round <= 5; round++) {
+      if (prizeChannelBlocked) break;
       const pending = [];
       for (const t of tasks) {
         if (onlyMission && String(t.missionDefId) !== String(onlyMission)) continue;
         for (const st of receivableStages(t)) {
           const k = stageKey(t, st);
-          if (receivedKeys.has(k) || tried.has(k)) continue;
+          // blockedKeys：上一轮 harvest 已确认被发奖侧拒绝的档位，同一次运行内不再重试。
+          // 否则阶段A0 与阶段B 会对同一批必失败的档位各打一遍，白发几十笔请求。
+          if (receivedKeys.has(k) || blockedKeys.has(k) || tried.has(k)) continue;
           pending.push({ task: t, stage: st });
         }
       }
@@ -1806,13 +1831,12 @@ async function runAccount(cookie, opts) {
         const variants = prizePlan ? [{ name: prizePlan, delta: prizeDeltaByName(prizePlan, task, stage), kind: 'shape' }] : prizeVariants(task, stage);
         let ok = false;
         // 「服务端已认下参数、失败在发奖环节」的标记，只在收到 RECEIVE_ALL_ERROR 后置位。
-        // 不能因为该档 rewardStatus=FAIL 就预置为 true —— 抓包实测 FAIL 档直接重领即成功，
-        // 预置会把真机形态之外的参数变体全部跳过，反而错过本可领到的奖励。
+        // 不能因为该档 rewardStatus=FAIL 就预置为 true —— 抓包实测 FAIL 档在 App 内直接
+        // 重领即成功，预置会把真机形态之外的参数变体全部跳过。
         let rewardSideFailed = false;
-        if (stage._why === 'fail可重领') log.info('   [提示] 该档上次发奖失败(rewardStatus=FAIL)，重领通常可成功');
+        if (stage._why === 'fail可重领') log.info('   [提示] 该档上次发奖失败(rewardStatus=FAIL)，奖励未被消耗，可重领');
         for (let vi = 0; vi < variants.length; vi++) {
           const v = variants[vi];
-          if (rewardSideFailed && v.kind === 'param') continue;
           const extra = Object.assign(prizeBase(task, stage), v.delta);
           // growth 任务平台的标准流程是 receivetask(报名) → 做任务 → receiveprize(领奖)，
           // 脚本此前从未调过 receivetask，这里补上并尝试从响应里取 instanceId
@@ -1851,6 +1875,7 @@ async function runAccount(cookie, opts) {
               log.info(`   [锁定领奖参数形态] ${v.name} → ${JSON.stringify(v.delta)}`);
             }
             receivedKeys.add(stageKey(task, stage));   // 只有真领到才永久去重
+            prizeRejectStreak = 0;
             ok = true;
             break;
           }
@@ -1866,20 +1891,40 @@ async function runAccount(cookie, opts) {
             break;
           }
           // RECEIVE_ALL_ERROR：服务端已认下参数、定位到阶段，失败发生在权益发放(UPP)环节。
-          // 此时继续枚举业务参数只会白发请求、抬高风控分，直接跳过所有 param 类变体。
-          if (code.indexOf('RECEIVE_ALL_ERROR') !== -1 && !rewardSideFailed) {
+          // 【2026-09-04 抓包定论】真机成功那两笔的请求体与本脚本逐字段完全相同
+          // （accountPlan/bizScene/count/instanceId/latitude/locationInfos/longitude/
+          //   missionCollectionId/missionId），asac 也同为 alscadOjfleDPawx9zVoT0。
+          // 业务参数已无可调空间，再换任何变体（含换 asac）都不会改变结果，直接收工。
+          if (code.indexOf('RECEIVE_ALL_ERROR') !== -1) {
             rewardSideFailed = true;
-            log.info('   [早停] 参数已被服务端接受，失败在发奖环节，跳过参数类变体，仅再试风控场景值');
+            log.info('   [早停] 参数已被服务端接受、阶段已定位，失败在权益发放(UPP)环节，跳过其余变体');
+            break;
           }
           if (vi < variants.length - 1) await sleep(1200);
         }
         if (!ok) {
           result.failed = (result.failed || 0) + 1;
+          if (rewardSideFailed) {
+            blockedKeys.add(stageKey(task, stage));
+            prizeRejectStreak++;
+          } else {
+            prizeRejectStreak = 0;
+          }
           if (rewardSideFailed && !prizeFailHintShown) {
             prizeFailHintShown = true;
-            log.info('   [结论] 参数已被服务端接受、阶段也定位到了，失败发生在权益发放(UPP)环节。');
-            log.info('          这类失败会在 querytask 里留下 rewardStatus=FAIL，下次运行重领通常就能成功，');
-            log.info('          不必改参数；若连续多天同一档都是 FAIL，再在 App 内手动领一次看看。');
+            log.info('   [结论] 领奖请求已与真机抓包逐字段对齐，服务端也定位到了阶段，失败发生在');
+            log.info('          权益发放(UPP)之前的风控决策：真机成功响应里 ext.DECISION_TRACE_RISK_QUERY_TYPE');
+            log.info('          = BAICHUAN_QUERY_RISK，而 /h5/ 通道生成不出 App 的设备签名');
+            log.info('          （x-sign / x-mini-wua / x-sgext / x-umt / x-devid / rc-token），');
+            log.info('          同一账号的 event.pageview 也被判 405::行为受限 —— 是同一套风控。');
+            log.info('          所以这不是参数问题，改参数无法绕过。奖励并未被消耗：抓包实测');
+            log.info('          rewardStatus=FAIL 的档在 App 内手动点「领取奖励」仍能正常到账。');
+          }
+          if (prizeRejectStreak >= PRIZE_REJECT_LIMIT && !prizeChannelBlocked) {
+            prizeChannelBlocked = true;
+            log.info(`   [熔断] 连续 ${prizeRejectStreak} 个档位被发奖侧拒绝，停止本账号后续领奖尝试`);
+            log.info('          （任务上报照常进行，奖励可在 App 内手动领；设 ELE_PRIZE=0 可永久关闭领奖尝试）');
+            break;
           }
         }
         await sleep(900);
