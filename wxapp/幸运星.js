@@ -5,7 +5,8 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
  *
  *
  * 功能（全部纯 Node 接口调用，无需浏览器 / 真实浏览 / App WebView）：
- *   1. 每日签到（SIGNIN_AND_RECEIVE 用 signinandreceive；RECEIVE_AND_SIGNIN 用 receiveprize）
+ *   1. 每日签到（SIGNIN_AND_RECEIVE 走 signinandreceive；
+ *      RECEIVE_AND_SIGNIN / abGroup=NEW_HOME_SIGN_DRAW 走 reward.lottery.draw，即「签到=抽奖」）
  *   2. 自动完成所有 PAGEVIEW 任务（pageview 上报 → RUNNING→FINISH）
  *   3. 自动领取全部已完成任务的奖励（receiveprize）
  *   4. 支持多账号逐个处理
@@ -31,6 +32,10 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
  *   ELEME_APPID         饿了么小程序 AppID，默认 wxece3a9a4c82f58c9（可选）
  *   ELEME_LOGIN_RESULT  直接注入有效登录态（可选，走方式 B）
  *   ELEME_COOKIE        H5 Cookie（可选，走方式 C）
+ *   ELE_LNG / ELE_LAT   全局经纬度覆盖（可选）
+ *   ELE_GEO_JSON        按账号 USERID 指定常用地址经纬度（可选）
+ *   ELE_LOTTERY_ACTID   「签到即抽奖」活动ID，正常由 homepage 自动下发，仅在服务端不下发
+ *   ELE_LOTTERY_CPNID   resource 模块时用这两个手动指定（可选，需成对配置）
  *
  * 【青龙面板】
  *   1. 配置 WX_ID 等环境变量（见上）。
@@ -75,17 +80,22 @@ const DEFAULT_CONFIG = {
   ASAC: {
     PAGEVIEW: 'alscFS8BNTO6jivYS7XOAM',
     // 任务领奖 mtop.ele.biz.growth.task.core.receiveprize 的风控场景值。
-    // 来源（静态逆向）：淘宝闪购 12.8.88 (me.ele) 内置离线包
-    //   assets/zcache-preset_sgyx-next.zip → sgyx-next~weex21/1311552/res/*home
-    //   其中明文写着 "mtop.ele.biz.growth.task.core.receiveprize,alscPlhUdkIEoklk01xaLW"
-    // 旧值 alscadOjfleDPawx9zVoT0 是签到组件的场景值，拿来做任务领奖属于场景串号，会被风控判失败
-    // （表现就是 RECEIVE_MISSION_REWARD_RECEIVE_ALL_ERROR）。
-    PRIZE: 'alscPlhUdkIEoklk01xaLW',
-    // 旧的任务领奖 asac，探测全部失败时作为最后兜底轮换
-    PRIZE_LEGACY: 'alscadOjfleDPawx9zVoT0',
+    //
+    // 【2026-09-04 抓包定论】此前把 alscPlhUdkIEoklk01xaLW 当首选、把
+    // alscadOjfleDPawx9zVoT0 注释成「签到组件的场景值，串号会被风控判失败」——这个推断是反的。
+    // 真机领奖成功那一笔（core.receiveprize，领到 60 幸运星）请求头里的 asac
+    // 实测就是 alscadOjfleDPawx9zVoT0。alscPlhUdkIEoklk01xaLW 只是离线包里
+    // 与接口名写在一起的静态字符串，并非运行时真正下发的场景值。
+    // 因此首选改回真机实测值，离线包字符串降级为备选轮换。
+    PRIZE: 'alscadOjfleDPawx9zVoT0',
+    // 离线包静态字符串，作为备选轮换（真机未观测到使用）
+    PRIZE_LEGACY: 'alscPlhUdkIEoklk01xaLW',
     SIGNIN: 'alsc3Lhy681SA5TT4iHgL3',
-    // 签到领奖组件 mtop.alsc.interact.playapp.signin.component.receiveprize 的场景值
+    // 签到领奖组件的场景值（与任务领奖同值）。当前代码路径未使用，保留作抓包记录。
     SIGNIN_PRIZE: 'alscadOjfleDPawx9zVoT0',
+    // 【2026-09-04 抓包实测 mtm82eypIOKkyf9b】
+    // reward.lottery.draw（签到即抽奖，NEW_HOME_SIGN_DRAW 分组的真实签到通道）的场景值。
+    LOTTERY: 'alscdZLQXT9DEAlXvQQOLO',
     EXCHANGE: 'alsc5KvbdX5mHl3sdv4guV',
     // event.trigger 的 asac 埋点头，硬编码于 i.java#p()
     TRIGGER: '2A21607NIIT1ND5C4YXJ6C'
@@ -93,6 +103,19 @@ const DEFAULT_CONFIG = {
   // c.java#e() 中 event.trigger 使用的是 alscec 头（另一套风控埋点）
   ALSCEC_TRIGGER: 'alsclarBlqjTJnvbrII23s'
 };
+
+// 互动中心首页的组件位编码。照抄真机抓包 mtm822oxkvTo5gHk / mtm822x5ww7iXwQ7。
+// 其中 INTERACT_CENTER_LOTTERY 是关键：它下发签到即抽奖所需的 actId + componentId。
+const CPN_CODES = [
+  'PLAY_NOTICE_CPN',
+  'INTERACT_RESOURCE_CPN',
+  'MORE_MENU_CPN',
+  'STAR_MSG_CONTENT_CPN',
+  'PLAY_RESOURCE_CPN',
+  'INTERACT_CENTER_SKIN_COMPONENT',
+  'INTERACT_CENTER_BUBBLE',
+  'INTERACT_CENTER_LOTTERY'
+];
 
 class EleMtop {
   constructor(cookieStr, config = {}) {
@@ -208,18 +231,40 @@ class EleMtop {
     };
   }
 
-  async homepage() {
-    // 真机参数（抓包 mtl9s4z4i4Z6ltjA）：带 modules/version/channel，不带 accountPlan/locationInfos。
-    // modules 决定服务端返回哪些模块（signIn/cardMission/property 等），缺了可能拿不到签到数据。
+  /**
+   * 互动中心首页聚合接口。
+   *
+   * 真机有两种调用形态（抓包 2026-09-04，同一次进页面先后发出）：
+   *   A. modules 形态（mtm7vju80fs5bisx / mtm81sceWwvX5RNZ）
+   *      → 下发 cardMission / contentMission / signIn / property / exchangeV2 / mdCard ...
+   *   B. cpnCodes 形态（mtm822oxkvTo5gHk / mtm822x5ww7iXwQ7）
+   *      → 除上面的业务模块外，**额外下发 resource 模块**，其中
+   *        resource.data.INTERACT_CENTER_LOTTERY[] = [{componentId, actId, backgroundImg}]
+   *        这是 reward.lottery.draw（签到即抽奖）唯一的 actId / componentId 来源。
+   *
+   * 实测 B 的返回是 A 的超集（少了 cardMission 一类"仅 modules 指定才下发"的模块），
+   * 所以这里一次请求同时带 modules + cpnCodes，取二者并集，避免多发一次请求。
+   * 若服务端不认组合参数（resource 缺失），主流程会用 homepageResource() 单独补一次。
+   */
+  async homepage(opt = {}) {
     const data = {
       bizScene: this.cfg.bizScene,
       longitude: this.cfg.longitude,
       latitude: this.cfg.latitude,
       channel: 'ES0015924020',
-      modules: JSON.stringify(['cardMission', 'contentMission', 'signIn', 'property', 'exchange', 'pinnedMission', 'orderMission', 'mdCard', 'exchangeV2']),
       version: '1.3.11'
     };
+    if (!opt.cpnOnly) {
+      data.modules = JSON.stringify(['cardMission', 'contentMission', 'signIn', 'property', 'exchange', 'pinnedMission', 'orderMission', 'mdCard', 'exchangeV2']);
+    }
+    if (!opt.modulesOnly) {
+      data.cpnCodes = JSON.stringify(CPN_CODES);
+    }
     return this.call('mtop.alsc.interact.et.interact.center.homepage', data);
+  }
+  /** 只取组件资源（cpnCodes 形态），用于补拿 resource.INTERACT_CENTER_LOTTERY */
+  async homepageResource() {
+    return this.homepage({ cpnOnly: true });
   }
   async querytask() {
     // 真机该接口的 missionCollectionId 是字符串，且额外带 launchChannels:"[]"
@@ -254,20 +299,37 @@ class EleMtop {
   /**
    * 任务事件上报（THIRD 类任务的真实完成通道）
    *
-   * 参数集合完整取自 App 反编译源码：
+   * 参数集合最初取自 App 反编译源码：
    *   jadx/out/sources/me/ele/shopdetailv2/header/widget/navigator/i.java#p()
    *   jadx/out/sources/me/ele/homepage/repository/c.java#e()
    *
-   * 之前 `缺少业务参数eventId` 的根因：
-   *   1) 未传 eventId（源码里被混淆成 com.heytap.mcssdk.constant.b.k = "eventId"）
-   *   2) bizScene 传了 interact_center，而源码里 me.ele.address.a.c = "bizScene"
-   *      对 THIRD 任务传的是 missionId / 业务场景标识，不是互动中心场景
-   *   3) 该接口是 POST + version 1.1，不是 GET
+   * 【2026-09-04 真机抓包 mtm7vjsit3RdoFIl，唯一一笔 event.trigger】
+   *   POST /gw/mtop.ele.biz.growth.task.event.trigger/1.1/
+   *   wua=<安全参数>&data={
+   *     "bizScene":"handPullEnterSecondFloor","client":"eleme",
+   *     "eventId":"3100056386320_ElemeSecondFloorHandPullTask_1788481775771",
+   *     "eventIdemPotent":"3100056386320_1788481775771",
+   *     "eventSubType":"EVENT_FINISH","eventTime":1788481775771,
+   *     "eventType":"THIRD","riskScene":"ElemeInteractiveSecondFloorHandlPullEnter",
+   *     "triggerType":"ASYNC"}
+   *   → {"data":{},"ret":["SUCCESS::接口调用成功"]}
+   *
+   * 与本实现的差异（已按抓包对齐可对齐的部分）：
+   *   - eventId 是 `{USERID}_{事件标识}_{时间戳}`，不是裸时间戳；
+   *   - eventIdemPotent 是 `{USERID}_{时间戳}`（幂等键，带用户维度更安全）；
+   *   - triggerType 真机为 ASYNC；
+   *   - 真机不带 latitude/longitude/collectionId/missionId。
+   * 仍保留 missionId/collectionId/经纬度：真机那笔是「二楼下拉」场景，bizScene 是业务场景标识
+   * 而不是任务号，互动中心任务的 bizScene/riskScene 映射抓包里没有样本，去掉 missionId 会
+   * 让服务端完全无法定位任务，所以这里按「真机形态 + 任务定位字段」的并集发送。
+   * 注意：真机这一笔带 wua 安全参数，H5 通道无法生成，因此 SUCCESS 也可能只是空跑
+   * （data 为空对象，服务端不回执任何任务状态）。
    */
   async eventTrigger(opt) {
     const now = Date.now();
     const missionId = String(opt.missionId);
-    const eventId = opt.eventId != null ? opt.eventId : now;
+    const uid = this.getCookie('USERID') || '0';
+    const tag = opt.eventTag || missionId;
     const data = {
       latitude: this.cfg.latitude,
       longitude: this.cfg.longitude,
@@ -276,10 +338,10 @@ class EleMtop {
       bizScene: opt.bizScene || missionId,
       eventType: opt.eventType || 'THIRD',
       eventSubType: opt.eventSubType || 'EVENT_FINISH',
-      eventId,
-      eventIdemPotent: opt.eventIdemPotent != null ? opt.eventIdemPotent : now,
+      eventId: opt.eventId != null ? opt.eventId : `${uid}_${tag}_${now}`,
+      eventIdemPotent: opt.eventIdemPotent != null ? opt.eventIdemPotent : `${uid}_${now}`,
       eventTime: now,
-      triggerType: opt.triggerType || 'SYNC',
+      triggerType: opt.triggerType || 'ASYNC',
       collectionId: String(opt.collectionId || this.cfg.missionCollectionId),
       missionId,
       client: this.cfg.client
@@ -338,7 +400,8 @@ class EleMtop {
       this.commonParams(o),
       opt._version || '1.0',
       { asac },
-      opt._method || 'GET'
+      // 真机领奖是 POST（抓包 mtlad252tqSIgWso），默认对齐真机
+      opt._method || 'POST'
     );
   }
   async receivetask(opt) {
@@ -348,24 +411,89 @@ class EleMtop {
     };
     return this.call('mtop.ele.biz.growth.task.core.receivetask', this.commonParams(o));
   }
-  async signinandreceive(copyId, actId) {
-    const data = this.commonParams({ copyId, actId: actId || '' });
+  async signinandreceive(copyId, actId, extra) {
+    const data = this.commonParams({ copyId, actId: actId || '', ...(extra || {}) });
     return this.call('mtop.alsc.interact.playapp.signin.component.signinandreceive', data, '1.0', { asac: this.cfg.ASAC.SIGNIN });
   }
   /**
-   * 签到奖励领取。
+   * 签到即抽奖 —— RECEIVE_AND_SIGNIN / NEW_HOME_SIGN_DRAW 分组的**真实**签到通道。
    *
-   * 【2026-09-03 实测】签到组件按 signInRewardStrategy 分两种策略：
-   *   - SIGNIN_AND_RECEIVE（签到即发奖）：用 signinandreceive 一步完成（多数账号走这个）；
-   *   - RECEIVE_AND_SIGNIN（领取即签到）：signinandreceive 会报
-   *     FAIL_BIZ_REWARD_MODE_NOT_SIGNIN_AND_RECEIVE::当前签到模式不支持独立领奖，
-   *     改用本接口（component.receiveprize）直接领取，服务端会把签到一并完成。
-   * 之前猜的 component.signin 纯签到接口实测不存在（FAIL_SYS_API_NOT_FOUNDED）。
+   * 【2026-09-04 抓包定论，推翻此前"抓包里没有签到接口"的结论】
+   * 真机点一次签到的完整链路（同一次进页面）：
+   *   08:34:34  homepage(modules 形态)   → signIn 模块，status=HAS_SIGNIN
+   *   08:34:47  homepage(cpnCodes 形态)  → resource.INTERACT_CENTER_LOTTERY[]，给出 actId+componentId
+   *   08:35:03  POST mtop.alsc.interact.playapp.reward.lottery.draw   ← 就是这一枪
+   *
+   * 抓包原文（mtm82eypIOKkyf9b，asac=alscdZLQXT9DEAlXvQQOLO，
+   *          referer=https://tb.ele.me/app/TBTakeout/engage-hub/home）：
+   *   {"actId":"2026042115330969901152328314",
+   *    "bizCode":"INTERACT_CENTER_LOT","bizScene":"INTERACT_CENTER_LOT",
+   *    "componentId":"2026072416485253901333232811",
+   *    "extParams":"{\"desc\":\"幸运福利\"}",
+   *    "latitude":"30.641167","longitude":"114.272228"}
+   * 响应 x-retcode: FAIL_BIZ_OVER_LIMIT::频次校验不通过，超过领取次数
+   *   —— 当日已领，不是参数错误，反证接口名与参数形态正确。
+   *
+   * 该账号 signInRewardStrategy=RECEIVE_AND_SIGNIN 且 abExperiment.abGroup=NEW_HOME_SIGN_DRAW
+   * （signDrawHit=true，newbieGuide.guideType=SIGN_DRAW），即"签到与抽奖合并"玩法：
+   * 抽一次奖 = 完成签到 + 发当日签到奖励，日历里的 receiveStatus=DONE 和
+   * awardResult.stageRewards[].rightInstanceIdStr 都是这一枪的结果。
+   * 所以这类账号调 signinandreceive 必然报
+   * FAIL_BIZ_REWARD_MODE_NOT_SIGNIN_AND_RECEIVE::当前签到模式不支持独立领奖 —— 那是服务端的正确反馈。
+   *
+   * 注意：真机请求体不带 accountPlan / locationInfos，bizScene 也不是 interact_center，
+   * 因此这里**不能**套 commonParams()，必须按真机原样只发这 7 个字段。
    */
-  async signinReceivePrize(copyId, actId) {
-    const data = this.commonParams({ copyId, actId: actId || '' });
-    return this.call('mtop.alsc.interact.playapp.signin.component.receiveprize', data, '1.0', { asac: this.cfg.ASAC.SIGNIN_PRIZE });
+  async lotteryDraw(opt = {}) {
+    const data = {
+      actId: opt.actId,
+      bizCode: opt.bizCode || 'INTERACT_CENTER_LOT',
+      bizScene: opt.bizScene || 'INTERACT_CENTER_LOT',
+      componentId: opt.componentId,
+      extParams: opt.extParams != null ? opt.extParams : JSON.stringify({ desc: '幸运福利' }),
+      latitude: this.cfg.latitude,
+      longitude: this.cfg.longitude
+    };
+    return this.call('mtop.alsc.interact.playapp.reward.lottery.draw', data, '1.0', { asac: this.cfg.ASAC.LOTTERY }, 'POST');
   }
+}
+
+/**
+ * 从 homepage 响应里取「签到即抽奖」的目标（actId + componentId）。
+ *
+ * 真机路径（抓包 mtm822oxkvTo5gHk）：
+ *   resource.data.INTERACT_CENTER_LOTTERY = [
+ *     { componentId: '2026072416485253901333232811', actId: '2026042115330969901152328314' },
+ *     { componentId: '2026061810292268901318752903', actId: '2026042115330969901152328314' }
+ *   ]
+ * 真机点的是第 0 个（extParams desc=幸运福利），所以保持数组原序返回、依次尝试。
+ *
+ * actId 兜底：exchangeV2.data.list[].exchangeActId 实测与之同值，
+ * 可在 resource 模块缺失（服务端不认组合参数）时顶上；componentId 无兜底，只能靠 resource。
+ */
+function pickLotteryTargets(hd) {
+  const out = [];
+  const seen = new Set();
+  const push = (actId, componentId) => {
+    if (!actId || !componentId) return;
+    const k = actId + '|' + componentId;
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push({ actId: String(actId), componentId: String(componentId) });
+  };
+  const list = (hd && hd.resource && hd.resource.data && hd.resource.data.INTERACT_CENTER_LOTTERY) || [];
+  if (Array.isArray(list)) for (const it of list) push(it && it.actId, it && it.componentId);
+  // 环境变量强制指定（componentId 也可单独指定，配合 resource 里的 actId）
+  const envAct = (process.env.ELE_LOTTERY_ACTID || '').trim();
+  const envCpn = (process.env.ELE_LOTTERY_CPNID || '').trim();
+  if (envAct && envCpn) return [{ actId: envAct, componentId: envCpn }];
+  if (out.length) return out;
+  // resource 缺失时用 exchangeV2 的 exchangeActId 兜 actId
+  const exAct = hd && hd.exchangeV2 && hd.exchangeV2.data && Array.isArray(hd.exchangeV2.data.list)
+    ? (hd.exchangeV2.data.list.find(x => x && x.exchangeActId) || {}).exchangeActId
+    : '';
+  if ((envAct || exAct) && envCpn) push(envAct || exAct, envCpn);
+  return out;
 }
 
 /* =====================================================================
@@ -1013,35 +1141,44 @@ function prizeBase(task, stage) {
 /**
  * 领奖参数候选变体（delta 形式，不含 missionId/missionCollectionId）。
  *
- * 背景：任务已完成（stage.status=FINISH 且 rewardStatus=TODO）但 receiveprize 仍报
- *   RECEIVE_MISSION_REWARD_RECEIVE_ALL_ERROR / RECEIVE_MISSION_REWARD_STAGE_NOT_EXIST_ERROR，
- * 说明「服务端认可的可领参数形态」与默认形态不一致。真机参数由服务端下发的动态渲染
- * 模板决定，离线包里只有接口名和 asac，拼不出完整 data，只能靠探测。
- * 因此在首个待领任务上做一次有节制的探测（变体间隔 1.2s），命中后记为 prizePlan，
- * 后续任务直接复用，不再重复探测。
+ * 【2026-09-04 抓包定论】真机领奖成功那一笔的完整请求体是：
+ *   POST /gw/mtop.ele.biz.growth.task.core.receiveprize/1.0/   asac: alscadOjfleDPawx9zVoT0
+ *   {"accountPlan":"HAVANA_COMMON","bizScene":"interact_center","count":1,
+ *    "instanceId":61706625,"latitude":"30.641318","locationInfos":"[…]",
+ *    "longitude":"114.272098","missionCollectionId":3112,"missionId":45226015}
+ *   → SUCCESS，到账 60 幸运星
+ * 其中 missionId = querytask 的 missionDefId，count = 阶段的 stageCount，
+ * 其余字段 commonParams() 已覆盖。唯一拿不到的是 instanceId：
+ * 已逐字节通读真机 querytask 响应（mtm7vju4HnIQ9TwV，15703B）与 homepage 响应
+ * （mtm7vju80fs5bisx，8197B），**两者都不含任何 instanceId 字段**，说明 instanceId 是
+ * 任务实例被创建后才存在的服务端 ID，H5 通道没有下发入口。
+ *
+ * 因此变体按「维度」分三类，配合调用侧按错误码早停，避免无意义地连发 8 次被拒请求：
+ *   shape —— 真机形态本身（带/不带 instanceId）
+ *   risk  —— 只改 asac 风控场景值。RECEIVE_ALL_ERROR 表示服务端已定位到阶段、
+ *            是发奖(UPP)环节失败，此时改业务参数没有意义，只有风控维度值得换。
+ *   param —— 改参数以帮助服务端定位阶段。仅当报 STAGE_NOT_EXIST / CLIENT_PARAM_STAGE
+ *            这类「没找到阶段」的错误时才值得试。
  */
 function prizeDeltaTable(sc, mx, ix) {
   const t = [];
-  const push = (name, delta) => t.push({ name, delta });
-  // 【2026-09-03 真机抓包 mtlad252tqSIgWso】领奖请求（mtop.ele.biz.growth.task.core.receiveprize）
-  // 明确带 instanceId（数字，= querytask 响应里任务的 id 字段），且为 POST。
-  // 把最接近真机形态的变体放最前面优先尝试，命中后后续任务直接复用。
-  if (ix != null) push("count=阶段号+instanceId+POST", { instanceId: ix, _method: 'POST' });
-  if (ix != null) push("count=阶段号+instanceId", { instanceId: ix });
-  // 实测：count 决定阶段，阶段号对了才有资格谈发奖
-  push("count=阶段号", {});
-  push('count=阶段号+先receivetask', { _pre: 'receivetask' });
-  if (mx != null) push("count=阶段号+missionXId", { missionXId: mx });
-  if (sc != null) push("count=阶段号+stageCount字段", { stageCount: sc });
-  push("count=阶段号+POST", { _method: "POST" });
-  push("count=阶段号+旧asac兜底", { _asac: DEFAULT_CONFIG.ASAC.PRIZE_LEGACY });
-  // 历史真机抓包形态（单阶段任务与上面等价）
-  if (sc == null || sc === 1) push("count=1(历史形态)", { count: 1 });
+  const push = (name, delta, kind) => t.push({ name, delta, kind: kind || 'param' });
+  // 1) 真机形态优先（receiveprize 默认已改 POST）
+  if (ix != null) push('真机形态+instanceId', { instanceId: ix }, 'shape');
+  push('真机形态(无instanceId)', {}, 'shape');
+  // 2) 风控维度：换 asac。首选已是真机实测值，这里换离线包里的静态值再试一次
+  push('换asac(离线包值)', { _asac: DEFAULT_CONFIG.ASAC.PRIZE_LEGACY }, 'risk');
+  // 3) 参数定位维度兜底
+  push('先receivetask报名', { _pre: 'receivetask' });
+  if (mx != null) push('带missionXId', { missionXId: mx });
+  if (sc != null) push('带stageCount字段', { stageCount: sc });
+  push('GET兜底', { _method: 'GET' });
+  if (sc == null || sc === 1) push('count=1(历史形态)', { count: 1 });
   return t;
 }
 function prizeVariants(task, stage) {
-  // querytask 响应里任务的实例ID字段名是 id（数字），不是 instanceId。
-  // 之前漏了 id 字段，导致带 instanceId 的变体永远不会被生成——这是领奖失败的根因。
+  // instanceId 在 querytask/homepage 响应中均不存在（已抓包确认），这里仍全量兜底探测字段名，
+  // 万一某些账号/版本的响应带上了，就能直接命中真机形态。
   const ix = ['instanceId', 'instanceid', 'taskInstanceId', 'missionInstId', 'id'].map((k) => task[k]).find((v) => v != null && v !== '');
   return prizeDeltaTable(stage.stageCount != null ? stage.stageCount : null, pickMissionXId(task), ix != null ? ix : null);
 }
@@ -1071,63 +1208,139 @@ async function runAccount(cookie, opts) {
   log.info(`幸运星余额: ${result.stars}`);
 
   // 签到
-  // 真机 homepage 响应字段（抓包 mtl9s4z4i4Z6ltjA）：
-  //   signIn.data.extInfo.copyId          ← 签到副本ID
-  //   signIn.data.signInQueryPrizeDTOS[]  ← 每日签到奖励列表
-  //     [today=true].extInfo.stageAward[0].actCode  ← 真正的 actId
-  //   signIn.data.signInRewardStrategy    ← SIGNIN_AND_RECEIVE / RECEIVE_AND_SIGNIN
-  //   signIn.data.status                  ← HAS_SIGNIN / NOT_SIGNIN
+  // 真机 homepage 响应字段（抓包 mtm81sceWwvX5RNZ / mtm822oxkvTo5gHk，2026-09-04）：
+  //   signIn.data.extInfo.copyId               ← 签到副本ID
+  //   signIn.data.signIn                       ← 今日是否已签（顶层布尔）
+  //   signIn.data.status                       ← HAS_SIGNIN / NOT_SIGNIN
+  //   signIn.data.signInRewardStrategy         ← SIGNIN_AND_RECEIVE / RECEIVE_AND_SIGNIN
+  //   signIn.data.signInQueryPrizeDTOS[]       ← 签到日历
+  //     [today=true].signIn / .dayNo
+  //     [today=true].extInfo.stageAward[0].receiveStatus  ← INIT / DONE
+  //     [today=true].extInfo.stageAward[0].actCode        ← 奖品档位码（**不是** actId）
+  //     [today=true].extInfo.awardResult.stageRewards[].rightInstanceIdStr ← 已发权益实例
+  //   abExperiment.data.abGroup                ← NEW_HOME_SIGN_DRAW 时签到=抽奖
+  //   resource.data.INTERACT_CENTER_LOTTERY[]  ← lottery.draw 的 actId + componentId
+  //
+  // 【2026-09-04 抓包纠错】此前把 stageAward[0].actCode（如 d170iq97jyrtzcer）当成 actId 传，
+  // 那是错的：actCode 只是奖品档位码，服务端拿它定位不到活动。真正的 actId 是互动活动 ID
+  // 2026042115330969901152328314，只在 resource.INTERACT_CENTER_LOTTERY[].actId
+  // 和 exchangeV2.data.list[].exchangeActId 里下发。
   let signInfo = null;
   try {
     const s = hd.signIn && hd.signIn.data;
-    // 从签到日历里找今日 (today=true) 的 actCode 作为 actId
     let todayActCode = '';
+    let todaySceneCode = '';
+    let todayDayNo = '';
+    let todayDone = false;
+    let todaySigned = false;
     const dtos = s && s.signInQueryPrizeDTOS;
     if (Array.isArray(dtos)) {
       const todayDto = dtos.find((d) => d.today) || dtos[0];
       const award = todayDto && todayDto.extInfo && todayDto.extInfo.stageAward;
-      if (Array.isArray(award) && award[0]) todayActCode = award[0].actCode || '';
+      if (Array.isArray(award) && award[0]) {
+        todayActCode = award[0].actCode || '';
+        todaySceneCode = award[0].sceneCode || '';
+        todayDone = award[0].receiveStatus === 'DONE';
+      }
+      if (todayDto) {
+        todayDayNo = todayDto.dayNo != null ? String(todayDto.dayNo) : '';
+        todaySigned = !!todayDto.signIn;
+      }
     }
+    let abGroup = '';
+    try { abGroup = hd.abExperiment.data.abGroup || ''; } catch (e) {}
     signInfo = {
       status: s && s.status,
       copyId: s && s.extInfo && s.extInfo.copyId,
-      actId: todayActCode || (s && s.actId) || '',
-      strategy: s && s.signInRewardStrategy
+      // 仅用于诊断打印，绝不当 actId 传给服务端
+      actCode: todayActCode,
+      sceneCode: todaySceneCode,
+      dayNo: todayDayNo,
+      signedToday: !!(s && s.signIn) || todaySigned,
+      rewardDone: todayDone,
+      strategy: s && s.signInRewardStrategy,
+      abGroup
     };
   } catch (e) {}
-  log.info(`签到状态: ${signInfo && signInfo.status}${signInfo && signInfo.strategy ? ` (策略 ${signInfo.strategy})` : ''}`);
+  const signedToday = !!(signInfo && (signInfo.status === 'HAS_SIGNIN' || signInfo.signedToday));
+  log.info(`签到状态: ${signInfo && signInfo.status}${signInfo && signInfo.strategy ? ` (策略 ${signInfo.strategy}${signInfo.abGroup ? `, AB ${signInfo.abGroup}` : ''})` : ''}`);
 
-  if (!dry && signInfo && signInfo.status !== 'HAS_SIGNIN' && signInfo.copyId) {
-    // 实测两种策略：
-    //   SIGNIN_AND_RECEIVE（多数账号）：signinandreceive 一步完成签到+发奖；
-    //   RECEIVE_AND_SIGNIN（账号3等）：signinandreceive 报「不支持独立领奖」，
-    //   需要直接调 receiveprize（服务端把签到与发奖一起完成）。
-    const preferReceive = signInfo.strategy === 'RECEIVE_AND_SIGNIN';
-    const trySign = async () => {
-      const r = preferReceive
-        ? await m.signinReceivePrize(signInfo.copyId, signInfo.actId || '')
-        : await m.signinandreceive(signInfo.copyId, signInfo.actId || '');
-      return retCode(r.json);
-    };
-    let code = await trySign();
-    log.info(`每日签到(${preferReceive ? 'RECEIVE_AND_SIGNIN->receiveprize' : 'signinandreceive'}): ${code}`);
-    // 策略与端点不匹配（mode 报错）→ 换另一端点再试一次
-    if (code.indexOf('NOT_SIGNIN_AND_RECEIVE') !== -1) {
+  // 通道判定（2026-09-04 抓包定论）：
+  //   abGroup=NEW_HOME_SIGN_DRAW 或 strategy=RECEIVE_AND_SIGNIN
+  //     → 「签到即抽奖」，抽一次 = 完成签到 + 发当日奖励，走 reward.lottery.draw；
+  //   否则（SIGNIN_AND_RECEIVE）→ signin.component.signinandreceive 一步签到+发奖。
+  const signByDraw = !!(signInfo && (signInfo.abGroup === 'NEW_HOME_SIGN_DRAW' || signInfo.strategy === 'RECEIVE_AND_SIGNIN'));
+
+  // 「签到即抽奖」：从 resource.INTERACT_CENTER_LOTTERY 取 actId+componentId 后逐个尝试。
+  // 真机点的是数组第 0 个（extParams desc=幸运福利），所以按原序试。
+  const drawSign = async () => {
+    let targets = pickLotteryTargets(hd);
+    if (!targets.length) {
+      // resource 没跟着 modules 一起下发 → 按真机那样单独补一次 cpnCodes 请求
+      await sleep(500);
+      const rp = await m.homepageResource();
+      try { targets = pickLotteryTargets(rp.json.data && rp.json.data.data); } catch (e) {}
+    }
+    if (!targets.length) {
+      log.info('   [提示] resource.INTERACT_CENTER_LOTTERY 未下发，拿不到 actId/componentId；'
+        + '可用 ELE_LOTTERY_ACTID + ELE_LOTTERY_CPNID 手动指定');
+      return 'NO_LOTTERY_TARGET';
+    }
+    let last = 'NO_LOTTERY_TARGET';
+    for (let i = 0; i < targets.length; i++) {
+      const t = targets[i];
+      const r = await m.lotteryDraw(t);
+      last = retCode(r.json);
+      log.info(`每日签到(签到即抽奖 cpn=…${String(t.componentId).slice(-8)}): ${last}`);
+      try {
+        const d = r.json.data && r.json.data.data;
+        const rewards = d && (d.rewards || d.prizeList || d.rightList || d.stageRewards);
+        if (rewards) log.info(`   奖励: ${JSON.stringify(rewards)}`);
+      } catch (e) {}
+      // 成功 / 已达上限都说明这个组件是对的，不用再试下一个
+      if (last.startsWith('SUCCESS') || last.indexOf('OVER_LIMIT') !== -1) break;
+      if (i < targets.length - 1) await sleep(800);
+    }
+    return last;
+  };
+
+  if (dry) {
+    log.info('干跑模式，跳过签到');
+  } else if (!signInfo || !signInfo.copyId) {
+    log.info('无签到组件');
+  } else if (signedToday) {
+    log.info(`今日已签到，跳过${signInfo.rewardDone ? '（当日奖励已发放）' : ''}`);
+  } else {
+    let code;
+    if (signByDraw) {
+      code = await drawSign();
+    } else {
+      const signExtra = {};
+      if (signInfo.sceneCode) signExtra.sceneCode = signInfo.sceneCode;
+      if (signInfo.dayNo) signExtra.dayNo = signInfo.dayNo;
+      // actId 留空：signinandreceive 靠 copyId 定位签到副本，actCode 不是 actId 不能塞
+      const r = await m.signinandreceive(signInfo.copyId, '', signExtra);
+      code = retCode(r.json);
+      log.info(`每日签到(SIGNIN_AND_RECEIVE): ${code}`);
+      // 服务端说「当前签到模式不支持独立领奖」→ 该账号其实也是签到即抽奖，兜底改走 lottery.draw
+      if (code.indexOf('NOT_SIGNIN_AND_RECEIVE') !== -1) {
+        log.info('   服务端提示不支持独立领奖 → 改走签到即抽奖通道');
+        await sleep(600);
+        code = await drawSign();
+      }
+    }
+    if (code.startsWith('SUCCESS')) {
+      log.info('  签到成功');
+    } else if (code.indexOf('OVER_LIMIT') !== -1) {
+      // 抓包实测原文：FAIL_BIZ_OVER_LIMIT::频次校验不通过，超过领取次数
+      log.info('  今日已领过（服务端频次限制），视为已签到');
+    } else if (code === 'NO_LOTTERY_TARGET') {
+      log.info('  签到未执行：缺少抽奖组件配置');
+    } else {
       try {
         log.info(`   [诊断] 签到组件数据: ${JSON.stringify(hd.signIn && hd.signIn.data)}`);
       } catch (e) {}
-      await sleep(600);
-      const r2 = preferReceive
-        ? await m.signinandreceive(signInfo.copyId, signInfo.actId || '')
-        : await m.signinReceivePrize(signInfo.copyId, signInfo.actId || '');
-      code = retCode(r2.json);
-      log.info(`  换另一端点重试: ${code}`);
     }
-    if (code.indexOf('NOT_SIGNIN_AND_RECEIVE') !== -1) {
-      log.info('   [提示] 两种端点都报模式错误，今日签到可能需要 App 内手动完成');
-    }
-  } else {
-    log.info((signInfo && signInfo.status === 'HAS_SIGNIN') ? '今日已签到，跳过' : (dry ? '干跑模式，跳过签到' : '无签到组件'));
   }
 
   // 收集任务：cardMission（首页任务卡）+ querytask（任务列表）
@@ -1167,6 +1380,17 @@ async function runAccount(cookie, opts) {
   const completes = tasks.filter(canComplete);
   const nPv = completes.filter((t) => completeChannel(t) === 'PAGEVIEW').length;
   log.info(`  可完成: ${completes.length} (PAGEVIEW ${nPv} / THIRD ${completes.length - nPv})`);
+  // ── PAGEVIEW 熔断 ───────────────────────────────────────────────────────────
+  // 【2026-09-04 抓包定论】真机全量抓包里**不存在** event.pageview 这个接口调用：
+  // PAGEVIEW 类任务是靠 UT 埋点（h-adashx.ut.ele.me/upload，spm a2ogi.bx1500380）
+  // 被动结算的，App 从来不主动调 pageview。脚本走 /h5/ 主动调它，缺 x-sign/x-mini-wua/wua
+  // 设备签名，必然被风控判为「405::行为受限」——上一轮 25 个任务 25 次 405 就是这个原因。
+  // 连续对同一账号刷 25 次被拦请求既无意义、又会抬高账号风险分，因此第一次命中 405 就熔断，
+  // 之后该账号所有 PAGEVIEW 任务直接走 event.trigger，不再重复触发风控。
+  // 可用 ELE_PAGEVIEW=0 彻底关闭 pageview 尝试（推荐长期挂机时设成 0）。
+  const pageviewEnabled = (process.env.ELE_PAGEVIEW || '').trim() !== '0';
+  let pageviewBlocked = !pageviewEnabled;
+  if (!pageviewEnabled && nPv) log.info('  已按 ELE_PAGEVIEW=0 跳过 pageview，PAGEVIEW 任务直接走 trigger');
   for (const task of completes) {
     if (onlyMission && String(task.missionDefId) !== String(onlyMission)) continue;
     const name = task.name || task.showTitle || ('任务' + task.missionDefId);
@@ -1186,19 +1410,24 @@ async function runAccount(cookie, opts) {
     };
 
     let code;
-    if (channel === 'PAGEVIEW') {
+    if (channel === 'PAGEVIEW' && !pageviewBlocked) {
       // 真机 pageview 不带 viewTime 字段（5 条样本均无），停留时长体现在「打开页面到上报」
       // 的真实间隔上，所以这里改成上报前等待，最多 3s，避免整轮任务被 --view-ms 拖慢。
       await sleep(Math.min(viewMs, 3000));
       const pv = await m.pageview({ missionId: task.missionDefId });
       code = retCode(pv.json);
       log.info(`   pageview: ${code}${code.startsWith('SUCCESS') ? ' (成功)' : ''}`);
-      // 405::行为受限 是 H5 pageview 通道的风控拦截，回落到 App 通道 event.trigger
+      // 405::行为受限 = H5 通道被风控拦。熔断本账号后续 pageview，回落到 event.trigger。
       if (!code.startsWith('SUCCESS')) {
+        if (code.indexOf('405') !== -1 || code.indexOf('行为受限') !== -1) {
+          pageviewBlocked = true;
+          log.info('   [熔断] pageview 被风控拦截(405)，本账号后续 PAGEVIEW 任务改走 trigger，不再重试 pageview');
+        }
         await sleep(600);
         code = await trigger();
       }
     } else {
+      if (channel === 'PAGEVIEW') log.info('   [跳过 pageview] 已熔断，直接走 trigger');
       code = await trigger();
     }
     if (code.startsWith('SUCCESS')) result.done++;
@@ -1218,6 +1447,7 @@ async function runAccount(cookie, opts) {
   let prizePlan = null;      // 探测到的可用领奖参数形态（方案名）
   const dumpList = [];       // --dump 时记录每次领奖尝试
   let diagDone = false;      // 只打印一次任务/阶段字段诊断
+  let prizeFailHintShown = false; // 发奖侧失败的结论只提示一次
   for (let round = 1; round <= 5; round++) {
     const pending = [];
     for (const t of tasks) {
@@ -1270,10 +1500,13 @@ async function runAccount(cookie, opts) {
         diagDone = true;
       }
       // 首个待领任务做参数形态探测，命中后记为 prizePlan，后续任务直接复用
-      const variants = prizePlan ? [{ name: prizePlan, delta: prizeDeltaByName(prizePlan, task, stage) }] : prizeVariants(task, stage);
+      const variants = prizePlan ? [{ name: prizePlan, delta: prizeDeltaByName(prizePlan, task, stage), kind: 'shape' }] : prizeVariants(task, stage);
       let ok = false;
+      // 服务端已进入发奖环节但发奖全失败 → 只剩风控维度值得试，参数维度全部跳过
+      let rewardSideFailed = false;
       for (let vi = 0; vi < variants.length; vi++) {
         const v = variants[vi];
+        if (rewardSideFailed && v.kind === 'param') continue;
         const extra = Object.assign(prizeBase(task, stage), v.delta);
         // growth 任务平台的标准流程是 receivetask(报名) → 做任务 → receiveprize(领奖)，
         // 脚本此前从未调过 receivetask，这里补上并尝试从响应里取 instanceId
@@ -1316,9 +1549,22 @@ async function runAccount(cookie, opts) {
         }
         log.info(`   receiveprize[${v.name}]: ${code}`);
         if (dump) dumpList.push({ missionDefId: task.missionDefId, stage: sc, variant: v.name, req: Object.assign(prizeBase(task, stage), v.delta), res: rp.json });
+        // RECEIVE_ALL_ERROR：服务端已认下参数、定位到阶段，失败发生在权益发放(UPP)环节。
+        // 此时继续枚举业务参数只会白发请求、抬高风控分，直接跳过所有 param 类变体。
+        if (code.indexOf('RECEIVE_ALL_ERROR') !== -1 && !rewardSideFailed) {
+          rewardSideFailed = true;
+          log.info('   [早停] 参数已被服务端接受，失败在发奖环节，跳过参数类变体，仅再试风控场景值');
+        }
         if (vi < variants.length - 1) await sleep(1200);
       }
-      if (!ok) result.failed = (result.failed || 0) + 1;
+      if (!ok) {
+        result.failed = (result.failed || 0) + 1;
+        if (rewardSideFailed && !prizeFailHintShown) {
+          prizeFailHintShown = true;
+          log.info('   [结论] 领奖参数无误，服务端在发奖环节拒绝。真机成功请求带 instanceId（任务实例ID），');
+          log.info('          该字段 querytask/homepage 均不下发，H5 通道也无 wua 设备签名，因此需在 App 内手动领取。');
+        }
+      }
       await sleep(900);
     }
     if (dry || !got) break;
