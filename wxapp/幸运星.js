@@ -1069,26 +1069,103 @@ async function getAllAccounts() {
 function retCode(json) {
   return (json && json.ret && json.ret[0]) || '';
 }
+const DONE_STATES = ['FINISH', 'FINISHED', 'COMPLETE', 'COMPLETED', 'DONE', 'SUCCESS'];
+const isDoneState = (v) => DONE_STATES.indexOf(String(v == null ? '' : v).toUpperCase()) !== -1;
+
+/**
+ * 提取任务的「用户维度进度」。
+ *
+ * 【2026-09-04 真机 querytask 逐字段定论（抓包 mtm7vju4HnIQ9TwV，15703B）】
+ * 进度只存在于任务顶层，missionStageDTOS 里没有任何用户数据：
+ *   stage.count       已累计完成次数
+ *   preStage.count    上一档进度
+ *   nextStageCount    下一个待领档位的门槛  ← 真机领奖请求的 count 就是它
+ *   finalStageCount   最后一档门槛
+ */
+function taskProgress(task) {
+  const num = (v) => {
+    if (v == null || v === '') return null;
+    const n = Number(v);
+    return isFinite(n) ? n : null;
+  };
+  return {
+    cur: num(task.stage && task.stage.count),
+    pre: num(task.preStage && task.preStage.count),
+    next: num(task.nextStageCount),
+    final: num(task.finalStageCount)
+  };
+}
+
 /**
  * 取出「已完成但奖励未领」的阶段。
  *
- * 不能只看任务顶层 status/receiveStatus（这是之前一直没自动领奖的根因）：
- *   - 多阶段任务（邀请助力、逛店铺等）顶层长期是 RUNNING，
- *     但已达标的那个 stage 已经是 status=FINISH / rewardStatus=TODO，此时就能领；
- *   - 顶层 receiveStatus=HAVERECEIVED 只表示领过某一阶段，后续阶段仍可领；
- *   - 已发放成功的阶段 rewardStatus=SUCCESS，只认 TODO 即可天然排除重复领取。
+ * 【2026-09-04 抓包定论：这里是「从来不自动领奖」的真正根因】
+ * 旧实现把 missionStageDTOS 当成了「用户进度明细」，它其实是**阶段配置定义**——
+ * 每档只有 stageCount + sourceAction（发奖动作定义，generateType=MANUAL）：
+ *   未完成态下 missionStageDTOS[].status 恒为 "RUNNING"（= 该档配置生效中），
+ *   rewardStatus 恒为 "TODO"；邀请助力任务 10 个档位全部是这两个值。
+ * 所以 `st.status === 'FINISH'` 永远不成立；而旧兜底又要求 `!list.length`
+ * （阶段明细为空），可 missionStageDTOS 从来不为空 —— 两条路都是死路，
+ * 于是无论真机上摆着几个「领取奖励」按钮，脚本一律打印「无待领取奖励」。
+ *
+ * 改为按真机语义判定：真机成功领奖那笔（missionId 45226015 闲鱼，单档）
+ * count:1 正是 nextStageCount，故主判定 = stage.count >= nextStageCount。
  */
 function receivableStages(task) {
-  const list = task.missionStageDTOS || [];
-  const out = [];
+  const list = Array.isArray(task.missionStageDTOS) ? task.missionStageDTOS : [];
+  const byCount = new Map();
   for (const st of list) {
-    if (st.status === 'FINISH' && st.rewardStatus === 'TODO') out.push(st);
+    const sc = st.stageCount != null ? Number(st.stageCount) : 1;
+    if (!byCount.has(sc)) byCount.set(sc, st);
   }
-  // 兜底：接口没下发阶段明细，但整任务已完成待领
-  if (!out.length && !list.length && task.status === 'FINISH' && task.receiveStatus === 'TORECEIVE') {
-    out.push({ stageCount: task.nextStageCount != null ? task.nextStageCount : 1, rewards: [] });
+  const out = [];
+  const seen = new Set();
+  const add = (sc, st, why) => {
+    const key = sc != null ? Number(sc) : 1;
+    if (!isFinite(key) || seen.has(key)) return;
+    seen.add(key);
+    const base = st || byCount.get(key) || { stageCount: key, rewards: [] };
+    out.push(Object.assign({}, base, { stageCount: key, _why: why }));
+  };
+
+  const p = taskProgress(task);
+  // 判定1（主）：累计进度已达下一档门槛。领完一档后服务端会把 nextStageCount 往后推，
+  // 全部领完则 nextStageCount > cur 或不再下发，天然不会重复领。
+  if (p.cur != null && p.next != null && p.cur >= p.next) add(p.next, byCount.get(p.next), 'progress');
+  // 判定2：阶段明细被服务端显式改写成完成态（部分任务类型会下发）
+  for (const st of list) {
+    const rs = String(st.rewardStatus == null ? 'TODO' : st.rewardStatus).toUpperCase();
+    if (isDoneState(st.status) && (rs === 'TODO' || rs === 'INIT')) {
+      add(st.stageCount != null ? Number(st.stageCount) : 1, st, 'stage-state');
+    }
+  }
+  // 判定3：任务顶层已完成且未领
+  if (isDoneState(task.status) && task.receiveStatus === 'TORECEIVE') {
+    add(p.next != null ? p.next : (p.final != null ? p.final : 1), null, 'task-state');
+  }
+  // 判定4：已刷满终档但 nextStageCount 没下发
+  if (!out.length && p.cur != null && p.final != null && p.cur >= p.final && task.receiveStatus !== 'HAVERECEIVED') {
+    add(p.final, byCount.get(p.final), 'final');
   }
   return out;
+}
+
+/** 一行式任务快照，用于诊断日志（让日志能直接定案，不必再抓包） */
+function taskBrief(task) {
+  const p = taskProgress(task);
+  const ac = task.actionConfig || {};
+  const av = ac.actionValue || {};
+  const recv = receivableStages(task);
+  return [
+    String(task.missionDefId),
+    (task.name || task.showTitle || '-').slice(0, 16),
+    'type=' + (ac.actionType || '-'),
+    'scene=' + (av.scenceCode || av.sceneCode || '-'),
+    'status=' + (task.status || '-'),
+    'recv=' + (task.receiveStatus || '-') + '/' + (task.receiveType || '-'),
+    'progress=' + (p.cur != null ? p.cur : '-') + '→' + (p.next != null ? p.next : '-') + '/' + (p.final != null ? p.final : '-'),
+    recv.length ? '【可领 ' + recv.map((s) => s.stageCount + '(' + s._why + ')').join(',') + '】' : ''
+  ].filter(Boolean).join(' ');
 }
 function canReceive(task) {
   return receivableStages(task).length > 0;
@@ -1114,16 +1191,38 @@ function prizeTitle(json) {
  * 因此：PAGEVIEW 任务优先走 pageview，失败后回落 trigger；THIRD 任务只能走 trigger。
  */
 function completeChannel(task) {
-  if (task.status !== 'RUNNING') return null;
+  // 已经可以领奖了就别再上报，先把奖领走（多阶段任务领完档位后 nextStageCount 会推进，下轮自会继续做）
+  if (canReceive(task)) return null;
+  const ts = String(task.status == null ? '' : task.status).toUpperCase();
+  // status 缺失（cardMission 里的精简结构）时允许尝试；非 RUNNING（完成/结束/未开始）一律跳过
+  if (ts && ts !== 'RUNNING') return null;
   const ac = task.actionConfig || {};
-  const at = ac.actionType;
-  const op = ac.actionValue && ac.actionValue.executeOpportunity;
-  if (at === 'PAGEVIEW' && op) return 'PAGEVIEW';
+  const at = String(ac.actionType == null ? '' : ac.actionType).toUpperCase();
+  // 【2026-09-04 放宽】旧实现要求 PAGEVIEW 必须带 actionValue.executeOpportunity，
+  // 但真机 44914007「浏览外卖品质馆」用的是 pageStageTime:15（停留时长）而没有该字段，
+  // 结果这类浏览任务被整体判成「不可完成」而静默跳过 —— 这是「任务没做全」的一部分。
+  if (at === 'PAGEVIEW') return 'PAGEVIEW';
   if (at === 'THIRD') return 'THIRD';
   return null;
 }
 function canComplete(task) {
   return completeChannel(task) !== null;
+}
+/**
+ * 脚本为什么不做这个任务（仅用于日志）。
+ * 之前不可完成的任务是完全静默跳过的，用户只能看到"可完成 N"，无法判断是漏做还是做不了。
+ */
+function skipReason(task) {
+  if (canReceive(task)) return '已完成待领取 → 交给领奖流程';
+  const ts = String(task.status == null ? '' : task.status).toUpperCase();
+  if (isDoneState(ts)) return '已完成';
+  if (ts && ts !== 'RUNNING') return '任务状态 ' + ts;
+  const ac = task.actionConfig || {};
+  const at = String(ac.actionType == null ? '' : ac.actionType).toUpperCase();
+  if (at === 'ORDER') return '需真实下单并支付，协议层无法完成';
+  if (at === 'P2P' || at === 'INVITE') return '需真人邀请/助力，协议层无法完成';
+  if (!at) return '未下发 actionConfig.actionType';
+  return '不支持的动作类型 ' + at;
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -1206,11 +1305,61 @@ function prizeDeltaTable(sc, mx, ix) {
   if (sc == null || sc === 1) push('count=1(历史形态)', { count: 1 });
   return t;
 }
+const ID_KEY_RE = /^(instance|missionInstance|missionInst|taskInstance|userMission|userTask|record|missionRecord)Id$/i;
+/**
+ * 有界递归搜集「可能是任务实例 ID」的字段。
+ *
+ * 真机领奖必带 instanceId:61706625，而**未完成态**的 querytask 响应里不存在该字段。
+ * 合理推断：实例是任务完成后服务端才创建的，完成态下才会随任务下发，且可能嵌在
+ * stage / extInfo / ext / missionInstance 等任意层级。这里递归捡出来，谁对用谁。
+ * 只认纯数字（≥5 位）值，避免把 UUID/spm 之类误当 ID。
+ */
+function deepPickIds(root, maxDepth) {
+  const limit = maxDepth == null ? 6 : maxDepth;
+  const out = [];
+  const visited = new Set();
+  const walk = (node, depth, path) => {
+    if (node == null || depth > limit || typeof node !== 'object' || visited.has(node)) return;
+    visited.add(node);
+    if (Array.isArray(node)) {
+      for (let i = 0; i < node.length && i < 12; i++) walk(node[i], depth + 1, path + '[' + i + ']');
+      return;
+    }
+    for (const k of Object.keys(node)) {
+      const v = node[k];
+      const sub = path ? path + '.' + k : k;
+      if (ID_KEY_RE.test(k) && (typeof v === 'number' || (typeof v === 'string' && /^\d{5,}$/.test(v)))) {
+        out.push({ path: sub, value: Number(v) });
+      }
+      if (v && typeof v === 'object') walk(v, depth + 1, sub);
+    }
+  };
+  walk(root, 0, '');
+  return out;
+}
+/** instanceId 候选值（按可信度排序，顶层精确字段名优先） */
+function prizeInstanceIds(task, stage) {
+  const out = [];
+  const push = (v) => {
+    if (v == null || v === '') return;
+    const n = typeof v === 'number' ? v : (/^\d+$/.test(String(v)) ? Number(v) : NaN);
+    if (!isFinite(n) || out.indexOf(n) !== -1) return;
+    out.push(n);
+  };
+  for (const k of ['instanceId', 'instanceid', 'missionInstanceId', 'missionInstId', 'taskInstanceId', 'id']) push(task[k]);
+  for (const hit of deepPickIds(task)) push(hit.value);
+  if (stage) for (const hit of deepPickIds(stage)) push(hit.value);
+  return out;
+}
 function prizeVariants(task, stage) {
-  // instanceId 在 querytask/homepage 响应中均不存在（已抓包确认），这里仍全量兜底探测字段名，
-  // 万一某些账号/版本的响应带上了，就能直接命中真机形态。
-  const ix = ['instanceId', 'instanceid', 'taskInstanceId', 'missionInstId', 'id'].map((k) => task[k]).find((v) => v != null && v !== '');
-  return prizeDeltaTable(stage.stageCount != null ? stage.stageCount : null, pickMissionXId(task), ix != null ? ix : null);
+  const cands = prizeInstanceIds(task, stage);
+  const sc = stage && stage.stageCount != null ? stage.stageCount : null;
+  const t = prizeDeltaTable(sc, pickMissionXId(task), cands.length ? cands[0] : null);
+  // 深搜出多个候选时，把其余候选也排进 shape 变体紧随其后（真机形态唯一缺的就是这个字段）
+  for (let i = 1; i < cands.length && i < 4; i++) {
+    t.splice(i, 0, { name: '真机形态+instanceId#' + (i + 1), delta: { instanceId: cands[i] }, kind: 'shape' });
+  }
+  return t;
 }
 /** 按方案名重建 delta，保证锁定的方案能正确套用到其它任务/阶段上 */
 function prizeDeltaByName(name, task, stage) {
@@ -1405,11 +1554,37 @@ async function runAccount(cookie, opts) {
     return fresh;
   };
 
+  // 领奖流程的共享状态（harvest 内部读写，必须在首次调用前初始化）
+  const receivedKeys = new Set();  // 已真正领到的阶段，永久去重
+  let prizePlan = null;            // 探测到的可用领奖参数形态（方案名）
+  const dumpList = [];             // --dump 时记录每次领奖尝试
+  let diagDone = false;            // 只打印一次任务/阶段字段诊断
+  let prizeFailHintShown = false;  // 发奖侧失败的结论只提示一次
+
+  // 任务快照 —— 与真机弹窗的按钮文案一一对应，看日志即可判断「哪个任务没做、哪个没领」
+  log.info(`--- 任务快照 (${tasks.length}) ---`);
+  for (const t of tasks) {
+    if (onlyMission && String(t.missionDefId) !== String(onlyMission)) continue;
+    log.info('  · ' + taskBrief(t));
+  }
+
+  // 阶段A0：先收存量奖励。
+  // 真机上手动做完（或上一轮脚本上报成功）的任务会停在「已完成待领取」，这批奖励跟本轮
+  // 能不能完成任务毫无关系，必须先领掉 —— 否则就是用户看到的「3 个领取奖励按钮、脚本一个没领」。
+  await harvest('阶段A0·存量');
+
   // 阶段A：完成任务（PAGEVIEW 走 event.pageview，THIRD 走 event.trigger）
   log.info('--- [阶段A] 完成任务 ---');
   const completes = tasks.filter(canComplete);
   const nPv = completes.filter((t) => completeChannel(t) === 'PAGEVIEW').length;
   log.info(`  可完成: ${completes.length} (PAGEVIEW ${nPv} / THIRD ${completes.length - nPv})`);
+  // 不可完成的任务逐条给出原因：之前是静默跳过的，用户只看到「可完成 N」，
+  // 分不清究竟是脚本漏做还是协议层做不了。
+  const skips = tasks.filter((t) => !canComplete(t) && (!onlyMission || String(t.missionDefId) === String(onlyMission)));
+  if (skips.length) {
+    log.info(`  跳过: ${skips.length}`);
+    for (const t of skips) log.info(`   ○ [${t.name || t.showTitle || t.missionDefId}] ${skipReason(t)}`);
+  }
   // ── PAGEVIEW 熔断 ───────────────────────────────────────────────────────────
   // 【2026-09-04 抓包定论】真机全量抓包里**不存在** event.pageview 这个接口调用：
   // PAGEVIEW 类任务是靠 UT 埋点（h-adashx.ut.ele.me/upload，spm a2ogi.bx1500380）
@@ -1486,139 +1661,130 @@ async function runAccount(cookie, opts) {
   await sleep(2500);
   tasks = await refresh();
 
-  // 阶段B：领取已完成任务奖励
+  // ── 领奖流程（原「阶段B」主体，抽成函数以便在阶段A 前后各跑一次）───────────
   // 多阶段任务（邀请助力、逛店铺等）一次调用只能领一个阶段，且服务端要在本阶段领完后
   // 才把下一阶段置为可领，所以这里循环多轮，直到没有新的可领阶段。
-  log.info('--- [阶段B] 领取已完成任务奖励 ---');
-  const receivedKeys = new Set();
-  let prizePlan = null;      // 探测到的可用领奖参数形态（方案名）
-  const dumpList = [];       // --dump 时记录每次领奖尝试
-  let diagDone = false;      // 只打印一次任务/阶段字段诊断
-  let prizeFailHintShown = false; // 发奖侧失败的结论只提示一次
-  for (let round = 1; round <= 5; round++) {
-    const pending = [];
-    for (const t of tasks) {
-      if (onlyMission && String(t.missionDefId) !== String(onlyMission)) continue;
-      for (const st of receivableStages(t)) {
-        const k = stageKey(t, st);
-        if (receivedKeys.has(k)) continue;
-        pending.push({ task: t, stage: st });
-      }
-    }
-    if (!pending.length) {
-      if (round === 1) log.info('  无待领取奖励');
-      break;
-    }
-    log.info(`  第 ${round} 轮可领取: ${pending.length}`);
-
-    let got = 0;
-    for (const { task, stage } of pending) {
-      const name = task.name || task.showTitle || ('任务' + task.missionDefId);
-      const sc = stage.stageCount != null ? stage.stageCount : 1;
-      const reward = (stage.rewards || [])[0];
-      const desc = reward ? `${reward.name || ''}+${reward.value}` : '';
-      log.info(`★ 领取 [${name}] (${task.missionDefId}) 阶段${sc}${desc ? ' 奖励:' + desc : ''}`);
-      receivedKeys.add(stageKey(task, stage));
-      if (dry) { result.skipped++; continue; }
-
-      if (!diagDone) {
-        // 专门提取所有可能是 instanceId 的字段（含深层），对齐真机领奖请求的 instanceId:61706625
-        const idFields = {};
-        for (const k of Object.keys(task)) {
-          if (/^(id|instanceId|instanceid|taskInstanceId|missionInstId|missionInstanceId|missionXId|missionId|recordId|userTaskId|userMissionId)$/i.test(k)) {
-            idFields[k] = task[k];
-          }
+  async function harvest(label) {
+    log.info(`--- [${label}] 领取已完成任务奖励 ---`);
+    const tried = new Set();   // 本次调用内已试过的阶段；失败的阶段在下次调用时仍会重试
+    for (let round = 1; round <= 5; round++) {
+      const pending = [];
+      for (const t of tasks) {
+        if (onlyMission && String(t.missionDefId) !== String(onlyMission)) continue;
+        for (const st of receivableStages(t)) {
+          const k = stageKey(t, st);
+          if (receivedKeys.has(k) || tried.has(k)) continue;
+          pending.push({ task: t, stage: st });
         }
-        // 深层搜索：stage.sourceAction.id / stage.sourceActionId 等
-        const deepIds = {};
-        try {
-          if (stage.sourceAction && stage.sourceAction.id != null) deepIds['stage.sourceAction.id'] = stage.sourceAction.id;
-          if (stage.sourceActionId != null) deepIds['stage.sourceActionId'] = stage.sourceActionId;
-          if (stage.id != null) deepIds['stage.id'] = stage.id;
-          if (task.actionConfig && task.actionConfig.missionInstanceTriggerType != null) deepIds['task.actionConfig.missionInstanceTriggerType'] = task.actionConfig.missionInstanceTriggerType;
-        } catch (e) {}
-        log.info(`   [诊断-instanceId排查] 任务顶层ID字段: ${JSON.stringify(idFields)}`);
-        log.info(`   [诊断-instanceId排查] 阶段深层ID字段: ${JSON.stringify(deepIds)}`);
-        log.info(`   [诊断-instanceId排查] prizeVariants将生成的ix: ${(() => { const ix = ['instanceId','instanceid','taskInstanceId','missionInstId','id'].map(k=>task[k]).find(v=>v!=null&&v!==''); return ix != null ? ix : 'null(无instanceId变体!)'; })()}`);
-        const jt = JSON.stringify(task);
-        const js = JSON.stringify(stage);
-        log.info(`   [诊断] 任务JSON: ${jt && jt.length > 3000 ? jt.slice(0, 3000) + '…(截断)' : jt}`);
-        log.info(`   [诊断] 阶段JSON: ${js && js.length > 2000 ? js.slice(0, 2000) + '…(截断)' : js}`);
-        diagDone = true;
       }
-      // 首个待领任务做参数形态探测，命中后记为 prizePlan，后续任务直接复用
-      const variants = prizePlan ? [{ name: prizePlan, delta: prizeDeltaByName(prizePlan, task, stage), kind: 'shape' }] : prizeVariants(task, stage);
-      let ok = false;
-      // 服务端已进入发奖环节但发奖全失败 → 只剩风控维度值得试，参数维度全部跳过
-      let rewardSideFailed = false;
-      for (let vi = 0; vi < variants.length; vi++) {
-        const v = variants[vi];
-        if (rewardSideFailed && v.kind === 'param') continue;
-        const extra = Object.assign(prizeBase(task, stage), v.delta);
-        // growth 任务平台的标准流程是 receivetask(报名) → 做任务 → receiveprize(领奖)，
-        // 脚本此前从未调过 receivetask，这里补上并尝试从响应里取 instanceId
-        if (v.delta && v.delta._pre === 'receivetask') {
-          delete extra._pre;
+      if (!pending.length) {
+        if (round === 1) log.info('  无待领取奖励');
+        break;
+      }
+      log.info(`  第 ${round} 轮可领取: ${pending.length}`);
+
+      let got = 0;
+      for (const { task, stage } of pending) {
+        const name = task.name || task.showTitle || ('任务' + task.missionDefId);
+        const sc = stage.stageCount != null ? stage.stageCount : 1;
+        const reward = (stage.rewards || [])[0];
+        const desc = reward ? `${reward.name || ''}+${reward.value}` : '';
+        log.info(`★ 领取 [${name}] (${task.missionDefId}) 阶段${sc}${stage._why ? '[' + stage._why + ']' : ''}${desc ? ' 奖励:' + desc : ''}`);
+        tried.add(stageKey(task, stage));
+        if (dry) { result.skipped++; continue; }
+
+        if (!diagDone) {
+          // 对齐真机领奖请求的 instanceId:61706625 —— 递归把所有像「任务实例ID」的字段捞出来
+          const hits = deepPickIds(task).concat(deepPickIds(stage).map((h) => ({ path: 'stage.' + h.path, value: h.value })));
+          const cands = prizeInstanceIds(task, stage);
+          log.info(`   [诊断-instanceId] 深搜命中: ${hits.length ? JSON.stringify(hits) : '无'}`);
+          log.info(`   [诊断-instanceId] 候选值(按可信度): ${cands.length ? cands.join(', ') : 'null（响应里没有任何实例ID，领奖将不带该字段）'}`);
+          log.info(`   [诊断-进度] ${taskBrief(task)}`);
+          const jt = JSON.stringify(task);
+          const js = JSON.stringify(stage);
+          log.info(`   [诊断] 任务JSON: ${jt && jt.length > 3000 ? jt.slice(0, 3000) + '…(截断)' : jt}`);
+          log.info(`   [诊断] 阶段JSON: ${js && js.length > 2000 ? js.slice(0, 2000) + '…(截断)' : js}`);
+          diagDone = true;
+        }
+        // 首个待领任务做参数形态探测，命中后记为 prizePlan，后续任务直接复用
+        const variants = prizePlan ? [{ name: prizePlan, delta: prizeDeltaByName(prizePlan, task, stage), kind: 'shape' }] : prizeVariants(task, stage);
+        let ok = false;
+        // 服务端已进入发奖环节但发奖全失败 → 只剩风控维度值得试，参数维度全部跳过
+        let rewardSideFailed = false;
+        for (let vi = 0; vi < variants.length; vi++) {
+          const v = variants[vi];
+          if (rewardSideFailed && v.kind === 'param') continue;
+          const extra = Object.assign(prizeBase(task, stage), v.delta);
+          // growth 任务平台的标准流程是 receivetask(报名) → 做任务 → receiveprize(领奖)，
+          // 脚本此前从未调过 receivetask，这里补上并尝试从响应里取 instanceId
+          if (v.delta && v.delta._pre === 'receivetask') {
+            delete extra._pre;
+            try {
+              const rt = await m.receivetask({ missionId: task.missionDefId, missionCollectionId: task.missionCollectionId });
+              log.info(`   receivetask: ${retCode(rt.json)}`);
+              if (dump) dumpList.push({ missionDefId: task.missionDefId, stage: sc, op: 'receivetask', req: { missionId: task.missionDefId, missionCollectionId: task.missionCollectionId }, res: rt.json });
+              const rd = rt.json && rt.json.data;
+              if (rd) {
+                const iid = rd.instanceId != null ? rd.instanceId : (rd.missionXId != null ? rd.missionXId : null);
+                if (iid != null) { extra.instanceId = iid; log.info(`   receivetask 返回 instanceId=${iid}`); }
+                const jd = JSON.stringify(rd);
+                if (jd) log.info(`   receivetask data: ${jd.length > 600 ? jd.slice(0, 600) + '…(截断)' : jd}`);
+              }
+            } catch (e) { log.info(`   receivetask: 异常 ${e.message}`); }
+            await sleep(800);
+          }
+          let rp;
           try {
-            const rt = await m.receivetask({ missionId: task.missionDefId, missionCollectionId: task.missionCollectionId });
-            log.info(`   receivetask: ${retCode(rt.json)}`);
-            if (dump) dumpList.push({ missionDefId: task.missionDefId, stage: sc, op: 'receivetask', req: { missionId: task.missionDefId, missionCollectionId: task.missionCollectionId }, res: rt.json });
-            const rd = rt.json && rt.json.data;
-            if (rd) {
-              const iid = rd.instanceId != null ? rd.instanceId : (rd.missionXId != null ? rd.missionXId : null);
-              if (iid != null) { extra.instanceId = iid; log.info(`   receivetask 返回 instanceId=${iid}`); }
-              const jd = JSON.stringify(rd);
-              if (jd) log.info(`   receivetask data: ${jd.length > 600 ? jd.slice(0, 600) + '…(截断)' : jd}`);
-            }
-          } catch (e) { log.info(`   receivetask: 异常 ${e.message}`); }
-          await sleep(800);
-        }
-        let rp;
-        try {
-          rp = await m.receiveprize(extra);
-        } catch (e) {
-          log.info(`   receiveprize[${v.name}]: 异常 ${e.message}`);
-          continue;
-        }
-        const code = retCode(rp.json);
-        const prize = prizeTitle(rp.json);
-        if (code.startsWith('SUCCESS')) {
-          log.info(`   receiveprize[${v.name}]: ${code} (领取成功${prize ? " → " + prize : ""})`);
-          result.received++;
-          got++;
-          if (prize) result.prizes.push(prize);
-          if (!prizePlan) {
-            prizePlan = v.name;
-            log.info(`   [锁定领奖参数形态] ${v.name} → ${JSON.stringify(v.delta)}`);
+            rp = await m.receiveprize(extra);
+          } catch (e) {
+            log.info(`   receiveprize[${v.name}]: 异常 ${e.message}`);
+            continue;
           }
-          ok = true;
-          break;
+          const code = retCode(rp.json);
+          const prize = prizeTitle(rp.json);
+          if (code.startsWith('SUCCESS')) {
+            log.info(`   receiveprize[${v.name}]: ${code} (领取成功${prize ? " → " + prize : ""})`);
+            result.received++;
+            got++;
+            if (prize) result.prizes.push(prize);
+            if (!prizePlan) {
+              prizePlan = v.name;
+              log.info(`   [锁定领奖参数形态] ${v.name} → ${JSON.stringify(v.delta)}`);
+            }
+            receivedKeys.add(stageKey(task, stage));   // 只有真领到才永久去重
+            ok = true;
+            break;
+          }
+          log.info(`   receiveprize[${v.name}]: ${code}`);
+          if (dump) dumpList.push({ missionDefId: task.missionDefId, stage: sc, variant: v.name, req: Object.assign(prizeBase(task, stage), v.delta), res: rp.json });
+          // RECEIVE_ALL_ERROR：服务端已认下参数、定位到阶段，失败发生在权益发放(UPP)环节。
+          // 此时继续枚举业务参数只会白发请求、抬高风控分，直接跳过所有 param 类变体。
+          if (code.indexOf('RECEIVE_ALL_ERROR') !== -1 && !rewardSideFailed) {
+            rewardSideFailed = true;
+            log.info('   [早停] 参数已被服务端接受，失败在发奖环节，跳过参数类变体，仅再试风控场景值');
+          }
+          if (vi < variants.length - 1) await sleep(1200);
         }
-        log.info(`   receiveprize[${v.name}]: ${code}`);
-        if (dump) dumpList.push({ missionDefId: task.missionDefId, stage: sc, variant: v.name, req: Object.assign(prizeBase(task, stage), v.delta), res: rp.json });
-        // RECEIVE_ALL_ERROR：服务端已认下参数、定位到阶段，失败发生在权益发放(UPP)环节。
-        // 此时继续枚举业务参数只会白发请求、抬高风控分，直接跳过所有 param 类变体。
-        if (code.indexOf('RECEIVE_ALL_ERROR') !== -1 && !rewardSideFailed) {
-          rewardSideFailed = true;
-          log.info('   [早停] 参数已被服务端接受，失败在发奖环节，跳过参数类变体，仅再试风控场景值');
+        if (!ok) {
+          result.failed = (result.failed || 0) + 1;
+          if (rewardSideFailed && !prizeFailHintShown) {
+            prizeFailHintShown = true;
+            log.info('   [结论] 领奖参数无误、阶段已被服务端定位，失败发生在权益发放(UPP)环节。');
+            log.info('          真机成功那笔带 instanceId（任务实例ID），未完成态的 querytask 不下发该字段；');
+            log.info('          若本次任务确实已完成而这里仍失败，请在 App 内手动领取，并把领奖那笔抓包发来定案。');
+          }
         }
-        if (vi < variants.length - 1) await sleep(1200);
+        await sleep(900);
       }
-      if (!ok) {
-        result.failed = (result.failed || 0) + 1;
-        if (rewardSideFailed && !prizeFailHintShown) {
-          prizeFailHintShown = true;
-          log.info('   [结论] 领奖参数无误，服务端在发奖环节拒绝。真机成功请求带 instanceId（任务实例ID），');
-          log.info('          该字段 querytask/homepage 均不下发，H5 通道也无 wua 设备签名，因此需在 App 内手动领取。');
-        }
-      }
-      await sleep(900);
+      if (dry || !got) break;
+      // 领到过奖励说明状态有变化，刷新看是否解锁了下一阶段
+      await sleep(1800);
+      tasks = await refresh();
     }
-    if (dry || !got) break;
-    // 领到过奖励说明状态有变化，刷新看是否解锁了下一阶段
-    await sleep(1800);
-    tasks = await refresh();
   }
+
+  // 阶段B：任务完成后再收一轮 —— 刚被上报完成的任务到这一步才进入「可领」状态
+  await harvest('阶段B');
 
   // --dump：把任务快照与领奖尝试全部落盘，便于和真机抓包逐字段比对
   if (dump) {

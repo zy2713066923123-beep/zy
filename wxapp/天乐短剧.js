@@ -24,6 +24,10 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
  *   REELIX_USER_KEY=encryptKey#iv#version  全局微信用户加密 key，不配置时会跳过签到/红包领取/提现
  *   REELIX_DO_SIGNIN=1                   是否签到，默认 1
  *   REELIX_DO_VIDEO_TASK=1               是否领取视频阶段奖励，默认 1
+ *   REELIX_DO_INVITE_COMMISSION=1        是否领取邀请分成佣金，默认 1
+ *   REELIX_DO_INVITE_ACTIVATION=1        是否领取邀请激活奖励，默认 1
+ *   REELIX_DO_SUBSCRIBE_REWARD=1         是否领取订阅消息奖励，默认 1
+ *   REELIX_DO_MY_MINI_PROGRAM=1          是否领取"添加到我的小程序"任务奖励，默认 1
  *   REELIX_VIDEO_STAGES=3                视频阶段奖励次数，默认 3
  *   REELIX_DO_WATCH=1                    是否上报观看时长，默认 1
  *   REELIX_WATCH_UNTIL_UNLOCK=1          是否持续上报到解锁可领取红包，默认 1
@@ -63,7 +67,7 @@ const APPID = 'wx82b9bc71fff22c52';
 const BASE_URL = 'https://live.mkjsy.com/reelix/api/v1/app';
 const WECHAT_SERVER = String(process.env.WX_SERVER || process.env.YYB_SERVER || process.env.WECHAT_SERVER || process.env.YINGYONGBAO_SERVER || '').replace(/\/$/, '');
 const REELIX_INVITE_CODE = String(process.env.REELIX_INVITE_CODE || 'JEL3OH').trim();
-const DEFAULT_BUILD = '2026-07-25 17:41:50';
+const DEFAULT_BUILD = '2026-09-04 09:00:00';
 const DEFAULT_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.75(0x18004b47) NetType/4G Language/zh_CN';
 const REFERER = 'https://servicewechat.com/wx82b9bc71fff22c52/16/page-frame.html';
 const CACHE_DIR = path.join(process.cwd(), '.cache');
@@ -94,6 +98,10 @@ const TX_PAGE_SIZE = Number(process.env.REELIX_TX_PAGE_SIZE || 10);
 const WITHDRAW_PAGE_SIZE = Number(process.env.REELIX_WITHDRAW_PAGE_SIZE || 10);
 const ACCOUNT_CONCURRENCY = Math.max(1, Number(process.env.REELIX_CONCURRENCY || 3));
 const DEBUG = String(process.env.REELIX_DEBUG || '') === '1';
+const DO_INVITE_COMMISSION = envFlag('REELIX_DO_INVITE_COMMISSION', true);
+const DO_INVITE_ACTIVATION = envFlag('REELIX_DO_INVITE_ACTIVATION', true);
+const DO_SUBSCRIBE_REWARD = envFlag('REELIX_DO_SUBSCRIBE_REWARD', true);
+const DO_MY_MINI_PROGRAM = envFlag('REELIX_DO_MY_MINI_PROGRAM', true);
 
 let notifyText = '';
 const summaries = [];
@@ -638,6 +646,144 @@ async function doVideoTask(client) {
   }
 }
 
+async function getEarnPageOverview(client) {
+  const resp = await request(client, 'GET', '/points/earn-page/overview');
+  if (!resp.ok) {
+    log(`赚钱页概览查询失败：${resp.status}`);
+    return null;
+  }
+  return resp.data || null;
+}
+
+// 邀请分成佣金：claimable 数组非空即可直接领取，无需加密
+async function doInviteCommission(client) {
+  if (!DO_INVITE_COMMISSION) return;
+  const statusResp = await request(client, 'GET', '/points/invite-commission/status');
+  if (!statusResp.ok) {
+    log(`邀请佣金状态查询失败：${statusResp.status}`);
+    return;
+  }
+  const status = statusResp.data || {};
+  const claimable = Array.isArray(status.claimable) ? status.claimable : [];
+  if (!claimable.length) {
+    log('邀请佣金：暂无可领取佣金');
+    return;
+  }
+  const total = claimable.reduce((sum, item) => sum + Number(item.totalAmount || 0), 0);
+  log(`邀请佣金：检测到 ${claimable.length} 笔可领，合计约 ${total}`);
+  const settleDates = claimable.map((item) => item.settleDate).filter(Boolean);
+  const body = settleDates.length ? { settleDates } : {};
+  const claimResp = await request(client, 'POST', '/points/invite-commission/claim', body);
+  if (!claimResp.ok) {
+    log(`邀请佣金：领取失败 ${claimResp.status} ${JSON.stringify(claimResp.data || {}).slice(0, 160)}`);
+    return;
+  }
+  const result = claimResp.data || {};
+  if (result.success !== false) {
+    log(`邀请佣金：领取成功，获得 ${result.claimedAmount || total}`);
+  } else {
+    log(`邀请佣金：领取未成功 ${JSON.stringify(result).slice(0, 160)}`);
+  }
+}
+
+// 邀请激活奖励：hasClaimable 为真即可直接领取，无需加密
+async function doInviteActivation(client) {
+  if (!DO_INVITE_ACTIVATION) return;
+  const statusResp = await request(client, 'GET', '/points/invite/activation-status');
+  if (!statusResp.ok) {
+    log(`邀请激活状态查询失败：${statusResp.status}`);
+    return;
+  }
+  const status = statusResp.data || {};
+  if (!status.hasClaimable) {
+    log(`邀请激活：暂无可领取奖励（可领 ${status.claimableCount || 0}）`);
+    return;
+  }
+  log(`邀请激活：检测到可领 ${status.claimableCount || 0} 个，每个 ${status.rewardPerInvite || 0}`);
+  const claimResp = await request(client, 'POST', '/points/invite/claim-activation');
+  if (!claimResp.ok) {
+    log(`邀请激活：领取失败 ${claimResp.status} ${JSON.stringify(claimResp.data || {}).slice(0, 160)}`);
+    return;
+  }
+  const result = claimResp.data || {};
+  log(`邀请激活：领取成功，获得 ${result.totalReward || 0}`);
+}
+
+// 订阅消息奖励：需 templateId（来自 /config/subscribe_config），无需加密
+async function doSubscribeReward(client) {
+  if (!DO_SUBSCRIBE_REWARD) return;
+  const cfgResp = await request(client, 'GET', '/config/subscribe_config');
+  if (!cfgResp.ok) {
+    log(`订阅配置查询失败：${cfgResp.status}`);
+    return;
+  }
+  const cfg = cfgResp.data || {};
+  const templateId = cfg.subscribeTemplateId;
+  if (!cfg.subscribeEnable || !templateId) {
+    log('订阅奖励：未开启或缺少 templateId，跳过');
+    return;
+  }
+  const statusResp = await request(client, 'GET', '/points/subscribe/status');
+  if (!statusResp.ok) {
+    log(`订阅状态查询失败：${statusResp.status}`);
+    return;
+  }
+  if (statusResp.data && statusResp.data.subscribed) {
+    log('订阅奖励：已订阅，无需重复领取');
+    return;
+  }
+  const claimResp = await request(client, 'POST', '/points/subscribe/reward', {
+    data: { type: 'subscribe', templateId },
+  });
+  if (!claimResp.ok) {
+    log(`订阅奖励：领取失败 ${claimResp.status} ${JSON.stringify(claimResp.data || {}).slice(0, 160)}`);
+    return;
+  }
+  const result = claimResp.data || {};
+  if (result.isNew && result.points > 0) {
+    log(`订阅奖励：领取成功，获得 ${result.points}`);
+  } else {
+    log(`订阅奖励：${result.message || '不可重复领取'}`);
+  }
+}
+
+// "添加到我的小程序"任务：attain 标记完成（无需加密），claim 领取奖励（需加密）
+async function doMyMiniProgramTask(client, account) {
+  if (!DO_MY_MINI_PROGRAM) return;
+  const overview = await getEarnPageOverview(client);
+  const task = overview && overview.myMiniProgramTask;
+  if (!task || !task.enabled || task.status === 'hidden' || task.status === 'claimed_before') {
+    log('我的小程序任务：未开启或已领过，跳过');
+    return;
+  }
+  if (task.status === 'claimed_today') {
+    log('我的小程序任务：今日已领取');
+    return;
+  }
+  // pending 表示已添加但服务端未确认，先 attain 同步状态
+  if (task.status === 'pending') {
+    try {
+      await api(client, 'POST', '/points/my-mini-program/attain', { data: { added: true } });
+      log('我的小程序任务：已上报添加状态');
+    } catch (error) {
+      log(`我的小程序任务：上报添加状态失败 ${error.message}`);
+      return;
+    }
+  }
+  if (!account.userKey) {
+    log('我的小程序任务：缺少加密 key，无法领取奖励');
+    return;
+  }
+  try {
+    const intent = await api(client, 'POST', '/points/my-mini-program/claim-intent');
+    const body = buildSecurePayload(account, 'points.my_mini_program.claim', {}, intent);
+    const result = await api(client, 'POST', '/points/my-mini-program/claim', { data: body });
+    log(`我的小程序任务：领取成功，获得 ${result.points || result.rewardPoints || 0}`);
+  } catch (error) {
+    log(`我的小程序任务：领取失败 ${error.message}`);
+  }
+}
+
 async function getDramaContexts(client) {
   const data = await api(client, 'GET', '/dramas/recommend?pageSize=100');
   const list = summarizeList(data);
@@ -999,6 +1145,28 @@ async function runAccount(account) {
     } else {
       log(`广告：视频奖励失败：${error.message}`);
     }
+  }
+
+  // 额外积分任务：邀请佣金 / 邀请激活 / 订阅奖励 / 我的小程序任务
+  try {
+    await doInviteCommission(client);
+  } catch (error) {
+    log(`邀请佣金任务异常：${error.message}`);
+  }
+  try {
+    await doInviteActivation(client);
+  } catch (error) {
+    log(`邀请激活任务异常：${error.message}`);
+  }
+  try {
+    await doSubscribeReward(client);
+  } catch (error) {
+    log(`订阅奖励任务异常：${error.message}`);
+  }
+  try {
+    await doMyMiniProgramTask(client, account);
+  } catch (error) {
+    log(`我的小程序任务异常：${error.message}`);
   }
 
   const now = new Date();
