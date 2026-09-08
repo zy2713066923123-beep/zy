@@ -1,9 +1,11 @@
+# name: 绿燕子旧衣服回收
+#  cron: 28 17,05 * * * 
 #   --------------------------------注释区--------------------------------
 #   https://lyz.api.5tan.com/api/找authorization,格式：bearer 134561263326003496
 #   变量:pyzck ，格式：多号@分割
 #   token有效期不知道
 #   corn: 每天跑一次就行 22 7 * * *
-#   $ = new Env('皮炎子回收')
+#   $ = new Env('绿燕子旧衣服回收')
 #   建议把请求头替换成自己的UA，填进ua里，不改也行挑选随机幸运儿封号
 #   活动入口https://gitee.com/wry-fisher/push-notifications/blob/master/lyztgm.png
 #   by fisher 2024.09.03
