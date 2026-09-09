@@ -13,17 +13,21 @@ require('./yyb.js'); // 自动同步 yyb_go 存活账号
   WX_ID          (可选白名单) 微信账号 openid/wxid，多账号用 & 或换行分隔；留空自动拉取 yyb_go 所有存活账号
 ------------------------------------------
 契约（appid wxe417414e03e537aa，host lm.api.sujh.net，appid头 shilv）：
+（以下路径与参数均来自 Reqable 实抓，2026-09-09 验证通过：签到前 signIn=0/score=30，
+  签到后 signIn=1/score=40，单次 +10 积分）
 
 登录  GET  /app/login/wechatLogin?encryptedData=&iv=&code=
         -> {code:200, token:"eyJ...", userId}
 用户  GET  /app/user/index?platform=1
         -> {code:200, data:{score, money, ...}}
-签到  POST /app/signin/addSignIn  {platform:1}
-        -> {code:200}
-token 用法：authorization: <裸JWT>（不带 bearer 前缀）；请求头须带 appid: shilv
+积分  GET  /app/score/index?platform=1
+        -> {code:200, data:{signIn:0|1, score}}   signIn=1 表示今日已签到
+模板  GET  /app/msgTemplate/list?platform=1&type=6
+        -> {code:200, rows:[{templateId}]}        签到提交需要携带
+签到  POST /app/score/sign      body {tmplIds:[...], platform:1}
+        -> {code:200, msg:"操作成功"}
 
-注：旧脚本域名 sl.api.5tan.com 已迁移至 lm.api.sujh.net，签到路径推测为
-    /app/signin/addSignIn（原 /api/signin/addSignIn 前缀替换为 /app/），如不对需抓包修正。
+token 用法：authorization: <裸JWT>（不带 bearer 前缀）；请求头须带 appid: shilv
 ------------------------------------------
 */
 
@@ -66,6 +70,13 @@ const USER_AGENT =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
     "Chrome/144.0.0.0 Safari/537.36 MicroMessenger/7.0.20.1781(0x6700143B) NetType/WIFI " +
     "MiniProgramEnv/Windows WindowsWechat/WMPF WindowsWechat(0x63090a13) UnifiedPCWindowsWechat(0xf2541c37) XWEB/25364";
+
+// 订阅消息模板ID兜底值（/app/msgTemplate/list?type=6 拉取失败时使用，抓包实测值）
+const DEFAULT_TMPL_IDS = [
+    "KBO3hu2sg9uAf1jE5mw7sH9EMwULMKNfPhNG-qE2zec",
+    "lrG7AIJCOfa8D1YZvmHgRnIAlVlHUjSYmcf4oCOYI-4",
+    "wAoZ0p2GpZYRrguH1JB1xWyqdL1kgnGP-XDvoYxlLhc",
+];
 
 const wechat = new WeChatServer({ appid: MINI_APP_ID });
 
@@ -190,7 +201,10 @@ class Task {
             const d = res.data || {};
             if (d.score !== undefined) this.log(`积分: ${d.score}`);
             if (d.money !== undefined) this.log(`余额: ${d.money}`);
+            return;
         }
+        // 非 200 视为 token 失效，交给上层触发重新登录
+        throw new Error(`用户信息获取失败: ${msgOf(res)}`);
     }
 
     async ensureLogin() {
@@ -209,14 +223,40 @@ class Task {
         if (!this.token) await this.login();
     }
 
+    /** 积分首页：signIn=1 表示今日已签到 */
+    async getScoreInfo() {
+        const res = await this.request("/app/score/index", { params: { platform: 1 } });
+        if (!isOk(res)) return null;
+        const d = res.data || {};
+        return { signIn: Number(d.signIn ?? -1), score: d.score };
+    }
+
+    /** 订阅消息模板ID，签到接口要求携带 tmplIds */
+    async getTmplIds() {
+        const res = await this.request("/app/msgTemplate/list", { params: { platform: 1, type: 6 } });
+        const rows = res?.rows;
+        if (Array.isArray(rows) && rows.length) {
+            const ids = rows.map((r) => r.templateId).filter(Boolean);
+            if (ids.length) return ids;
+        }
+        return DEFAULT_TMPL_IDS.slice();
+    }
+
     async sign() {
-        const res = await this.request("/app/signin/addSignIn", {
+        const before = await this.getScoreInfo();
+        if (before && before.signIn === 1) {
+            this.log(`✅ 今日已签到（积分 ${before.score ?? "-"}）`);
+            return;
+        }
+        const tmplIds = await this.getTmplIds();
+        const res = await this.request("/app/score/sign", {
             method: "POST",
-            body: { platform: 1 },
+            body: { tmplIds, platform: 1 },
         });
         if (isOk(res)) {
-            this.log("✅ 签到成功");
-            await this.getUserInfo();
+            const after = await this.getScoreInfo();
+            const score = after?.score;
+            this.log(`✅ 签到成功${score !== undefined ? `，当前积分 ${score}` : ""}`);
             return;
         }
         if (isAlreadyDone(msgOf(res))) return this.log(`✅ 今日已签到（${msgOf(res)}）`);
